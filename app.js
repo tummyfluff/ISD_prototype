@@ -1,5 +1,3 @@
-import { sampleData } from "./data/sampleData.js";
-
 const d3 = window.d3;
 if (!window.d3 || !window.d3.forceSimulation) {
   console.error("D3 force not loaded");
@@ -8,7 +6,9 @@ if (!window.d3 || !window.d3.forceSimulation) {
 const CURRENT_USER = "Dr Hannah Lewis";
 const CURRENT_USER_HANDLE = "@Hannah";
 
-// type NodeType = "location" | "experiment" | "protocol" | "portal"
+// type NodeType =
+//   "location" | "experiment" | "protocol" | "portal" |
+//   "project" | "sample" | "dataset" | "analysis" | "figure" | "handover"
 // type Task = { id: string, text: string, done: boolean, assignedTo: string }
 // type Comment = { author: string, text: string, timestamp: string, isNew: boolean }
 // type Node = {
@@ -21,7 +21,7 @@ const CURRENT_USER_HANDLE = "@Hannah";
 //   sharedWithIds?: string[],
 //   kind?: "lab" | "room" | "bench" | "fume" | "freezer" | "sink" | "glovebox" | "shelf" | "generic",
 //   locationId: string | null,
-//   status?: "active",
+//   status?: string,
 //   summary: string,
 //   linkedNodeIds: string[], // runtime edge-backed alias
 //   tasks: Task[],
@@ -34,7 +34,18 @@ const CURRENT_USER_HANDLE = "@Hannah";
 //   expandedInnerWidthPx?: number // legacy runtime field
 // }
 
-const TYPE_ORDER = ["location", "experiment", "protocol", "portal"];
+const TYPE_ORDER = [
+  "location",
+  "experiment",
+  "protocol",
+  "project",
+  "sample",
+  "dataset",
+  "analysis",
+  "figure",
+  "handover",
+  "portal"
+];
     const SVG_NS = "http://www.w3.org/2000/svg";
     const CANVAS_WIDTH = 1320;
     const CANVAS_HEIGHT = 760;
@@ -49,12 +60,24 @@ const TYPE_ORDER = ["location", "experiment", "protocol", "portal"];
       location: 172,
       experiment: 172,
       protocol: 172,
+      project: 202,
+      sample: 188,
+      dataset: 188,
+      analysis: 188,
+      figure: 176,
+      handover: 206,
       portal: 92
     };
     const COLLAPSED_CARD_HEIGHT_BY_TYPE = {
       location: 72,
       experiment: 72,
       protocol: 58,
+      project: 72,
+      sample: 64,
+      dataset: 64,
+      analysis: 64,
+      figure: 64,
+      handover: 72,
       portal: 92
     };
     const EXPANDED_CARD_MIN_W = 320;
@@ -74,7 +97,13 @@ const TYPE_ORDER = ["location", "experiment", "protocol", "portal"];
       location: 0,
       experiment: 350,
       protocol: 700,
-      portal: 1050
+      portal: 1050,
+      project: 1400,
+      sample: 1750,
+      dataset: 2100,
+      analysis: 2450,
+      figure: 2800,
+      handover: 3150
     };
     const HYBRID_LANE_GAP_Y = 28;
     const HYBRID_LANE_MAX_HEIGHT = 900;
@@ -86,67 +115,199 @@ const TYPE_ORDER = ["location", "experiment", "protocol", "portal"];
       [0, 10]
     ];
 
-    const users = Array.isArray(sampleData.users) ? sampleData.users.map((user) => ({ ...user })) : [];
-const orgs = Array.isArray(sampleData.orgs) ? sampleData.orgs.map((org) => ({ ...org })) : [];
-const workspaces = Array.isArray(sampleData.workspaces)
-  ? sampleData.workspaces.map((workspace) => ({ ...workspace }))
-  : [];
-const workspaceOptions = workspaces.length
-  ? workspaces.map((workspace) => ({
-      id: workspace.id,
-      name: workspace.name || workspace.id,
-      kind: workspace.kind || "global"
-    }))
-  : [
-      {
-        id: "ws-location-map",
-        name: "Location Map",
-        kind: "global"
+    const STORE_KEY = "amytis_store_v1";
+
+    function extractEntityArray(data, key) {
+      if (!data || typeof data !== "object") return [];
+      const direct = data[key];
+      if (Array.isArray(direct)) return direct;
+      if (direct instanceof Map) return Array.from(direct.values());
+      if (direct && typeof direct === "object") return Object.values(direct);
+      const byId = data[`${key}ById`];
+      if (byId instanceof Map) return Array.from(byId.values());
+      if (byId && typeof byId === "object") return Object.values(byId);
+      return [];
+    }
+
+    async function loadInitialData() {
+      try {
+        const storedRaw = window.localStorage.getItem(STORE_KEY);
+        if (storedRaw) {
+          try {
+            return JSON.parse(storedRaw);
+          } catch (error) {
+            console.warn("Failed to parse local storage amytis_store_v1 payload.", error);
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to read local storage amytis_store_v1 payload.", error);
       }
-    ];
 
-const userById = new Map(users.map((user) => [user.id, user]));
-const orgById = new Map(orgs.map((org) => [org.id, org]));
-void orgById;
+      try {
+        const response = await fetch("data/defaultData.json");
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (error) {
+        console.warn("Failed to load data/defaultData.json.", error);
+      }
 
-const activeWorkspace = workspaces.find((workspace) => workspace.kind === "global") || workspaces[0] || null;
-let currentWorkspaceId = activeWorkspace?.id || workspaceOptions[0]?.id || null;
-if (!workspaceOptions.some((workspace) => workspace.id === currentWorkspaceId)) {
-  currentWorkspaceId = workspaceOptions[0]?.id || null;
-}
-let workspaceMenuOpen = false;
-const workspaceNodeIdSet = new Set(
-  activeWorkspace && Array.isArray(activeWorkspace.nodeIds) && activeWorkspace.nodeIds.length
-    ? activeWorkspace.nodeIds
-    : (Array.isArray(sampleData.nodes) ? sampleData.nodes.map((node) => node.id) : [])
-);
+      try {
+        const moduleData = await import("./data/sampleData.js");
+        if (moduleData && moduleData.sampleData) {
+          return moduleData.sampleData;
+        }
+      } catch (error) {
+        console.error("Failed to import fallback data/sampleData.js.", error);
+      }
 
-const nodes = (Array.isArray(sampleData.nodes) ? sampleData.nodes : [])
-  .filter((node) => workspaceNodeIdSet.has(node.id))
-  .map((node) => ({
-    ...node,
-    label: node.title,
-    owner: (node.ownerId && userById.get(node.ownerId)
-      ? userById.get(node.ownerId).name
-      : (node.ownerId || "Unknown")),
-    tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => ({ ...task })) : [],
-    comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : []
-  }));
+      return {
+        users: [],
+        orgs: [],
+        nodes: [],
+        edges: [],
+        workspaces: []
+      };
+    }
 
-const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    function buildStore(data) {
+      const users = extractEntityArray(data, "users")
+        .filter((entry) => entry && typeof entry.id === "string")
+        .map((entry) => ({ ...entry }));
+      const orgs = extractEntityArray(data, "orgs")
+        .filter((entry) => entry && typeof entry.id === "string")
+        .map((entry) => ({ ...entry }));
+      const nodes = extractEntityArray(data, "nodes")
+        .filter((entry) => entry && typeof entry.id === "string")
+        .map((entry) => ({ ...entry }));
+      const edges = extractEntityArray(data, "edges")
+        .filter((entry) => entry && typeof entry.id === "string")
+        .map((entry) => ({ ...entry }));
+      const workspaces = extractEntityArray(data, "workspaces")
+        .filter((entry) => entry && typeof entry.id === "string")
+        .map((entry) => ({ ...entry }));
 
-const workspaceEdgeIdSet = new Set(
-  activeWorkspace && Array.isArray(activeWorkspace.edgeIds) && activeWorkspace.edgeIds.length
-    ? activeWorkspace.edgeIds
-    : (Array.isArray(sampleData.edges) ? sampleData.edges.map((edge) => edge.id) : [])
-);
+      return {
+        users,
+        orgs,
+        nodes,
+        edges,
+        workspaces,
+        usersById: new Map(users.map((entry) => [entry.id, entry])),
+        orgsById: new Map(orgs.map((entry) => [entry.id, entry])),
+        nodesById: new Map(nodes.map((entry) => [entry.id, entry])),
+        edgesById: new Map(edges.map((entry) => [entry.id, entry])),
+        workspacesById: new Map(workspaces.map((entry) => [entry.id, entry])),
+        workspaceOrder: workspaces.map((workspace) => workspace.id)
+      };
+    }
 
-const edges = (Array.isArray(sampleData.edges) ? sampleData.edges : [])
-  .filter((edge) => workspaceEdgeIdSet.has(edge.id))
-  .filter((edge) => nodeById.has(edge.sourceId) && nodeById.has(edge.targetId))
-  .map((edge) => ({ ...edge }));
+    let store = null;
+    let users = [];
+    let orgs = [];
+    let workspaces = [];
+    let workspaceOptions = [];
+    let userById = new Map();
+    let orgById = new Map();
+    let allNodesRuntime = [];
+    let allEdgesRuntime = [];
+    let workspaceById = new Map();
+    let currentWorkspaceId = null;
+    let currentWorkspaceKind = "normal";
+    let currentUserId = null;
+    let appliedWorkspaceId = null;
+    let hasAppliedWorkspace = false;
+    let workspaceMenuOpen = false;
+    let userMenuOpen = false;
+    let isCreatingWorkspace = false;
+    let workspaceDraftName = "";
+    let workspaceRenameId = null;
+    let workspaceRenameDraft = "";
 
-const edgeById = new Map();
+    function normalizeWorkspaceKind(rawKind) {
+      if (rawKind === "collab" || rawKind === "collaboration") return "collab";
+      if (rawKind === "normal" || rawKind === "global" || rawKind === "project") return "normal";
+      return "normal";
+    }
+
+    function enforceCollabUniqueness(workspaceRecords) {
+      const seenCollabByOwner = new Set();
+      workspaceRecords.forEach((workspace) => {
+        workspace.kind = normalizeWorkspaceKind(workspace.kind);
+        if (workspace.kind !== "collab") return;
+        const ownerKey = workspace.ownerId || "__no-owner__";
+        if (seenCollabByOwner.has(ownerKey)) {
+          console.warn(`Multiple collab workspaces found for owner "${ownerKey}". Converting "${workspace.id}" to normal.`);
+          workspace.kind = "normal";
+          return;
+        }
+        seenCollabByOwner.add(ownerKey);
+      });
+    }
+
+    function initializeRuntimeDataFromStore(nextStore) {
+      store = nextStore;
+
+      users = Array.from(store.usersById.values()).map((user) => ({ ...user }));
+      orgs = Array.from(store.orgsById.values()).map((org) => ({ ...org }));
+      const orderedWorkspaceRecords = store.workspaceOrder.length
+        ? store.workspaceOrder
+          .map((workspaceId) => store.workspacesById.get(workspaceId))
+          .filter(Boolean)
+        : Array.from(store.workspacesById.values());
+      workspaces = orderedWorkspaceRecords.map((workspace) => ({ ...workspace }));
+      enforceCollabUniqueness(workspaces);
+
+      workspaceOptions = workspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name || workspace.id,
+        kind: normalizeWorkspaceKind(workspace.kind),
+        ownerId: workspace.ownerId || null
+      }));
+
+      userById = new Map(users.map((user) => [user.id, user]));
+      orgById = new Map(orgs.map((org) => [org.id, org]));
+      void orgById;
+
+      allNodesRuntime = Array.from(store.nodesById.values())
+        .map((node) => ({
+          ...node,
+          label: node.title,
+          owner: (node.ownerId && userById.get(node.ownerId)
+            ? userById.get(node.ownerId).name
+            : (node.ownerId || "Unknown")),
+          summary: typeof node.summary === "string" && node.summary.trim()
+            ? node.summary
+            : `${node.title} node`,
+          tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => ({ ...task })) : [],
+          comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
+          locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
+        }));
+      allEdgesRuntime = Array.from(store.edgesById.values())
+        .map((edge) => ({ ...edge }));
+      workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+
+      if (userById.has("user-hannah-lewis")) {
+        currentUserId = "user-hannah-lewis";
+      } else if (users.length) {
+        currentUserId = users[0].id;
+      } else {
+        currentUserId = null;
+      }
+      const initialWorkspaceOptions = workspaceOptions.filter((workspace) => workspace.ownerId === currentUserId);
+      currentWorkspaceId = initialWorkspaceOptions[0]?.id || null;
+      currentWorkspaceKind = normalizeWorkspaceKind(initialWorkspaceOptions[0]?.kind);
+      appliedWorkspaceId = null;
+      hasAppliedWorkspace = false;
+      workspaceMenuOpen = false;
+      userMenuOpen = false;
+      resetWorkspaceCreateState();
+    }
+
+let nodes = [];
+let edges = [];
+let nodeById = new Map();
+let edgeById = new Map();
 let outgoingEdgeIdsBySourceId = new Map();
 let incomingEdgeIdsByTargetId = new Map();
 let edgeRuntimeCounter = 0;
@@ -263,8 +424,6 @@ function replaceOutgoingEdges(nodeId, targetIds, kindResolver = inferEdgeKindFor
   rebuildEdgeIndexes();
 }
 
-rebuildEdgeIndexes();
-
 function attachLinkedNodeAccessors() {
   nodes.forEach((node) => {
     Object.defineProperty(node, "linkedNodeIds", {
@@ -280,8 +439,6 @@ function attachLinkedNodeAccessors() {
   });
 }
 
-attachLinkedNodeAccessors();
-
 const state = {
       selectedNodeId: "exp-culture-check-b",
       listMode: "by-location",
@@ -294,6 +451,289 @@ const state = {
       notificationsOpen: false,
       openLenses: new Map()
     };
+
+function getWorkspaceRecordById(workspaceId) {
+  const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
+  if (!visibleWorkspaceOptions.length) return null;
+  const visibleWorkspaceIds = new Set(visibleWorkspaceOptions.map((workspace) => workspace.id));
+  if (workspaceId && visibleWorkspaceIds.has(workspaceId) && workspaceById.has(workspaceId)) {
+    return workspaceById.get(workspaceId);
+  }
+  const fallbackWorkspaceId = visibleWorkspaceOptions[0].id;
+  return workspaceById.get(fallbackWorkspaceId) || null;
+}
+
+function getWorkspaceOptionById(workspaceId) {
+  const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
+  if (!visibleWorkspaceOptions.length) return null;
+  return visibleWorkspaceOptions.find((workspace) => workspace.id === workspaceId) || visibleWorkspaceOptions[0];
+}
+
+function getCurrentUserRecord() {
+  if (!currentUserId) return null;
+  return userById.get(currentUserId) || null;
+}
+
+function getCurrentUserName() {
+  const currentUser = getCurrentUserRecord();
+  return currentUser?.name || "None";
+}
+
+function getSortedUsersForMenu() {
+  return [...users].sort((leftUser, rightUser) => {
+    const leftName = leftUser?.name || "";
+    const rightName = rightUser?.name || "";
+    const nameComparison = leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+    if (nameComparison !== 0) return nameComparison;
+    return (leftUser?.id || "").localeCompare(rightUser?.id || "");
+  });
+}
+
+function getWorkspaceOptionsForCurrentUser() {
+  if (!currentUserId) return [];
+  return workspaceOptions.filter((workspace) => workspace.ownerId === currentUserId);
+}
+
+function setCurrentWorkspaceForCurrentUser() {
+  const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
+  currentWorkspaceId = visibleWorkspaceOptions[0]?.id || null;
+  currentWorkspaceKind = normalizeWorkspaceKind(visibleWorkspaceOptions[0]?.kind);
+}
+
+function resetWorkspaceCreateState() {
+  isCreatingWorkspace = false;
+  workspaceDraftName = "";
+}
+
+function resetWorkspaceRenameState() {
+  workspaceRenameId = null;
+  workspaceRenameDraft = "";
+}
+
+function syncWorkspaceRuntimeAndStore() {
+  enforceCollabUniqueness(workspaces);
+  workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+  workspaceOptions = workspaces.map((workspace) => ({
+    id: workspace.id,
+    name: workspace.name || workspace.id,
+    kind: normalizeWorkspaceKind(workspace.kind),
+    ownerId: workspace.ownerId || null
+  }));
+
+  if (store) {
+    store.workspaces = workspaces.map((workspace) => ({ ...workspace }));
+    store.workspacesById = new Map(workspaces.map((workspace) => [workspace.id, { ...workspace }]));
+    store.workspaceOrder = workspaces.map((workspace) => workspace.id);
+  }
+}
+
+function sanitizeWorkspaceSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function generateWorkspaceId(ownerId, name) {
+  const ownerSlug = sanitizeWorkspaceSlug(ownerId) || "user";
+  const nameSlug = sanitizeWorkspaceSlug(name) || "workspace";
+  let candidate = `ws-${ownerSlug}-${nameSlug}`;
+  if (!workspaceById.has(candidate)) {
+    return candidate;
+  }
+  const stamp = Date.now().toString(36);
+  candidate = `ws-${ownerSlug}-${nameSlug}-${stamp}`;
+  if (!workspaceById.has(candidate)) {
+    return candidate;
+  }
+  let counter = 2;
+  while (workspaceById.has(`${candidate}-${counter}`)) {
+    counter += 1;
+  }
+  return `${candidate}-${counter}`;
+}
+
+function toPersistableNode(node) {
+  const clone = { ...node };
+  delete clone.label;
+  delete clone.owner;
+  delete clone.linkedNodeIds;
+  return clone;
+}
+
+function buildPersistableDataSnapshot() {
+  return {
+    users: users.map((user) => ({ ...user })),
+    orgs: orgs.map((org) => ({ ...org })),
+    nodes: allNodesRuntime.map((node) => toPersistableNode(node)),
+    edges: allEdgesRuntime.map((edge) => ({ ...edge })),
+    workspaces: workspaces.map((workspace) => ({ ...workspace }))
+  };
+}
+
+function persistStoreToLocalStorage() {
+  try {
+    const payload = buildPersistableDataSnapshot();
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Failed to persist amytis_store_v1 payload.", error);
+  }
+}
+
+function createWorkspaceForCurrentUser(name) {
+  if (!currentUserId) return null;
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) return null;
+
+  const id = generateWorkspaceId(currentUserId, trimmedName);
+  const workspaceRecord = {
+    id,
+    name: trimmedName,
+    kind: "normal",
+    ownerId: currentUserId,
+    nodeIds: [],
+    edgeIds: []
+  };
+  workspaces.push(workspaceRecord);
+  syncWorkspaceRuntimeAndStore();
+
+  currentWorkspaceId = id;
+  currentWorkspaceKind = "normal";
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return workspaceRecord;
+}
+
+function renameWorkspace(workspaceId, nextName) {
+  const trimmedName = String(nextName || "").trim();
+  if (!trimmedName) return false;
+  const workspaceRecord = workspaceById.get(workspaceId);
+  if (!workspaceRecord) return false;
+
+  workspaceRecord.name = trimmedName;
+  const workspaceIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
+  if (workspaceIndex >= 0) {
+    workspaces[workspaceIndex].name = trimmedName;
+  }
+
+  syncWorkspaceRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function deleteWorkspace(workspaceId) {
+  const workspaceIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
+  if (workspaceIndex === -1) return false;
+
+  const wasActiveWorkspace = currentWorkspaceId === workspaceId;
+  workspaces.splice(workspaceIndex, 1);
+  syncWorkspaceRuntimeAndStore();
+
+  if (wasActiveWorkspace) {
+    setCurrentWorkspaceForCurrentUser();
+    if (!currentWorkspaceId) {
+      currentWorkspaceKind = "normal";
+    }
+    hasAppliedWorkspace = false;
+  }
+
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function sanitizeStateForWorkspace() {
+  const hasNodes = nodes.length > 0;
+  if (!state.selectedNodeId || !nodeById.has(state.selectedNodeId)) {
+    state.selectedNodeId = hasNodes ? nodes[0].id : null;
+  }
+
+  state.expandedLocationIds = new Set(
+    [...state.expandedLocationIds].filter((locationId) => {
+      const node = getNodeById(locationId);
+      return !!node && node.type === "location";
+    })
+  );
+
+  if (state.expandedCanvasLocationId) {
+    const expandedNode = getNodeById(state.expandedCanvasLocationId);
+    if (!expandedNode || expandedNode.type !== "location") {
+      state.expandedCanvasLocationId = null;
+    }
+  }
+
+  if (state.expandedDragRootId && !nodeById.has(state.expandedDragRootId)) {
+    state.expandedDragRootId = null;
+    state.expandedDragOverrides = new Map();
+  } else {
+    state.expandedDragOverrides = new Map(
+      [...state.expandedDragOverrides.entries()].filter(([nodeId]) => nodeById.has(nodeId))
+    );
+  }
+
+  if (state.focusLocationId) {
+    const focusNode = getNodeById(state.focusLocationId);
+    if (!focusNode || focusNode.type !== "location") {
+      state.focusLocationId = null;
+    }
+  }
+
+  state.openLenses = new Map(
+    [...state.openLenses.entries()].filter(([locationId]) => {
+      const locationNode = getNodeById(locationId);
+      return !!locationNode && locationNode.type === "location";
+    })
+  );
+
+  if (!getLocationNodes().length && state.listMode === "by-location") {
+    state.listMode = "all-nodes";
+  }
+}
+
+function applyWorkspaceData(workspaceId, options = {}) {
+  const workspaceRecord = getWorkspaceRecordById(workspaceId);
+  const workspaceOption = getWorkspaceOptionById(workspaceId);
+  currentWorkspaceId = workspaceRecord?.id || workspaceOption?.id || null;
+  currentWorkspaceKind = normalizeWorkspaceKind(workspaceRecord?.kind || workspaceOption?.kind);
+
+  if (!workspaceRecord) {
+    nodes = [];
+    edges = [];
+    nodeById = new Map();
+    edgeRuntimeCounter = 0;
+    rebuildEdgeIndexes();
+    if (options.sanitizeState !== false) {
+      sanitizeStateForWorkspace();
+    }
+    return;
+  }
+
+  const scopedNodeIds = new Set(
+    workspaceRecord && Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.length
+      ? workspaceRecord.nodeIds
+      : []
+  );
+  nodes = allNodesRuntime.filter((node) => scopedNodeIds.has(node.id));
+  nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  const scopedEdgeIds = new Set(
+    workspaceRecord && Array.isArray(workspaceRecord.edgeIds) && workspaceRecord.edgeIds.length
+      ? workspaceRecord.edgeIds
+      : []
+  );
+  edges = allEdgesRuntime
+    .filter((edge) => scopedEdgeIds.has(edge.id))
+    .filter((edge) => nodeById.has(edge.sourceId) && nodeById.has(edge.targetId))
+    .map((edge) => ({ ...edge }));
+
+  edgeRuntimeCounter = 0;
+  rebuildEdgeIndexes();
+  attachLinkedNodeAccessors();
+
+  if (options.sanitizeState !== false) {
+    sanitizeStateForWorkspace();
+  }
+}
     // Manual seed example for lens testing:
     // state.openLenses.set("loc-lab-a", { x: 120, y: 120, w: 320, h: 220 });
 
@@ -410,6 +850,11 @@ const state = {
       workspaceMenuBtnEl.addEventListener("click", (event) => {
         event.stopPropagation();
         workspaceMenuOpen = !workspaceMenuOpen;
+        userMenuOpen = false;
+        if (!workspaceMenuOpen) {
+          resetWorkspaceCreateState();
+          resetWorkspaceRenameState();
+        }
         renderWorkspaceMenu();
       });
     }
@@ -424,6 +869,9 @@ const state = {
       if (event.key !== "Escape") return;
       if (!workspaceMenuOpen) return;
       workspaceMenuOpen = false;
+      userMenuOpen = false;
+      resetWorkspaceCreateState();
+      resetWorkspaceRenameState();
       renderWorkspaceMenu();
     });
 
@@ -436,6 +884,9 @@ const state = {
         !workspaceMenuWrapEl.contains(clickTarget)
       ) {
         workspaceMenuOpen = false;
+        userMenuOpen = false;
+        resetWorkspaceCreateState();
+        resetWorkspaceRenameState();
         renderWorkspaceMenu();
       }
 
@@ -597,30 +1048,304 @@ const state = {
 
     function renderWorkspaceMenu() {
       if (!workspaceMenuBtnEl || !workspaceMenuPanelEl) return;
+      let createInputEl = null;
+      let renameInputEl = null;
+      const currentUserName = getCurrentUserName();
       workspaceMenuBtnEl.setAttribute("aria-expanded", String(workspaceMenuOpen));
+      workspaceMenuBtnEl.setAttribute("title", `Workspaces · User: ${currentUserName}`);
       workspaceMenuPanelEl.classList.toggle("is-open", workspaceMenuOpen);
+      workspaceMenuPanelEl.setAttribute("aria-label", `Workspace and user list. Current user: ${currentUserName}`);
       workspaceMenuPanelEl.innerHTML = "";
 
-      workspaceOptions.forEach((workspace) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.role = "menuitemradio";
-        item.className = "workspace-menu-item";
-        item.textContent = workspace.name || workspace.id;
-        const isActive = workspace.id === currentWorkspaceId;
-        if (isActive) {
-          item.classList.add("is-active");
+      const userSelectEl = document.createElement("div");
+      userSelectEl.className = "workspace-user-select";
+      const userToggleEl = document.createElement("button");
+      userToggleEl.type = "button";
+      userToggleEl.className = "workspace-user-toggle";
+      userToggleEl.setAttribute("aria-label", "Select user");
+      userToggleEl.setAttribute("aria-expanded", String(userMenuOpen));
+
+      const userToggleNameEl = document.createElement("span");
+      userToggleNameEl.className = "workspace-user-toggle-name";
+      userToggleNameEl.textContent = `User: ${currentUserName}`;
+      userToggleEl.appendChild(userToggleNameEl);
+
+      const userToggleChevronEl = document.createElement("span");
+      userToggleChevronEl.className = "workspace-user-chevron";
+      userToggleChevronEl.textContent = "▼";
+      userToggleEl.appendChild(userToggleChevronEl);
+
+      userToggleEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        userMenuOpen = !userMenuOpen;
+        renderWorkspaceMenu();
+      });
+      userSelectEl.appendChild(userToggleEl);
+
+      if (userMenuOpen) {
+        const userDropdownEl = document.createElement("div");
+        userDropdownEl.className = "workspace-user-dropdown";
+        const sortedUsers = getSortedUsersForMenu();
+        if (!sortedUsers.length) {
+          const emptyUsersEl = document.createElement("div");
+          emptyUsersEl.className = "workspace-menu-empty";
+          emptyUsersEl.textContent = "No users";
+          userDropdownEl.appendChild(emptyUsersEl);
+        } else {
+          sortedUsers.forEach((user) => {
+            const userItemEl = document.createElement("button");
+            userItemEl.type = "button";
+            userItemEl.className = "workspace-user-item";
+            const isActiveUser = user.id === currentUserId;
+            if (isActiveUser) {
+              userItemEl.classList.add("is-active");
+            }
+
+            const userNameEl = document.createElement("span");
+            userNameEl.className = "workspace-user-name";
+            userNameEl.textContent = user.name || user.id;
+            userItemEl.appendChild(userNameEl);
+
+            const orgName = user.orgId && orgById.get(user.orgId) ? orgById.get(user.orgId).name : "";
+            if (orgName) {
+              const userOrgEl = document.createElement("span");
+              userOrgEl.className = "workspace-user-org";
+              userOrgEl.textContent = orgName;
+              userItemEl.appendChild(userOrgEl);
+            }
+
+            userItemEl.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              currentUserId = user.id;
+              setCurrentWorkspaceForCurrentUser();
+              hasAppliedWorkspace = false;
+              userMenuOpen = false;
+              resetWorkspaceCreateState();
+              resetWorkspaceRenameState();
+              renderAll();
+            });
+            userDropdownEl.appendChild(userItemEl);
+          });
         }
-        item.setAttribute("aria-checked", String(isActive));
-        item.addEventListener("click", (event) => {
+        userSelectEl.appendChild(userDropdownEl);
+      }
+      workspaceMenuPanelEl.appendChild(userSelectEl);
+
+      const workspaceListEl = document.createElement("div");
+      workspaceListEl.className = "workspace-workspace-list";
+      const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
+      if (!visibleWorkspaceOptions.length) {
+        const noWorkspacesEl = document.createElement("div");
+        noWorkspacesEl.className = "workspace-menu-empty";
+        noWorkspacesEl.textContent = "No workspaces";
+        workspaceListEl.appendChild(noWorkspacesEl);
+      } else {
+        visibleWorkspaceOptions.forEach((workspace) => {
+          const rowEl = document.createElement("div");
+          rowEl.className = "workspace-menu-row";
+          const isActive = workspace.id === currentWorkspaceId;
+          const isRenaming = workspaceRenameId === workspace.id;
+          if (isActive) {
+            rowEl.classList.add("is-active");
+          }
+
+          if (isRenaming) {
+            const renameInput = document.createElement("input");
+            renameInput.type = "text";
+            renameInput.className = "workspace-rename-input";
+            renameInput.placeholder = "Workspace name";
+            renameInput.value = workspaceRenameDraft;
+            renameInput.maxLength = 80;
+            renameInput.addEventListener("click", (event) => {
+              event.stopPropagation();
+            });
+            renameInput.addEventListener("input", () => {
+              workspaceRenameDraft = renameInput.value;
+            });
+            renameInput.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                const renamed = renameWorkspace(workspace.id, workspaceRenameDraft);
+                if (renamed) {
+                  resetWorkspaceRenameState();
+                }
+                renderWorkspaceMenu();
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                resetWorkspaceRenameState();
+                renderWorkspaceMenu();
+              }
+            });
+            renameInput.addEventListener("blur", () => {
+              if (workspaceRenameId !== workspace.id) return;
+              resetWorkspaceRenameState();
+              renderWorkspaceMenu();
+            });
+            rowEl.appendChild(renameInput);
+            renameInputEl = renameInput;
+          } else {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.role = "menuitemradio";
+            item.className = "workspace-menu-item";
+            item.setAttribute("aria-checked", String(isActive));
+
+            const labelEl = document.createElement("span");
+            labelEl.className = "workspace-menu-item-label";
+            labelEl.textContent = workspace.name || workspace.id;
+            item.appendChild(labelEl);
+
+            item.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              currentWorkspaceId = workspace.id;
+              workspaceMenuOpen = false;
+              userMenuOpen = false;
+              resetWorkspaceCreateState();
+              resetWorkspaceRenameState();
+              renderAll();
+            });
+            rowEl.appendChild(item);
+          }
+
+          if (isActive && !isRenaming) {
+            const actionsEl = document.createElement("div");
+            actionsEl.className = "workspace-menu-item-actions";
+
+            const renameBtnEl = document.createElement("button");
+            renameBtnEl.type = "button";
+            renameBtnEl.className = "workspace-row-icon-btn rename";
+            renameBtnEl.setAttribute("aria-label", `Rename workspace ${workspace.name || workspace.id}`);
+            renameBtnEl.textContent = "✎";
+            renameBtnEl.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              resetWorkspaceCreateState();
+              workspaceRenameId = workspace.id;
+              workspaceRenameDraft = workspace.name || workspace.id || "";
+              renderWorkspaceMenu();
+            });
+            actionsEl.appendChild(renameBtnEl);
+
+            const deleteBtnEl = document.createElement("button");
+            deleteBtnEl.type = "button";
+            deleteBtnEl.className = "workspace-row-icon-btn delete";
+            deleteBtnEl.setAttribute("aria-label", `Delete workspace ${workspace.name || workspace.id}`);
+            deleteBtnEl.textContent = "✕";
+            deleteBtnEl.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const workspaceName = workspace.name || workspace.id || "workspace";
+              const confirmed = window.confirm(`Delete workspace "${workspaceName}"?`);
+              if (!confirmed) return;
+              const deleted = deleteWorkspace(workspace.id);
+              if (!deleted) return;
+              if (workspaceRenameId === workspace.id) {
+                resetWorkspaceRenameState();
+              }
+              resetWorkspaceCreateState();
+              renderAll();
+            });
+            actionsEl.appendChild(deleteBtnEl);
+
+            rowEl.appendChild(actionsEl);
+          }
+
+          workspaceListEl.appendChild(rowEl);
+        });
+      }
+      workspaceMenuPanelEl.appendChild(workspaceListEl);
+
+      const createWrapEl = document.createElement("div");
+      createWrapEl.className = "workspace-create-wrap";
+
+      if (!currentUserId) {
+        const createBtnEl = document.createElement("button");
+        createBtnEl.type = "button";
+        createBtnEl.className = "workspace-create-btn";
+        createBtnEl.textContent = "+ Workspace";
+        createBtnEl.disabled = true;
+        createWrapEl.appendChild(createBtnEl);
+
+        const createHintEl = document.createElement("div");
+        createHintEl.className = "workspace-create-hint";
+        createHintEl.textContent = "Select a user to create a workspace.";
+        createWrapEl.appendChild(createHintEl);
+      } else if (!isCreatingWorkspace) {
+        const createBtnEl = document.createElement("button");
+        createBtnEl.type = "button";
+        createBtnEl.className = "workspace-create-btn";
+        createBtnEl.textContent = "+ Workspace";
+        createBtnEl.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          currentWorkspaceId = workspace.id;
-          workspaceMenuOpen = false;
-          renderAll();
+          resetWorkspaceRenameState();
+          isCreatingWorkspace = true;
+          workspaceDraftName = "";
+          renderWorkspaceMenu();
         });
-        workspaceMenuPanelEl.appendChild(item);
-      });
+        createWrapEl.appendChild(createBtnEl);
+      } else {
+        const nameInputEl = document.createElement("input");
+        nameInputEl.type = "text";
+        nameInputEl.className = "workspace-create-input";
+        nameInputEl.placeholder = "Workspace name";
+        nameInputEl.value = workspaceDraftName;
+        nameInputEl.maxLength = 80;
+        nameInputEl.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        nameInputEl.addEventListener("input", () => {
+          workspaceDraftName = nameInputEl.value;
+        });
+        nameInputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            const createdWorkspace = createWorkspaceForCurrentUser(workspaceDraftName);
+            if (createdWorkspace) {
+              resetWorkspaceCreateState();
+              renderAll();
+            }
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            resetWorkspaceCreateState();
+            renderWorkspaceMenu();
+          }
+        });
+        nameInputEl.addEventListener("blur", () => {
+          resetWorkspaceCreateState();
+          renderWorkspaceMenu();
+        });
+        createWrapEl.appendChild(nameInputEl);
+        createInputEl = nameInputEl;
+      }
+
+      workspaceMenuPanelEl.appendChild(createWrapEl);
+
+      if (createInputEl) {
+        requestAnimationFrame(() => {
+          if (!createInputEl.isConnected) return;
+          createInputEl.focus();
+          createInputEl.select();
+        });
+      }
+      if (renameInputEl) {
+        requestAnimationFrame(() => {
+          if (!renameInputEl.isConnected) return;
+          renameInputEl.focus();
+          renameInputEl.select();
+        });
+      }
     }
 
     function applyCameraTransform() {
@@ -1011,6 +1736,12 @@ const state = {
         location: "LOC",
         experiment: "EXP",
         protocol: "PROT",
+        project: "PRJ",
+        sample: "SAMP",
+        dataset: "DATA",
+        analysis: "ANL",
+        figure: "FIG",
+        handover: "HND",
         portal: "PRTL"
       };
       return map[type] || type.toUpperCase();
@@ -1178,9 +1909,26 @@ const state = {
         location: [],
         experiment: [],
         protocol: [],
+        project: [],
+        sample: [],
+        dataset: [],
+        analysis: [],
+        figure: [],
+        handover: [],
         portal: []
       };
-      const laneOrder = ["location", "experiment", "protocol", "portal"];
+      const laneOrder = [
+        "location",
+        "experiment",
+        "protocol",
+        "project",
+        "sample",
+        "dataset",
+        "analysis",
+        "figure",
+        "handover",
+        "portal"
+      ];
 
       visibleIdSet.forEach((nodeId) => {
         const node = getNodeById(nodeId);
@@ -1367,7 +2115,7 @@ const state = {
         .filter((node) => node.type !== "experiment" || node.status === "active");
     }
 
-    function normalizeGraphSemantics() {
+    function normalizeGlobalLocationSemantics() {
       const protocolIds = new Set(nodes.filter((node) => node.type === "protocol").map((node) => node.id));
       const experimentIds = new Set(nodes.filter((node) => node.type === "experiment").map((node) => node.id));
       const locationIds = new Set(nodes.filter((node) => node.type === "location").map((node) => node.id));
@@ -1438,6 +2186,38 @@ const state = {
           const activeHere = activeExperimentsByLocation.get(locationNode.id) || [];
           locationNode.linkedNodeIds = uniqueIds([...cleanedLinks, ...activeHere]);
         });
+    }
+
+    function normalizeProjectWorkspaceSemantics() {
+      const allIds = new Set(nodes.map((node) => node.id));
+      nodes.forEach((node) => {
+        if (!Array.isArray(node.tasks)) node.tasks = [];
+        if (!Array.isArray(node.comments)) node.comments = [];
+        if (typeof node.summary !== "string" || !node.summary.trim()) {
+          node.summary = `${node.label || node.title || node.id} node`;
+        }
+        if (node.type === "location") {
+          node.kind = node.kind || "generic";
+        }
+        if (node.type === "experiment" && !node.status) {
+          node.status = "active";
+        }
+        if (node.locationId && !allIds.has(node.locationId)) {
+          node.locationId = null;
+        }
+      });
+    }
+
+    function normalizeActiveWorkspaceSemantics() {
+      if (currentWorkspaceKind === "collab") {
+        normalizeProjectWorkspaceSemantics();
+        return;
+      }
+      if (currentWorkspaceKind === "normal") {
+        normalizeProjectWorkspaceSemantics();
+        return;
+      }
+      normalizeProjectWorkspaceSemantics();
     }
 
     function hasMentionForCurrentUser(text) {
@@ -1662,7 +2442,8 @@ const state = {
       allNodesBtn.classList.toggle("active", state.listMode === "all-nodes");
 
       const parentMap = buildParentMap();
-      if (state.listMode === "by-location") {
+      const hasLocationNodes = getLocationNodes().length > 0;
+      if (state.listMode === "by-location" && hasLocationNodes) {
         const roots = getLocationNodes()
           .filter((locationNode) => !parentMap.has(locationNode.id))
           .sort((a, b) => a.label.localeCompare(b.label));
@@ -2223,7 +3004,11 @@ const state = {
         buildProtocolCardContent(card, node);
         return;
       }
-      buildPortalCardContent(card, node);
+      if (node.type === "portal") {
+        buildPortalCardContent(card, node);
+        return;
+      }
+      buildArtifactCardContent(card, node);
     }
 
     function buildLocationCardContent(card, node) {
@@ -2397,6 +3182,39 @@ const state = {
       card.appendChild(icon);
       card.appendChild(kind);
       card.appendChild(name);
+    }
+
+    function buildArtifactCardContent(card, node) {
+      const header = document.createElement("div");
+      header.className = "node-card-header node-drag-handle";
+
+      const title = document.createElement("div");
+      title.className = "node-card-label";
+      title.textContent = node.label;
+      header.appendChild(title);
+
+      const footer = document.createElement("div");
+      footer.className = "node-card-footer";
+
+      const owner = document.createElement("div");
+      owner.className = "node-card-owner";
+      owner.textContent = node.owner;
+      footer.appendChild(owner);
+
+      if (node.status) {
+        const status = document.createElement("span");
+        status.className = `node-card-status ${getStatusClass(node.status)}`.trim();
+        status.textContent = node.status;
+        footer.appendChild(status);
+      } else {
+        const badge = document.createElement("span");
+        badge.className = "node-card-type-badge";
+        badge.textContent = getTypeShort(node.type);
+        footer.appendChild(badge);
+      }
+
+      card.appendChild(header);
+      card.appendChild(footer);
     }
 
     function createSvgElement(tag, attrs = {}) {
@@ -3119,7 +3937,19 @@ const state = {
     }
 
     function renderWorkspace(workspaceId) {
-      void workspaceId;
+      const targetWorkspaceId = workspaceId || currentWorkspaceId;
+      if (!hasAppliedWorkspace || appliedWorkspaceId !== targetWorkspaceId) {
+        applyWorkspaceData(targetWorkspaceId, { sanitizeState: true });
+        normalizeActiveWorkspaceSemantics();
+        initializeGraphLayoutIfMissing();
+        const visibleNodeIds = getVisibleNodeIdsForGlobalView();
+        if (visibleNodeIds && visibleNodeIds.size) {
+          fitCameraToNodes(visibleNodeIds, 80);
+        }
+        appliedWorkspaceId = currentWorkspaceId;
+        hasAppliedWorkspace = true;
+        resetLocationClickTracker();
+      }
       renderNodeLists();
       renderBreadcrumb();
       renderCanvas();
@@ -3133,7 +3963,37 @@ const state = {
       renderWorkspaceMenu();
     }
 
-    normalizeGraphSemantics();
-    initializeGraphLayoutIfMissing();
-    renderPanelState();
-    renderAll();
+    function renderLoadingState() {
+      if (nodeListEl) {
+        nodeListEl.innerHTML = "";
+        const loadingMessage = document.createElement("div");
+        loadingMessage.className = "node-list-empty";
+        loadingMessage.textContent = "Loading…";
+        nodeListEl.appendChild(loadingMessage);
+      }
+      if (detailsPaneEl) {
+        detailsPaneEl.innerHTML = "";
+        const detailsLoading = document.createElement("p");
+        detailsLoading.className = "muted";
+        detailsLoading.textContent = "Loading…";
+        detailsPaneEl.appendChild(detailsLoading);
+      }
+    }
+
+    async function bootApp() {
+      renderPanelState();
+      renderLoadingState();
+
+      try {
+        const initialData = await loadInitialData();
+        const initialStore = buildStore(initialData);
+        initializeRuntimeDataFromStore(initialStore);
+      } catch (error) {
+        console.error("Failed to initialize app store from initial data.", error);
+        initializeRuntimeDataFromStore(buildStore({}));
+      }
+
+      renderAll();
+    }
+
+    void bootApp();
