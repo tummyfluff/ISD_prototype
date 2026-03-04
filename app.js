@@ -7,8 +7,7 @@ const CURRENT_USER = "Dr Hannah Lewis";
 const CURRENT_USER_HANDLE = "@Hannah";
 
 // type NodeType =
-//   "location" | "experiment" | "protocol" | "portal" |
-//   "project" | "sample" | "dataset" | "analysis" | "figure" | "handover"
+//   "location" | "process" | "standard" | "portal" | "handover"
 // type Task = { id: string, text: string, done: boolean, assignedTo: string }
 // type Comment = { author: string, text: string, timestamp: string, isNew: boolean }
 // type Node = {
@@ -36,16 +35,12 @@ const CURRENT_USER_HANDLE = "@Hannah";
 
 const TYPE_ORDER = [
   "location",
-  "experiment",
-  "protocol",
-  "project",
-  "sample",
-  "dataset",
-  "analysis",
-  "figure",
+  "process",
+  "standard",
   "handover",
   "portal"
 ];
+const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
     const SVG_NS = "http://www.w3.org/2000/svg";
     const CANVAS_WIDTH = 1320;
     const CANVAS_HEIGHT = 760;
@@ -58,25 +53,15 @@ const TYPE_ORDER = [
     const COLLAPSED_CARD_W = 172;
     const COLLAPSED_CARD_WIDTH_BY_TYPE = {
       location: 172,
-      experiment: 172,
-      protocol: 172,
-      project: 202,
-      sample: 188,
-      dataset: 188,
-      analysis: 188,
-      figure: 176,
+      process: 172,
+      standard: 188,
       handover: 206,
       portal: 92
     };
     const COLLAPSED_CARD_HEIGHT_BY_TYPE = {
       location: 72,
-      experiment: 72,
-      protocol: 58,
-      project: 72,
-      sample: 64,
-      dataset: 64,
-      analysis: 64,
-      figure: 64,
+      process: 72,
+      standard: 64,
       handover: 72,
       portal: 92
     };
@@ -95,15 +80,10 @@ const TYPE_ORDER = [
     const EDGE_PAD = 500;
     const HYBRID_LANE_X = {
       location: 0,
-      experiment: 350,
-      protocol: 700,
-      portal: 1050,
-      project: 1400,
-      sample: 1750,
-      dataset: 2100,
-      analysis: 2450,
-      figure: 2800,
-      handover: 3150
+      process: 350,
+      standard: 700,
+      handover: 1050,
+      portal: 1400
     };
     const HYBRID_LANE_GAP_Y = 28;
     const HYBRID_LANE_MAX_HEIGHT = 900;
@@ -220,14 +200,48 @@ const TYPE_ORDER = [
     let workspaceMenuOpen = false;
     let userMenuOpen = false;
     let isCreatingWorkspace = false;
-    let workspaceDraftName = "";
-    let workspaceRenameId = null;
-    let workspaceRenameDraft = "";
+  let workspaceDraftName = "";
+  let workspaceRenameId = null;
+  let workspaceRenameDraft = "";
+  let createNodeMenuOpen = false;
+  let createNodeMenuMode = "create";
+  let createNodeMenuNodeId = null;
+  let createNodeMenuClientX = 0;
+  let createNodeMenuClientY = 0;
+  let createNodeMenuWorldX = 0;
+  let createNodeMenuWorldY = 0;
+  let newNodeInlineEditId = null;
+  let suppressNextWorkspaceAutoFit = false;
 
     function normalizeWorkspaceKind(rawKind) {
       if (rawKind === "collab" || rawKind === "collaboration") return "collab";
       if (rawKind === "normal" || rawKind === "global" || rawKind === "project") return "normal";
       return "normal";
+    }
+
+    function normalizeNodeType(rawType) {
+      const type = String(rawType || "").toLowerCase();
+      if (type === "location") return "location";
+      if (type === "portal") return "portal";
+      if (type === "handover") return "handover";
+      if (type === "process" || type === "experiment") return "process";
+      if (type === "standard" || type === "protocol") return "standard";
+      return "standard";
+    }
+
+    function normalizeProcessStatus(rawStatus) {
+      const status = String(rawStatus || "").trim().toLowerCase();
+      if (status === "planned") return "Planned";
+      if (status === "active") return "Active";
+      if (status === "complete" || status === "completed") return "Complete";
+      if (status === "abandoned") return "Abandoned";
+      return "Planned";
+    }
+
+    function getNextProcessStatus(status) {
+      const normalized = normalizeProcessStatus(status);
+      const index = PROCESS_STATUSES.indexOf(normalized);
+      return PROCESS_STATUSES[(index + 1) % PROCESS_STATUSES.length];
     }
 
     function enforceCollabUniqueness(workspaceRecords) {
@@ -272,13 +286,18 @@ const TYPE_ORDER = [
       allNodesRuntime = Array.from(store.nodesById.values())
         .map((node) => ({
           ...node,
-          label: node.title,
+          type: normalizeNodeType(node.type),
+          title: typeof node.title === "string" ? node.title : "",
+          label: typeof node.title === "string" ? node.title : "",
+          status: normalizeNodeType(node.type) === "process"
+            ? normalizeProcessStatus(node.status)
+            : node.status,
           owner: (node.ownerId && userById.get(node.ownerId)
             ? userById.get(node.ownerId).name
             : (node.ownerId || "Unknown")),
           summary: typeof node.summary === "string" && node.summary.trim()
             ? node.summary
-            : `${node.title} node`,
+            : `${typeof node.title === "string" ? node.title : node.id} node`,
           tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => ({ ...task })) : [],
           comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
           locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
@@ -315,10 +334,10 @@ let edgeRuntimeCounter = 0;
 function inferEdgeKindForPair(sourceNode, targetNode) {
   if (!sourceNode || !targetNode) return "link";
   if (sourceNode.type === "location" && targetNode.type === "location") return "location_contains";
-  if (sourceNode.type === "location" && targetNode.type === "protocol") return "location_protocol";
-  if (sourceNode.type === "location" && targetNode.type === "experiment") return "location_experiment";
-  if (sourceNode.type === "protocol" && targetNode.type === "experiment") return "protocol_experiment";
-  if (sourceNode.type === "portal" && targetNode.type === "protocol") return "portal_protocol";
+  if (sourceNode.type === "location" && targetNode.type === "standard") return "location_standard";
+  if (sourceNode.type === "location" && targetNode.type === "process") return "location_process";
+  if (sourceNode.type === "standard" && targetNode.type === "process") return "standard_process";
+  if (sourceNode.type === "portal" && targetNode.type === "standard") return "portal_standard";
   return "link";
 }
 
@@ -510,6 +529,356 @@ function resetWorkspaceRenameState() {
   workspaceRenameDraft = "";
 }
 
+function syncNodeRuntimeAndStore() {
+  if (!store) return;
+  const persistedNodes = allNodesRuntime.map((node) => toPersistableNode(node));
+  store.nodes = persistedNodes;
+  store.nodesById = new Map(persistedNodes.map((node) => [node.id, node]));
+}
+
+function generateNodeId(type) {
+  const typeSlug = String(type || "node").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "node";
+  const base = `${typeSlug}-${Date.now().toString(36)}`;
+  const existingIds = new Set(allNodesRuntime.map((node) => node.id));
+  let candidate = base;
+  let suffix = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function setNodeTitleById(nodeId, nextTitle, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node) return false;
+  const normalizedTitle = String(nextTitle ?? "").trim();
+  node.title = normalizedTitle;
+  node.label = normalizedTitle;
+  if (typeof node.summary !== "string") {
+    node.summary = "";
+  }
+  if (!node.summary.trim() && normalizedTitle) {
+    node.summary = `${normalizedTitle} node`;
+  }
+  syncNodeRuntimeAndStore();
+  if (options.persist !== false) {
+    persistStoreToLocalStorage();
+  }
+  return true;
+}
+
+function setProcessStatusById(nodeId, nextStatus, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "process") return false;
+  node.status = normalizeProcessStatus(nextStatus);
+  syncNodeRuntimeAndStore();
+  if (options.persist !== false) {
+    persistStoreToLocalStorage();
+  }
+  return true;
+}
+
+function cycleProcessStatus(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "process") return;
+  const nextStatus = getNextProcessStatus(node.status);
+  setProcessStatusById(nodeId, nextStatus);
+  renderAll();
+}
+
+function createNodeAtWorldPosition(type, worldX, worldY) {
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord) return null;
+
+  const normalizedType = normalizeNodeType(type);
+  const owner = getCurrentUserRecord();
+  const nodeId = generateNodeId(normalizedType);
+  const nodeTitle = "";
+  const nextNode = {
+    id: nodeId,
+    type: normalizedType,
+    title: nodeTitle,
+    label: nodeTitle,
+    ownerId: owner?.id || currentUserId || null,
+    owner: owner?.name || "Unknown",
+    summary: "",
+    tasks: [],
+    comments: [],
+    locationId: null,
+    graphPos: {
+      x: Number.isFinite(worldX) ? worldX : 0,
+      y: Number.isFinite(worldY) ? worldY : 0
+    }
+  };
+
+  if (normalizedType === "location") {
+    nextNode.kind = "generic";
+  }
+  if (normalizedType === "process") {
+    nextNode.status = "Planned";
+  }
+
+  allNodesRuntime.push(nextNode);
+  if (!Array.isArray(workspaceRecord.nodeIds)) {
+    workspaceRecord.nodeIds = [];
+  }
+  if (!workspaceRecord.nodeIds.includes(nodeId)) {
+    workspaceRecord.nodeIds.push(nodeId);
+  }
+
+  syncWorkspaceRuntimeAndStore();
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+
+  suppressNextWorkspaceAutoFit = true;
+  newNodeInlineEditId = normalizedType === "portal" ? null : nodeId;
+  state.selectedNodeId = nodeId;
+  hasAppliedWorkspace = false;
+  renderAll();
+  return getNodeById(nodeId);
+}
+
+function shouldOpenCreateNodeMenuForTarget(target) {
+  if (!(target instanceof Element)) return false;
+  return !target.closest(
+    ".node-card, .edge-line, .edge-hit, .edge-chevron, .lens-card, #workspaceMenu, .panel, .panel-pill, .notif-wrap, .layout-mode-controls, #mapCreateMenu"
+  );
+}
+
+function getNodeIdFromTarget(target) {
+  if (!(target instanceof Element)) return null;
+  const nodeCard = target.closest(".node-card");
+  if (!nodeCard) return null;
+  const nodeId = nodeCard.dataset.nodeId || "";
+  return nodeById.has(nodeId) ? nodeId : null;
+}
+
+function closeCreateNodeMenu() {
+  createNodeMenuOpen = false;
+  createNodeMenuMode = "create";
+  createNodeMenuNodeId = null;
+  if (!createNodeMenuEl) return;
+  createNodeMenuEl.classList.remove("is-open");
+  createNodeMenuEl.setAttribute("aria-hidden", "true");
+  createNodeMenuEl.innerHTML = "";
+}
+
+function getWorkspaceMembershipCount(nodeId) {
+  if (!nodeId) return 0;
+  let count = 0;
+  workspaces.forEach((workspace) => {
+    if (Array.isArray(workspace.nodeIds) && workspace.nodeIds.includes(nodeId)) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
+function syncEdgeRuntimeAndStore() {
+  if (!store) return;
+  const persistedEdges = allEdgesRuntime.map((edge) => ({ ...edge }));
+  store.edges = persistedEdges;
+  store.edgesById = new Map(persistedEdges.map((edge) => [edge.id, edge]));
+}
+
+function sanitizeAfterNodeDelete() {
+  hasAppliedWorkspace = false;
+  if (state.selectedNodeId && !allNodesRuntime.some((node) => node.id === state.selectedNodeId)) {
+    state.selectedNodeId = null;
+  }
+  if (newNodeInlineEditId && !allNodesRuntime.some((node) => node.id === newNodeInlineEditId)) {
+    newNodeInlineEditId = null;
+  }
+}
+
+function deleteNodeFromCurrentWorkspace(nodeId) {
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord || !nodeId) return false;
+  if (!Array.isArray(workspaceRecord.nodeIds)) {
+    workspaceRecord.nodeIds = [];
+  }
+  const hadNode = workspaceRecord.nodeIds.includes(nodeId);
+  if (!hadNode) return false;
+
+  const removedEdgeIds = new Set(
+    allEdgesRuntime
+      .filter((edge) => edge && (edge.sourceId === nodeId || edge.targetId === nodeId))
+      .map((edge) => edge.id)
+  );
+
+  workspaceRecord.nodeIds = workspaceRecord.nodeIds.filter((id) => id !== nodeId);
+  if (!Array.isArray(workspaceRecord.edgeIds)) {
+    workspaceRecord.edgeIds = [];
+  }
+  workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((edgeId) => !removedEdgeIds.has(edgeId));
+  syncWorkspaceRuntimeAndStore();
+  sanitizeAfterNodeDelete();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function deleteNodeGlobally(nodeId) {
+  if (!nodeId) return false;
+  const nodeExists = allNodesRuntime.some((node) => node.id === nodeId);
+  if (!nodeExists) return false;
+
+  allNodesRuntime = allNodesRuntime.filter((node) => node.id !== nodeId);
+  const removedEdgeIds = new Set(
+    allEdgesRuntime
+      .filter((edge) => edge && (edge.sourceId === nodeId || edge.targetId === nodeId))
+      .map((edge) => edge.id)
+  );
+  allEdgesRuntime = allEdgesRuntime.filter((edge) => !removedEdgeIds.has(edge.id));
+
+  workspaces.forEach((workspace) => {
+    if (Array.isArray(workspace.nodeIds)) {
+      workspace.nodeIds = workspace.nodeIds.filter((id) => id !== nodeId);
+    }
+    if (Array.isArray(workspace.edgeIds) && removedEdgeIds.size) {
+      workspace.edgeIds = workspace.edgeIds.filter((edgeId) => !removedEdgeIds.has(edgeId));
+    }
+  });
+
+  syncNodeRuntimeAndStore();
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  sanitizeAfterNodeDelete();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function requestNodeDelete(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node) return;
+  const membershipCount = getWorkspaceMembershipCount(nodeId);
+  let deleted = false;
+
+  if (membershipCount > 1) {
+    const scope = window.prompt(
+      `Delete "${node.label || node.id}" from current workspace only, or globally?\nType "w" for workspace-only or "g" for global delete.`,
+      "w"
+    );
+    if (!scope) return;
+    const normalizedScope = scope.trim().toLowerCase();
+    if (normalizedScope === "g") {
+      const confirmedGlobal = window.confirm(`Delete "${node.label || node.id}" globally from all workspaces?`);
+      if (!confirmedGlobal) return;
+      deleted = deleteNodeGlobally(nodeId);
+    } else if (normalizedScope === "w") {
+      deleted = deleteNodeFromCurrentWorkspace(nodeId);
+    } else {
+      return;
+    }
+  } else {
+    deleted = deleteNodeFromCurrentWorkspace(nodeId);
+  }
+
+  if (!deleted) return;
+  closeCreateNodeMenu();
+  renderAll();
+}
+
+function requestNodeEdit(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node) return;
+  if (node.type === "portal") return;
+  state.selectedNodeId = nodeId;
+  newNodeInlineEditId = nodeId;
+  closeCreateNodeMenu();
+  renderAll();
+}
+
+function openNodeActionMenu(clientX, clientY, nodeId) {
+  createNodeMenuOpen = true;
+  createNodeMenuMode = "node";
+  createNodeMenuNodeId = nodeId;
+  createNodeMenuClientX = clientX;
+  createNodeMenuClientY = clientY;
+  renderCreateNodeMenu();
+}
+
+function renderCreateNodeMenu() {
+  if (!createNodeMenuEl) return;
+  if (!createNodeMenuOpen) {
+    closeCreateNodeMenu();
+    return;
+  }
+
+  createNodeMenuEl.innerHTML = "";
+  if (createNodeMenuMode === "node") {
+    const node = getNodeById(createNodeMenuNodeId);
+    if (!node) {
+      closeCreateNodeMenu();
+      return;
+    }
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "map-create-menu-item";
+    if (node.type === "portal") {
+      editButton.classList.add("is-disabled");
+      editButton.textContent = "Edit link (coming soon)";
+      editButton.disabled = true;
+    } else {
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        requestNodeEdit(node.id);
+      });
+    }
+    createNodeMenuEl.appendChild(editButton);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "map-create-menu-item is-danger";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      requestNodeDelete(node.id);
+    });
+    createNodeMenuEl.appendChild(deleteButton);
+  } else {
+    CREATE_NODE_MENU_ITEMS.forEach((menuItem) => {
+      const itemButton = document.createElement("button");
+      itemButton.type = "button";
+      itemButton.className = "map-create-menu-item";
+      itemButton.textContent = menuItem.label;
+      itemButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        createNodeAtWorldPosition(menuItem.type, createNodeMenuWorldX, createNodeMenuWorldY);
+        closeCreateNodeMenu();
+      });
+      createNodeMenuEl.appendChild(itemButton);
+    });
+  }
+
+  createNodeMenuEl.classList.add("is-open");
+  createNodeMenuEl.setAttribute("aria-hidden", "false");
+  createNodeMenuEl.style.left = `${createNodeMenuClientX}px`;
+  createNodeMenuEl.style.top = `${createNodeMenuClientY}px`;
+
+  const menuRect = createNodeMenuEl.getBoundingClientRect();
+  const boundedX = Math.min(createNodeMenuClientX, window.innerWidth - menuRect.width - 8);
+  const boundedY = Math.min(createNodeMenuClientY, window.innerHeight - menuRect.height - 8);
+  createNodeMenuEl.style.left = `${Math.max(8, boundedX)}px`;
+  createNodeMenuEl.style.top = `${Math.max(8, boundedY)}px`;
+}
+
+function openCreateNodeMenu(clientX, clientY, worldX, worldY) {
+  createNodeMenuOpen = true;
+  createNodeMenuMode = "create";
+  createNodeMenuNodeId = null;
+  createNodeMenuClientX = clientX;
+  createNodeMenuClientY = clientY;
+  createNodeMenuWorldX = worldX;
+  createNodeMenuWorldY = worldY;
+  renderCreateNodeMenu();
+}
+
 function syncWorkspaceRuntimeAndStore() {
   enforceCollabUniqueness(workspaces);
   workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
@@ -646,6 +1015,9 @@ function sanitizeStateForWorkspace() {
   const hasNodes = nodes.length > 0;
   if (!state.selectedNodeId || !nodeById.has(state.selectedNodeId)) {
     state.selectedNodeId = hasNodes ? nodes[0].id : null;
+  }
+  if (!newNodeInlineEditId || !nodeById.has(newNodeInlineEditId)) {
+    newNodeInlineEditId = null;
   }
 
   state.expandedLocationIds = new Set(
@@ -812,6 +1184,18 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const workspaceMenuWrapEl = document.getElementById("workspaceMenu");
     const workspaceMenuBtnEl = document.getElementById("workspaceMenuBtn");
     const workspaceMenuPanelEl = document.getElementById("workspaceMenuPanel");
+    const createNodeMenuEl = document.createElement("div");
+    createNodeMenuEl.id = "mapCreateMenu";
+    createNodeMenuEl.className = "map-create-menu";
+    createNodeMenuEl.setAttribute("aria-hidden", "true");
+    document.body.appendChild(createNodeMenuEl);
+    const CREATE_NODE_MENU_ITEMS = [
+      { type: "location", label: "Location" },
+      { type: "process", label: "Process" },
+      { type: "standard", label: "Standard" },
+      { type: "portal", label: "Portal" },
+      { type: "handover", label: "Handover" }
+    ];
     let gridPatternInverse2x2 = null;
     if (bgGridPatternEl) {
       bgGridPatternEl.setAttribute("width", String(GRID_BG_SPACING_PX));
@@ -849,6 +1233,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     if (workspaceMenuBtnEl) {
       workspaceMenuBtnEl.addEventListener("click", (event) => {
         event.stopPropagation();
+        closeCreateNodeMenu();
         workspaceMenuOpen = !workspaceMenuOpen;
         userMenuOpen = false;
         if (!workspaceMenuOpen) {
@@ -867,6 +1252,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
+      if (createNodeMenuOpen) {
+        closeCreateNodeMenu();
+      }
       if (!workspaceMenuOpen) return;
       workspaceMenuOpen = false;
       userMenuOpen = false;
@@ -877,6 +1265,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     document.addEventListener("click", (event) => {
       const clickTarget = event.target;
+      if (
+        createNodeMenuOpen &&
+        clickTarget instanceof Node &&
+        createNodeMenuEl &&
+        !createNodeMenuEl.contains(clickTarget)
+      ) {
+        closeCreateNodeMenu();
+      }
       if (
         workspaceMenuOpen &&
         workspaceMenuWrapEl &&
@@ -978,6 +1374,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     if (viewportEl) {
       viewportEl.addEventListener("wheel", onViewportWheel, { passive: false });
       viewportEl.addEventListener("mousedown", onViewportMouseDown);
+      viewportEl.addEventListener("contextmenu", onViewportContextMenu);
     }
     window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("mouseup", onWindowMouseUp);
@@ -1408,10 +1805,34 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function onViewportWheel(event) {
+      closeCreateNodeMenu();
       event.preventDefault();
       const { mx, my } = getViewportPoint(event);
       const zoomMultiplier = Math.exp(-event.deltaY * ZOOM_SENSITIVITY);
       applyZoomAtCursor(mx, my, zoomMultiplier);
+    }
+
+    function onViewportContextMenu(event) {
+      if (!viewportEl) return;
+      if (!currentWorkspaceId) return;
+      const nodeId = getNodeIdFromTarget(event.target);
+      if (nodeId) {
+        event.preventDefault();
+        event.stopPropagation();
+        openNodeActionMenu(event.clientX, event.clientY, nodeId);
+        return;
+      }
+      if (!shouldOpenCreateNodeMenuForTarget(event.target)) {
+        closeCreateNodeMenu();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const { mx, my } = getViewportPoint(event);
+      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+      const worldX = (mx - camera.panX) / zoom;
+      const worldY = (my - camera.panY) / zoom;
+      openCreateNodeMenu(event.clientX, event.clientY, worldX, worldY);
     }
 
     function onViewportMouseDown(event) {
@@ -1419,6 +1840,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       if (dragState.isDragging) return;
       if (resizeState.isResizing) return;
       if (event.target.closest(".node-card")) return;
+      closeCreateNodeMenu();
       isPanning = true;
       lastPanClientX = event.clientX;
       lastPanClientY = event.clientY;
@@ -1695,6 +2117,66 @@ function applyWorkspaceData(workspaceId, options = {}) {
       return `status-${String(status).toLowerCase().replace(/\s+/g, "-")}`;
     }
 
+    function finishInlineNodeTitleEdit(nodeId, nextTitle, options = {}) {
+      const shouldCommit = options.commit !== false;
+      if (shouldCommit) {
+        setNodeTitleById(nodeId, nextTitle);
+      }
+      newNodeInlineEditId = null;
+      renderAll();
+    }
+
+    function createInlineNodeTitleInput(node) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "node-inline-title-input";
+      input.placeholder = "Untitled";
+      input.value = node.title || "";
+      input.maxLength = 120;
+
+      let resolved = false;
+      const commit = () => {
+        if (resolved) return;
+        resolved = true;
+        finishInlineNodeTitleEdit(node.id, input.value, { commit: true });
+      };
+      const cancel = () => {
+        if (resolved) return;
+        resolved = true;
+        finishInlineNodeTitleEdit(node.id, input.value, { commit: false });
+      };
+
+      input.addEventListener("mousedown", (event) => {
+        event.stopPropagation();
+      });
+      input.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          commit();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          cancel();
+        }
+      });
+      input.addEventListener("blur", () => {
+        commit();
+      });
+
+      requestAnimationFrame(() => {
+        if (!input.isConnected) return;
+        input.focus();
+        input.select();
+      });
+      return input;
+    }
+
     function getMedian(values, fallback = 1) {
       if (!Array.isArray(values) || values.length === 0) return fallback;
       const sorted = values
@@ -1734,13 +2216,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
     function getTypeShort(type) {
       const map = {
         location: "LOC",
-        experiment: "EXP",
-        protocol: "PROT",
-        project: "PRJ",
-        sample: "SAMP",
-        dataset: "DATA",
-        analysis: "ANL",
-        figure: "FIG",
+        process: "PRC",
+        standard: "STD",
         handover: "HND",
         portal: "PRTL"
       };
@@ -1907,25 +2384,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const visibleIdSet = new Set(visibleNodeIds);
       const lanes = {
         location: [],
-        experiment: [],
-        protocol: [],
-        project: [],
-        sample: [],
-        dataset: [],
-        analysis: [],
-        figure: [],
         handover: [],
+        process: [],
+        standard: [],
         portal: []
       };
       const laneOrder = [
         "location",
-        "experiment",
-        "protocol",
-        "project",
-        "sample",
-        "dataset",
-        "analysis",
-        "figure",
+        "process",
+        "standard",
         "handover",
         "portal"
       ];
@@ -2103,7 +2570,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     function getActiveExperimentsForLocation(locationId) {
       return nodes
-        .filter((node) => node.type === "experiment" && node.status === "active" && node.locationId === locationId)
+        .filter((node) => node.type === "process" && normalizeProcessStatus(node.status) === "Active" && node.locationId === locationId)
         .sort((a, b) => a.label.localeCompare(b.label));
     }
 
@@ -2112,12 +2579,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
       return locationNode.linkedNodeIds
         .map((id) => getNodeById(id))
         .filter((node) => node && node.type !== "location")
-        .filter((node) => node.type !== "experiment" || node.status === "active");
+        .filter((node) => node.type !== "process" || normalizeProcessStatus(node.status) === "Active");
     }
 
     function normalizeGlobalLocationSemantics() {
-      const protocolIds = new Set(nodes.filter((node) => node.type === "protocol").map((node) => node.id));
-      const experimentIds = new Set(nodes.filter((node) => node.type === "experiment").map((node) => node.id));
+      const standardIds = new Set(nodes.filter((node) => node.type === "standard").map((node) => node.id));
+      const processIds = new Set(nodes.filter((node) => node.type === "process").map((node) => node.id));
       const locationIds = new Set(nodes.filter((node) => node.type === "location").map((node) => node.id));
 
       nodes.forEach((node) => {
@@ -2135,38 +2602,38 @@ function applyWorkspaceData(workspaceId, options = {}) {
         });
 
       nodes
-        .filter((node) => node.type === "experiment")
-        .forEach((experimentNode) => {
-          experimentNode.status = "active";
+        .filter((node) => node.type === "process")
+        .forEach((processNode) => {
+          processNode.status = normalizeProcessStatus(processNode.status);
           // Strict parent->child direction keeps experiment nodes as leaves.
-          experimentNode.linkedNodeIds = [];
-          if (!locationIds.has(experimentNode.locationId)) {
-            experimentNode.locationId = null;
+          processNode.linkedNodeIds = [];
+          if (!locationIds.has(processNode.locationId)) {
+            processNode.locationId = null;
           }
         });
 
       nodes
-        .filter((node) => node.type === "protocol")
-        .forEach((protocolNode) => {
-          protocolNode.locationId = null;
-          protocolNode.linkedNodeIds = uniqueIds(protocolNode.linkedNodeIds.filter((id) => experimentIds.has(id)));
+        .filter((node) => node.type === "standard")
+        .forEach((standardNode) => {
+          standardNode.locationId = null;
+          standardNode.linkedNodeIds = uniqueIds(standardNode.linkedNodeIds.filter((id) => processIds.has(id)));
         });
 
       nodes
         .filter((node) => node.type === "portal")
         .forEach((portalNode) => {
           portalNode.locationId = null;
-          portalNode.linkedNodeIds = uniqueIds(portalNode.linkedNodeIds.filter((id) => protocolIds.has(id)));
+          portalNode.linkedNodeIds = uniqueIds(portalNode.linkedNodeIds.filter((id) => standardIds.has(id)));
         });
 
       // Keep location->experiment links for active experiments only.
       const activeExperimentsByLocation = new Map();
       nodes
-        .filter((node) => node.type === "experiment" && node.status === "active" && node.locationId)
-        .forEach((experimentNode) => {
-          const bucket = activeExperimentsByLocation.get(experimentNode.locationId) || [];
-          bucket.push(experimentNode.id);
-          activeExperimentsByLocation.set(experimentNode.locationId, bucket);
+        .filter((node) => node.type === "process" && normalizeProcessStatus(node.status) === "Active" && node.locationId)
+        .forEach((processNode) => {
+          const bucket = activeExperimentsByLocation.get(processNode.locationId) || [];
+          bucket.push(processNode.id);
+          activeExperimentsByLocation.set(processNode.locationId, bucket);
         });
 
       nodes
@@ -2176,9 +2643,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
             const linkedNode = getNodeById(linkedId);
             if (!linkedNode) return false;
             if (linkedNode.type === "location") return true;
-            if (linkedNode.type === "protocol") return true;
-            if (linkedNode.type === "experiment") {
-              return linkedNode.status === "active" && linkedNode.locationId === locationNode.id;
+            if (linkedNode.type === "standard") return true;
+            if (linkedNode.type === "process") {
+              return normalizeProcessStatus(linkedNode.status) === "Active" && linkedNode.locationId === locationNode.id;
             }
             // Location nodes should not directly link to portal nodes.
             return false;
@@ -2199,8 +2666,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
         if (node.type === "location") {
           node.kind = node.kind || "generic";
         }
-        if (node.type === "experiment" && !node.status) {
-          node.status = "active";
+        if (node.type === "process") {
+          node.status = normalizeProcessStatus(node.status);
         }
         if (node.locationId && !allIds.has(node.locationId)) {
           node.locationId = null;
@@ -2264,7 +2731,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       if (node.type === "location") {
         return node.id;
       }
-      if (node.type === "experiment" && node.locationId) {
+      if (node.type === "process" && node.locationId) {
         const loc = getNodeById(node.locationId);
         if (!loc || loc.type !== "location") return null;
         if (getChildLocations(loc.id).length > 0) {
@@ -2374,8 +2841,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
       main.appendChild(owner);
       row.appendChild(main);
 
-      if (node.type === "experiment") {
-        row.appendChild(createStatusPill(node.status));
+      if (node.type === "process") {
+        row.appendChild(createStatusPill(normalizeProcessStatus(node.status)));
       }
 
       row.addEventListener("click", () => selectNode(node.id));
@@ -2417,12 +2884,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
           const emptyActive = document.createElement("p");
           emptyActive.className = "muted";
           emptyActive.style.margin = "4px 0 4px 34px";
-          emptyActive.textContent = "No active experiments.";
+          emptyActive.textContent = "No active processes.";
           wrapper.appendChild(emptyActive);
         } else {
           const activeWrap = document.createElement("div");
           activeWrap.className = "location-indent";
-          active.forEach((experimentNode) => activeWrap.appendChild(createNodeRow(experimentNode)));
+          active.forEach((processNode) => activeWrap.appendChild(createNodeRow(processNode)));
           wrapper.appendChild(activeWrap);
         }
 
@@ -2741,8 +3208,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
       const activeAtExpanded = nodes
         .filter((node) =>
-          node.type === "experiment" &&
-          node.status === "active" &&
+          node.type === "process" &&
+          normalizeProcessStatus(node.status) === "Active" &&
           node.locationId === expandedLocationId &&
           visibleSet.has(node.id)
         )
@@ -2965,10 +3432,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
       });
 
       nodes
-        .filter((node) => node.type === "experiment" && node.status === "active" && node.locationId === expandedNode.id)
-        .forEach((experimentNode) => {
-          visibleNodeIds.add(experimentNode.id);
-          nonLocationSeedIds.add(experimentNode.id);
+        .filter((node) => node.type === "process" && normalizeProcessStatus(node.status) === "Active" && node.locationId === expandedNode.id)
+        .forEach((processNode) => {
+          visibleNodeIds.add(processNode.id);
+          nonLocationSeedIds.add(processNode.id);
         });
 
       [...nonLocationSeedIds].forEach((seedId) => {
@@ -2996,12 +3463,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
         buildLocationCardContent(card, node);
         return;
       }
-      if (node.type === "experiment") {
-        buildExperimentCardContent(card, node);
+      if (node.type === "process") {
+        buildProcessCardContent(card, node);
         return;
       }
-      if (node.type === "protocol") {
-        buildProtocolCardContent(card, node);
+      if (node.type === "standard") {
+        buildStandardCardContent(card, node);
         return;
       }
       if (node.type === "portal") {
@@ -3016,9 +3483,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const header = document.createElement("div");
       header.className = "node-card-header node-drag-handle";
 
-      const title = document.createElement("div");
-      title.className = "node-card-label";
-      title.textContent = node.label;
+      let title = null;
+      if (node.id === newNodeInlineEditId) {
+        title = createInlineNodeTitleInput(node);
+      } else {
+        title = document.createElement("div");
+        title.className = "node-card-label";
+        title.textContent = node.label;
+      }
 
       const owner = document.createElement("div");
       owner.className = "node-card-owner";
@@ -3118,13 +3590,18 @@ function applyWorkspaceData(workspaceId, options = {}) {
       card.appendChild(resizeHandle);
     }
 
-    function buildExperimentCardContent(card, node) {
+    function buildProcessCardContent(card, node) {
       const header = document.createElement("div");
       header.className = "node-card-header node-drag-handle";
 
-      const title = document.createElement("div");
-      title.className = "node-card-label";
-      title.textContent = node.label;
+      let title = null;
+      if (node.id === newNodeInlineEditId) {
+        title = createInlineNodeTitleInput(node);
+      } else {
+        title = document.createElement("div");
+        title.className = "node-card-label";
+        title.textContent = node.label;
+      }
       header.appendChild(title);
 
       const footer = document.createElement("div");
@@ -3134,10 +3611,16 @@ function applyWorkspaceData(workspaceId, options = {}) {
       owner.className = "node-card-owner";
       owner.textContent = node.owner;
 
-      const status = document.createElement("span");
-      const statusValue = node.status || "unknown";
-      status.className = `node-card-status ${getStatusClass(statusValue)}`.trim();
+      const status = document.createElement("button");
+      status.type = "button";
+      const statusValue = normalizeProcessStatus(node.status);
+      status.className = `node-card-status node-card-status-btn ${getStatusClass(statusValue)}`.trim();
       status.textContent = statusValue;
+      status.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        cycleProcessStatus(node.id);
+      });
 
       card.appendChild(header);
       footer.appendChild(owner);
@@ -3145,52 +3628,57 @@ function applyWorkspaceData(workspaceId, options = {}) {
       card.appendChild(footer);
     }
 
-    function buildProtocolCardContent(card, node) {
+    function buildStandardCardContent(card, node) {
       const header = document.createElement("div");
       header.className = "node-card-header node-drag-handle";
 
-      const title = document.createElement("div");
-      title.className = "node-card-label";
-      title.textContent = node.label;
+      let title = null;
+      if (node.id === newNodeInlineEditId) {
+        title = createInlineNodeTitleInput(node);
+      } else {
+        title = document.createElement("div");
+        title.className = "node-card-label";
+        title.textContent = node.label;
+      }
       header.appendChild(title);
 
       const footer = document.createElement("div");
       footer.className = "node-card-footer";
 
-      const badge = document.createElement("span");
-      badge.className = "node-card-type-badge";
-      badge.textContent = getTypeShort(node.type);
+      const owner = document.createElement("div");
+      owner.className = "node-card-owner";
+      owner.textContent = node.owner;
 
       card.appendChild(header);
-      footer.appendChild(badge);
+      footer.appendChild(owner);
       card.appendChild(footer);
     }
 
     function buildPortalCardContent(card, node) {
       const icon = document.createElement("div");
-      icon.className = "node-portal-icon";
-      icon.textContent = "↗";
-
-      const kind = document.createElement("div");
-      kind.className = "node-portal-kind";
-      kind.textContent = "Project";
-
-      const name = document.createElement("div");
-      name.className = "node-portal-name";
-      name.textContent = node.label.replace(/^Project:\s*/i, "");
+      icon.className = "node-portal-glyph";
+      const ring = document.createElement("span");
+      ring.className = "node-portal-glyph-ring";
+      const core = document.createElement("span");
+      core.className = "node-portal-glyph-core";
+      icon.appendChild(ring);
+      icon.appendChild(core);
 
       card.appendChild(icon);
-      card.appendChild(kind);
-      card.appendChild(name);
     }
 
     function buildArtifactCardContent(card, node) {
       const header = document.createElement("div");
       header.className = "node-card-header node-drag-handle";
 
-      const title = document.createElement("div");
-      title.className = "node-card-label";
-      title.textContent = node.label;
+      let title = null;
+      if (node.id === newNodeInlineEditId) {
+        title = createInlineNodeTitleInput(node);
+      } else {
+        title = document.createElement("div");
+        title.className = "node-card-label";
+        title.textContent = node.label;
+      }
       header.appendChild(title);
 
       const footer = document.createElement("div");
@@ -3206,7 +3694,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         status.className = `node-card-status ${getStatusClass(node.status)}`.trim();
         status.textContent = node.status;
         footer.appendChild(status);
-      } else {
+      } else if (node.type !== "handover") {
         const badge = document.createElement("span");
         badge.className = "node-card-type-badge";
         badge.textContent = getTypeShort(node.type);
@@ -3215,6 +3703,13 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
       card.appendChild(header);
       card.appendChild(footer);
+
+      if (node.type === "handover") {
+        const handoverCorner = document.createElement("div");
+        handoverCorner.className = "handover-corner-mark";
+        handoverCorner.setAttribute("aria-hidden", "true");
+        card.appendChild(handoverCorner);
+      }
     }
 
     function createSvgElement(tag, attrs = {}) {
@@ -3580,7 +4075,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
       if (node.type === "location") {
         expandLocationAncestors(node.id);
-      } else if (node.type === "experiment" && node.locationId) {
+      } else if (node.type === "process" && node.locationId) {
         expandLocationAncestors(node.locationId);
       }
 
@@ -3634,10 +4129,37 @@ function applyWorkspaceData(workspaceId, options = {}) {
         return;
       }
 
-      const title = document.createElement("h3");
-      title.className = "details-title";
-      title.textContent = selectedNode.label;
-      detailsPaneEl.appendChild(title);
+      if (selectedNode.type === "portal") {
+        const titleDisplay = document.createElement("h2");
+        titleDisplay.className = "details-title";
+        titleDisplay.textContent = selectedNode.title || selectedNode.label || "Portal";
+        detailsPaneEl.appendChild(titleDisplay);
+      } else {
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.className = "details-title-input";
+        titleInput.value = selectedNode.title || selectedNode.label || "";
+        titleInput.placeholder = "Untitled";
+        titleInput.maxLength = 120;
+        titleInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            titleInput.blur();
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            titleInput.value = selectedNode.title || "";
+            titleInput.blur();
+          }
+        });
+        titleInput.addEventListener("blur", () => {
+          const nextTitle = titleInput.value;
+          setNodeTitleById(selectedNode.id, nextTitle);
+          renderAll();
+        });
+        detailsPaneEl.appendChild(titleInput);
+      }
 
       const metaGrid = document.createElement("div");
       metaGrid.className = "meta-grid";
@@ -3664,10 +4186,27 @@ function applyWorkspaceData(workspaceId, options = {}) {
           appendMetaRow(metaGrid, "Parent location", "Top-level location");
         }
       } else {
-        appendMetaRow(metaGrid, "Status", selectedNode.type === "experiment" ? selectedNode.status : "N/A");
+        if (selectedNode.type === "process") {
+          const statusSelect = document.createElement("select");
+          statusSelect.className = "details-status-select";
+          PROCESS_STATUSES.forEach((statusOption) => {
+            const optionEl = document.createElement("option");
+            optionEl.value = statusOption;
+            optionEl.textContent = statusOption;
+            statusSelect.appendChild(optionEl);
+          });
+          statusSelect.value = normalizeProcessStatus(selectedNode.status);
+          statusSelect.addEventListener("change", () => {
+            setProcessStatusById(selectedNode.id, statusSelect.value);
+            renderAll();
+          });
+          appendMetaRow(metaGrid, "Status", statusSelect);
+        } else {
+          appendMetaRow(metaGrid, "Status", "N/A");
+        }
       }
 
-      if (selectedNode.type === "experiment") {
+      if (selectedNode.type === "process") {
         if (selectedNode.locationId) {
           const loc = getNodeById(selectedNode.locationId);
           if (loc) {
@@ -3937,6 +4476,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function renderWorkspace(workspaceId) {
+      closeCreateNodeMenu();
       const targetWorkspaceId = workspaceId || currentWorkspaceId;
       if (!hasAppliedWorkspace || appliedWorkspaceId !== targetWorkspaceId) {
         applyWorkspaceData(targetWorkspaceId, { sanitizeState: true });
@@ -3944,7 +4484,13 @@ function applyWorkspaceData(workspaceId, options = {}) {
         initializeGraphLayoutIfMissing();
         const visibleNodeIds = getVisibleNodeIdsForGlobalView();
         if (visibleNodeIds && visibleNodeIds.size) {
-          fitCameraToNodes(visibleNodeIds, 80);
+          if (suppressNextWorkspaceAutoFit) {
+            suppressNextWorkspaceAutoFit = false;
+          } else {
+            fitCameraToNodes(visibleNodeIds, 80);
+          }
+        } else {
+          suppressNextWorkspaceAutoFit = false;
         }
         appliedWorkspaceId = currentWorkspaceId;
         hasAppliedWorkspace = true;
