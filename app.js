@@ -642,7 +642,7 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
 function shouldOpenCreateNodeMenuForTarget(target) {
   if (!(target instanceof Element)) return false;
   return !target.closest(
-    ".node-card, .edge-line, .edge-hit, .edge-chevron, .lens-card, #workspaceMenu, .panel, .panel-pill, .notif-wrap, .layout-mode-controls, #mapCreateMenu"
+    ".node-card, .edge-line, .edge-hit, .edge-chevron, .lens-card, #workspaceMenu, .panel, .panel-pill, .notif-wrap, .layout-mode-controls, #mapCreateMenu, #edgeCreateHandle, #edgeActionMenu"
   );
 }
 
@@ -662,6 +662,815 @@ function closeCreateNodeMenu() {
   createNodeMenuEl.classList.remove("is-open");
   createNodeMenuEl.setAttribute("aria-hidden", "true");
   createNodeMenuEl.innerHTML = "";
+}
+
+function clearEdgeHoverIntentTimer() {
+  if (edgeHoverIntent.timerId !== null) {
+    window.clearTimeout(edgeHoverIntent.timerId);
+    edgeHoverIntent.timerId = null;
+  }
+}
+
+function clearEdgeHoverIntent() {
+  clearEdgeHoverIntentTimer();
+  edgeHoverIntent = {
+    armed: false,
+    timerId: null,
+    startedAt: 0,
+    candidateNodeId: null,
+    candidateAnchorX: 0,
+    candidateAnchorY: 0,
+    candidateAngleDeg: 0,
+    startClientX: 0,
+    startClientY: 0
+  };
+}
+
+function clearEdgeActionIntentTimer() {
+  if (edgeActionIntent.timerId !== null) {
+    window.clearTimeout(edgeActionIntent.timerId);
+    edgeActionIntent.timerId = null;
+  }
+}
+
+function clearEdgeActionIntent() {
+  clearEdgeActionIntentTimer();
+  edgeActionIntent = {
+    armed: false,
+    timerId: null,
+    edgeId: null,
+    sourceId: null,
+    targetId: null,
+    startClientX: 0,
+    startClientY: 0,
+    candidateClientX: 0,
+    candidateClientY: 0,
+    startX: 0,
+    startY: 0,
+    controlX: 0,
+    controlY: 0,
+    endX: 0,
+    endY: 0
+  };
+}
+
+function clearEdgeActionHideTimer() {
+  if (edgeActionHideTimerId !== null) {
+    window.clearTimeout(edgeActionHideTimerId);
+    edgeActionHideTimerId = null;
+  }
+}
+
+function updateEdgeActionMenuVisual() {
+  if (!edgeActionMenuEl || !edgeActionReverseBtnEl || !edgeActionDeleteBtnEl) return;
+  if (!edgeActionMenuState.visible || !edgeActionMenuState.edgeId) {
+    edgeActionMenuEl.classList.remove("is-visible");
+    edgeActionMenuEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+  if (!edgeById.has(edgeActionMenuState.edgeId)) {
+    hideEdgeActionMenu({ clearIntent: true });
+    return;
+  }
+  const nx = Number.isFinite(edgeActionMenuState.normalX) ? edgeActionMenuState.normalX : 0;
+  const ny = Number.isFinite(edgeActionMenuState.normalY) ? edgeActionMenuState.normalY : -1;
+  const len = Math.sqrt((nx * nx) + (ny * ny)) || 1;
+  const ux = nx / len;
+  const uy = ny / len;
+  const ax = edgeActionMenuState.anchorX;
+  const ay = edgeActionMenuState.anchorY;
+  edgeActionReverseBtnEl.style.left = `${ax - (ux * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
+  edgeActionReverseBtnEl.style.top = `${ay - (uy * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
+  edgeActionDeleteBtnEl.style.left = `${ax + (ux * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
+  edgeActionDeleteBtnEl.style.top = `${ay + (uy * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
+  edgeActionMenuEl.classList.add("is-visible");
+  edgeActionMenuEl.setAttribute("aria-hidden", "false");
+}
+
+function showEdgeActionMenu(nextState) {
+  edgeActionMenuState = {
+    visible: true,
+    edgeId: nextState?.edgeId || null,
+    sourceId: nextState?.sourceId || null,
+    targetId: nextState?.targetId || null,
+    anchorX: Number.isFinite(nextState?.anchorX) ? nextState.anchorX : 0,
+    anchorY: Number.isFinite(nextState?.anchorY) ? nextState.anchorY : 0,
+    normalX: Number.isFinite(nextState?.normalX) ? nextState.normalX : 0,
+    normalY: Number.isFinite(nextState?.normalY) ? nextState.normalY : -1
+  };
+  updateEdgeActionMenuVisual();
+}
+
+function hideEdgeActionMenu(options = {}) {
+  clearEdgeActionHideTimer();
+  if (options.keepPinned !== true) {
+    edgeActionPinned = false;
+  }
+  edgeActionMenuState = {
+    visible: false,
+    edgeId: null,
+    sourceId: null,
+    targetId: null,
+    anchorX: 0,
+    anchorY: 0,
+    normalX: 0,
+    normalY: -1
+  };
+  updateEdgeActionMenuVisual();
+  if (options.clearIntent !== false) {
+    clearEdgeActionIntent();
+  }
+}
+
+function scheduleEdgeActionHide() {
+  clearEdgeActionHideTimer();
+  if (edgeActionPinned) return;
+  edgeActionHideTimerId = window.setTimeout(() => {
+    edgeActionHideTimerId = null;
+    if (edgeActionPinned) return;
+    hideEdgeActionMenu({ clearIntent: false });
+  }, EDGE_ACTION_HIDE_GRACE_MS);
+}
+
+function updateEdgeCreateHandleVisual() {
+  if (!edgeCreateHandleEl) return;
+  if (!edgeCreateHover.visible || !edgeCreateHover.nodeId || edgeCreateDraft.active) {
+    edgeCreateHandleEl.classList.remove("is-visible");
+    edgeCreateHandleEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+  edgeCreateHandleEl.style.left = `${edgeCreateHover.anchorX}px`;
+  edgeCreateHandleEl.style.top = `${edgeCreateHover.anchorY}px`;
+  edgeCreateHandleEl.style.transform = `translate(-50%, -50%) rotate(${edgeCreateHover.angleDeg}deg)`;
+  edgeCreateHandleEl.classList.add("is-visible");
+  edgeCreateHandleEl.setAttribute("aria-hidden", "false");
+}
+
+function setEdgeCreateHover(nextHover) {
+  edgeCreateHover = {
+    visible: !!nextHover?.visible,
+    nodeId: nextHover?.nodeId || null,
+    anchorX: Number.isFinite(nextHover?.anchorX) ? nextHover.anchorX : 0,
+    anchorY: Number.isFinite(nextHover?.anchorY) ? nextHover.anchorY : 0,
+    angleDeg: Number.isFinite(nextHover?.angleDeg) ? nextHover.angleDeg : 0
+  };
+  if (edgeCreateHover.visible) {
+    hideEdgeActionMenu({ clearIntent: true });
+  }
+  updateEdgeCreateHandleVisual();
+}
+
+function clearEdgeCreateHover() {
+  setEdgeCreateHover({ visible: false, nodeId: null, anchorX: 0, anchorY: 0, angleDeg: 0 });
+}
+
+function setEdgeCreateHighlight(nodeId, className, apply) {
+  if (!nodeId) return;
+  const card = lastRenderedCardsById.get(nodeId);
+  if (card) {
+    card.classList.toggle(className, !!apply);
+  }
+}
+
+function applyEdgeCreateHighlights(sourceId, targetId) {
+  if (edgeCreateHighlightedSourceId && edgeCreateHighlightedSourceId !== sourceId) {
+    setEdgeCreateHighlight(edgeCreateHighlightedSourceId, "edge-create-source", false);
+    edgeCreateHighlightedSourceId = null;
+  }
+  if (edgeCreateHighlightedTargetId && edgeCreateHighlightedTargetId !== targetId) {
+    setEdgeCreateHighlight(edgeCreateHighlightedTargetId, "edge-create-target", false);
+    edgeCreateHighlightedTargetId = null;
+  }
+  if (sourceId) {
+    setEdgeCreateHighlight(sourceId, "edge-create-source", true);
+    edgeCreateHighlightedSourceId = sourceId;
+  }
+  if (targetId) {
+    setEdgeCreateHighlight(targetId, "edge-create-target", true);
+    edgeCreateHighlightedTargetId = targetId;
+  }
+}
+
+function clearEdgeCreateHighlights() {
+  if (edgeCreateHighlightedSourceId) {
+    setEdgeCreateHighlight(edgeCreateHighlightedSourceId, "edge-create-source", false);
+    edgeCreateHighlightedSourceId = null;
+  }
+  if (edgeCreateHighlightedTargetId) {
+    setEdgeCreateHighlight(edgeCreateHighlightedTargetId, "edge-create-target", false);
+    edgeCreateHighlightedTargetId = null;
+  }
+}
+
+function cancelEdgeCreateDraft(options = {}) {
+  if (!edgeCreateDraft.active) return;
+  edgeCreateDraft = {
+    active: false,
+    sourceId: null,
+    startX: 0,
+    startY: 0,
+    endX: 0,
+    endY: 0,
+    targetId: null
+  };
+  clearEdgeCreateHighlights();
+  if (options.clearHover !== false) {
+    clearEdgeCreateHover();
+  }
+  if (options.redraw !== false) {
+    requestRender({ edges: true });
+  }
+}
+
+function cancelEdgeCreateInteractions(options = {}) {
+  clearEdgeHoverIntent();
+  if (edgeCreateDraft.active) {
+    cancelEdgeCreateDraft({ clearHover: true, redraw: options.redraw !== false });
+  } else if (options.clearHover !== false) {
+    clearEdgeCreateHover();
+  }
+  cancelEdgeActionInteractions();
+}
+
+function cancelEdgeActionInteractions() {
+  clearEdgeActionIntent();
+  clearEdgeActionHideTimer();
+  edgeActionPinned = false;
+  hideEdgeActionMenu({ clearIntent: false });
+}
+
+function getWorldPointFromClient(clientX, clientY) {
+  if (!viewportEl) return { worldX: 0, worldY: 0 };
+  const viewportRect = viewportEl.getBoundingClientRect();
+  const mx = clientX - viewportRect.left;
+  const my = clientY - viewportRect.top;
+  const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+  return {
+    worldX: (mx - camera.panX) / zoom,
+    worldY: (my - camera.panY) / zoom
+  };
+}
+
+function isPointNearNodeBorder(node, frame, worldX, worldY, thresholdPx = EDGE_HANDLE_BORDER_HIT_PX) {
+  if (!node || !frame) return false;
+  if (node.type === "portal") {
+    const cx = frame.x + (frame.w / 2);
+    const cy = frame.y + (frame.h / 2);
+    const radius = Math.min(frame.w, frame.h) / 2;
+    const dx = worldX - cx;
+    const dy = worldY - cy;
+    const dist = Math.sqrt((dx * dx) + (dy * dy));
+    return Math.abs(dist - radius) <= thresholdPx;
+  }
+  if (
+    worldX < frame.x - thresholdPx ||
+    worldX > frame.x + frame.w + thresholdPx ||
+    worldY < frame.y - thresholdPx ||
+    worldY > frame.y + frame.h + thresholdPx
+  ) {
+    return false;
+  }
+  const distLeft = Math.abs(worldX - frame.x);
+  const distRight = Math.abs(worldX - (frame.x + frame.w));
+  const distTop = Math.abs(worldY - frame.y);
+  const distBottom = Math.abs(worldY - (frame.y + frame.h));
+  return Math.min(distLeft, distRight, distTop, distBottom) <= thresholdPx;
+}
+
+function isPointerNearAnyVisibleNodeBorder(clientX, clientY) {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+  if (!lastVisibleNodeFrames || !lastVisibleNodeFrames.size) return false;
+  const { worldX, worldY } = getWorldPointFromClient(clientX, clientY);
+  for (const [nodeId, frame] of lastVisibleNodeFrames.entries()) {
+    const node = getNodeById(nodeId);
+    if (!node || !frame) continue;
+    if (isPointNearNodeBorder(node, frame, worldX, worldY, EDGE_HANDLE_BORDER_HIT_PX)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getClosestPointAndNormalOnQuadratic(x1, y1, cx, cy, x2, y2, pointX, pointY) {
+  let best = null;
+  const SAMPLE_COUNT = 24;
+  for (let index = 0; index <= SAMPLE_COUNT; index += 1) {
+    const t = index / SAMPLE_COUNT;
+    const sample = getQuadraticPointAndTangentAt(x1, y1, cx, cy, x2, y2, t);
+    const dx = sample.px - pointX;
+    const dy = sample.py - pointY;
+    const distSq = (dx * dx) + (dy * dy);
+    if (!best || distSq < best.distSq) {
+      best = {
+        t,
+        distSq,
+        px: sample.px,
+        py: sample.py,
+        tx: sample.tx,
+        ty: sample.ty
+      };
+    }
+  }
+  if (!best) {
+    return { px: x1, py: y1, normalX: 0, normalY: -1 };
+  }
+  const tangentLength = Math.sqrt((best.tx * best.tx) + (best.ty * best.ty)) || 1;
+  return {
+    px: best.px,
+    py: best.py,
+    normalX: -(best.ty / tangentLength),
+    normalY: best.tx / tangentLength
+  };
+}
+
+function buildEdgeActionCandidate(event, edgeMeta) {
+  if (!event || !edgeMeta || !edgeMeta.edgeId) return null;
+  const { worldX, worldY } = getWorldPointFromClient(event.clientX, event.clientY);
+  const closest = getClosestPointAndNormalOnQuadratic(
+    edgeMeta.startX,
+    edgeMeta.startY,
+    edgeMeta.controlX,
+    edgeMeta.controlY,
+    edgeMeta.endX,
+    edgeMeta.endY,
+    worldX,
+    worldY
+  );
+  return {
+    edgeId: edgeMeta.edgeId,
+    sourceId: edgeMeta.sourceId,
+    targetId: edgeMeta.targetId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    anchorX: closest.px,
+    anchorY: closest.py,
+    normalX: closest.normalX,
+    normalY: closest.normalY,
+    startX: edgeMeta.startX,
+    startY: edgeMeta.startY,
+    controlX: edgeMeta.controlX,
+    controlY: edgeMeta.controlY,
+    endX: edgeMeta.endX,
+    endY: edgeMeta.endY
+  };
+}
+
+function isEdgeActionBlocked() {
+  return (
+    edgeCreateDraft.active ||
+    isPanning ||
+    dragState.isDragging ||
+    resizeState.isResizing ||
+    createNodeMenuOpen ||
+    workspaceMenuOpen ||
+    userMenuOpen
+  );
+}
+
+function startEdgeActionIntent(candidate) {
+  clearEdgeActionIntent();
+  edgeActionIntent = {
+    armed: true,
+    timerId: null,
+    edgeId: candidate.edgeId,
+    sourceId: candidate.sourceId,
+    targetId: candidate.targetId,
+    startClientX: candidate.clientX,
+    startClientY: candidate.clientY,
+    candidateClientX: candidate.clientX,
+    candidateClientY: candidate.clientY,
+    startX: candidate.startX,
+    startY: candidate.startY,
+    controlX: candidate.controlX,
+    controlY: candidate.controlY,
+    endX: candidate.endX,
+    endY: candidate.endY
+  };
+  edgeActionIntent.timerId = window.setTimeout(() => {
+    edgeActionIntent.timerId = null;
+    if (!edgeActionIntent.armed || isEdgeActionBlocked()) {
+      return;
+    }
+    if (isPointerNearAnyVisibleNodeBorder(edgeActionIntent.candidateClientX, edgeActionIntent.candidateClientY)) {
+      hideEdgeActionMenu({ clearIntent: true });
+      return;
+    }
+    const candidateNow = buildEdgeActionCandidate(
+      {
+        clientX: edgeActionIntent.candidateClientX,
+        clientY: edgeActionIntent.candidateClientY
+      },
+      {
+        edgeId: edgeActionIntent.edgeId,
+        sourceId: edgeActionIntent.sourceId,
+        targetId: edgeActionIntent.targetId,
+        startX: edgeActionIntent.startX,
+        startY: edgeActionIntent.startY,
+        controlX: edgeActionIntent.controlX,
+        controlY: edgeActionIntent.controlY,
+        endX: edgeActionIntent.endX,
+        endY: edgeActionIntent.endY
+      }
+    );
+    if (!candidateNow) return;
+    showEdgeActionMenu(candidateNow);
+  }, EDGE_ACTION_INTENT_DELAY_MS);
+}
+
+function updateEdgeActionIntent(candidate) {
+  if (!candidate) {
+    clearEdgeActionIntent();
+    if (!edgeActionPinned) {
+      scheduleEdgeActionHide();
+    }
+    return;
+  }
+  if (isPointerNearAnyVisibleNodeBorder(candidate.clientX, candidate.clientY)) {
+    clearEdgeActionIntent();
+    if (!edgeActionPinned) {
+      hideEdgeActionMenu({ clearIntent: false });
+    }
+    return;
+  }
+  clearEdgeActionHideTimer();
+  if (edgeActionMenuState.visible && edgeActionMenuState.edgeId === candidate.edgeId) {
+    showEdgeActionMenu(candidate);
+    return;
+  }
+  if (!edgeActionIntent.armed || edgeActionIntent.edgeId !== candidate.edgeId) {
+    startEdgeActionIntent(candidate);
+    return;
+  }
+  const dx = candidate.clientX - edgeActionIntent.startClientX;
+  const dy = candidate.clientY - edgeActionIntent.startClientY;
+  if (Math.sqrt((dx * dx) + (dy * dy)) > EDGE_HANDLE_INTENT_MOVE_PX) {
+    startEdgeActionIntent(candidate);
+    return;
+  }
+  edgeActionIntent.candidateClientX = candidate.clientX;
+  edgeActionIntent.candidateClientY = candidate.clientY;
+  edgeActionIntent.startX = candidate.startX;
+  edgeActionIntent.startY = candidate.startY;
+  edgeActionIntent.controlX = candidate.controlX;
+  edgeActionIntent.controlY = candidate.controlY;
+  edgeActionIntent.endX = candidate.endX;
+  edgeActionIntent.endY = candidate.endY;
+}
+
+function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
+  if (!node || !frame) return { x: worldX, y: worldY };
+  if (node.type === "portal") {
+    const cx = frame.x + (frame.w / 2);
+    const cy = frame.y + (frame.h / 2);
+    const radius = Math.min(frame.w, frame.h) / 2;
+    const dx = worldX - cx;
+    const dy = worldY - cy;
+    const len = Math.sqrt((dx * dx) + (dy * dy)) || 1;
+    return {
+      x: cx + ((dx / len) * radius),
+      y: cy + ((dy / len) * radius)
+    };
+  }
+  const left = frame.x;
+  const right = frame.x + frame.w;
+  const top = frame.y;
+  const bottom = frame.y + frame.h;
+  const distLeft = Math.abs(worldX - left);
+  const distRight = Math.abs(worldX - right);
+  const distTop = Math.abs(worldY - top);
+  const distBottom = Math.abs(worldY - bottom);
+  const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+  if (minDist === distLeft) {
+    return { x: left, y: clamp(worldY, top, bottom) };
+  }
+  if (minDist === distRight) {
+    return { x: right, y: clamp(worldY, top, bottom) };
+  }
+  if (minDist === distTop) {
+    return { x: clamp(worldX, left, right), y: top };
+  }
+  return { x: clamp(worldX, left, right), y: bottom };
+}
+
+function getBorderAnchorToward(node, frame, towardX, towardY) {
+  if (!node || !frame) return { x: towardX, y: towardY };
+  if (node.type === "portal") {
+    const cx = frame.x + (frame.w / 2);
+    const cy = frame.y + (frame.h / 2);
+    const radius = Math.min(frame.w, frame.h) / 2;
+    const dx = towardX - cx;
+    const dy = towardY - cy;
+    const len = Math.sqrt((dx * dx) + (dy * dy)) || 1;
+    return {
+      x: cx + ((dx / len) * radius),
+      y: cy + ((dy / len) * radius)
+    };
+  }
+  return getBorderPointToward(frame, towardX, towardY);
+}
+
+function getAnchorAngleFromCenter(frame, anchorX, anchorY) {
+  const cx = frame.x + (frame.w / 2);
+  const cy = frame.y + (frame.h / 2);
+  return Math.atan2(anchorY - cy, anchorX - cx) * (180 / Math.PI);
+}
+
+function resolveEdgeHoverCandidate(event) {
+  if (!(event.target instanceof Element)) return null;
+  if (event.target === edgeCreateHandleEl || event.target.closest("#edgeCreateHandle")) {
+    if (edgeCreateHover.visible && edgeCreateHover.nodeId) {
+      return {
+        nodeId: edgeCreateHover.nodeId,
+        anchorX: edgeCreateHover.anchorX,
+        anchorY: edgeCreateHover.anchorY,
+        angleDeg: edgeCreateHover.angleDeg,
+        clientX: event.clientX,
+        clientY: event.clientY
+      };
+    }
+    return null;
+  }
+  const nodeId = getNodeIdFromTarget(event.target);
+  if (!nodeId) return null;
+  const node = getNodeById(nodeId);
+  const frame = lastVisibleNodeFrames.get(nodeId);
+  if (!node || !frame) return null;
+  const { worldX, worldY } = getWorldPointFromClient(event.clientX, event.clientY);
+  if (!isPointNearNodeBorder(node, frame, worldX, worldY, EDGE_HANDLE_BORDER_HIT_PX)) {
+    return null;
+  }
+  const anchor = getBorderAnchorFromPointer(node, frame, worldX, worldY);
+  return {
+    nodeId,
+    anchorX: anchor.x,
+    anchorY: anchor.y,
+    angleDeg: getAnchorAngleFromCenter(frame, anchor.x, anchor.y),
+    clientX: event.clientX,
+    clientY: event.clientY
+  };
+}
+
+function startEdgeHoverIntent(candidate) {
+  clearEdgeHoverIntent();
+  edgeHoverIntent = {
+    armed: true,
+    timerId: null,
+    startedAt: Date.now(),
+    candidateNodeId: candidate.nodeId,
+    candidateAnchorX: candidate.anchorX,
+    candidateAnchorY: candidate.anchorY,
+    candidateAngleDeg: candidate.angleDeg,
+    startClientX: candidate.clientX,
+    startClientY: candidate.clientY
+  };
+  edgeHoverIntent.timerId = window.setTimeout(() => {
+    edgeHoverIntent.timerId = null;
+    if (
+      !edgeHoverIntent.armed ||
+      edgeCreateDraft.active ||
+      isPanning ||
+      dragState.isDragging ||
+      resizeState.isResizing ||
+      createNodeMenuOpen ||
+      workspaceMenuOpen ||
+      userMenuOpen
+    ) {
+      return;
+    }
+    const frame = lastVisibleNodeFrames.get(edgeHoverIntent.candidateNodeId);
+    if (!frame) return;
+    setEdgeCreateHover({
+      visible: true,
+      nodeId: edgeHoverIntent.candidateNodeId,
+      anchorX: edgeHoverIntent.candidateAnchorX,
+      anchorY: edgeHoverIntent.candidateAnchorY,
+      angleDeg: edgeHoverIntent.candidateAngleDeg
+    });
+  }, EDGE_HANDLE_INTENT_DELAY_MS);
+}
+
+function updateEdgeHoverIntent(candidate) {
+  if (!candidate) {
+    clearEdgeHoverIntent();
+    clearEdgeCreateHover();
+    return;
+  }
+  if (!edgeHoverIntent.armed || edgeHoverIntent.candidateNodeId !== candidate.nodeId) {
+    clearEdgeCreateHover();
+    startEdgeHoverIntent(candidate);
+    return;
+  }
+  const dx = candidate.clientX - edgeHoverIntent.startClientX;
+  const dy = candidate.clientY - edgeHoverIntent.startClientY;
+  if (Math.sqrt((dx * dx) + (dy * dy)) > EDGE_HANDLE_INTENT_MOVE_PX) {
+    clearEdgeCreateHover();
+    startEdgeHoverIntent(candidate);
+    return;
+  }
+  edgeHoverIntent.candidateAnchorX = candidate.anchorX;
+  edgeHoverIntent.candidateAnchorY = candidate.anchorY;
+  edgeHoverIntent.candidateAngleDeg = candidate.angleDeg;
+  if (edgeCreateHover.visible && edgeCreateHover.nodeId === candidate.nodeId) {
+    setEdgeCreateHover({
+      visible: true,
+      nodeId: candidate.nodeId,
+      anchorX: candidate.anchorX,
+      anchorY: candidate.anchorY,
+      angleDeg: candidate.angleDeg
+    });
+  }
+}
+
+function generateGlobalEdgeId(sourceId, targetId) {
+  const existingIds = new Set(allEdgesRuntime.map((edge) => edge.id));
+  let candidate = `edge-${sourceId}-${targetId}`;
+  if (!existingIds.has(candidate)) return candidate;
+  let suffix = 2;
+  while (existingIds.has(`${candidate}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${candidate}-${suffix}`;
+}
+
+function workspaceHasEdgeBetweenNodes(workspaceRecord, nodeAId, nodeBId, options = {}) {
+  if (!workspaceRecord || !Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.length) {
+    return false;
+  }
+  if (!nodeAId || !nodeBId || nodeAId === nodeBId) return false;
+  const excludedEdgeId = options.excludeEdgeId || null;
+  const scopedIds = new Set(workspaceRecord.edgeIds);
+  return allEdgesRuntime.some((edge) =>
+    scopedIds.has(edge.id) &&
+    edge.id !== excludedEdgeId &&
+    (
+      (edge.sourceId === nodeAId && edge.targetId === nodeBId) ||
+      (edge.sourceId === nodeBId && edge.targetId === nodeAId)
+    )
+  );
+}
+
+function countWorkspaceReferencesForEdge(edgeId) {
+  if (!edgeId) return 0;
+  let count = 0;
+  workspaces.forEach((workspace) => {
+    if (Array.isArray(workspace.edgeIds) && workspace.edgeIds.includes(edgeId)) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
+function createEdgeInCurrentWorkspace(sourceId, targetId) {
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord) return false;
+  if (!sourceId || !targetId || sourceId === targetId) return false;
+  if (!nodeById.has(sourceId) || !nodeById.has(targetId)) return false;
+  if (workspaceHasEdgeBetweenNodes(workspaceRecord, sourceId, targetId)) return false;
+  if (!Array.isArray(workspaceRecord.edgeIds)) {
+    workspaceRecord.edgeIds = [];
+  }
+  const sourceNode = nodeById.get(sourceId);
+  const targetNode = nodeById.get(targetId);
+  const nextEdge = {
+    id: generateGlobalEdgeId(sourceId, targetId),
+    sourceId,
+    targetId,
+    kind: inferEdgeKindForPair(sourceNode, targetNode)
+  };
+  allEdgesRuntime.push(nextEdge);
+  workspaceRecord.edgeIds.push(nextEdge.id);
+  edges.push({ ...nextEdge });
+  rebuildEdgeIndexes();
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function deleteEdgeFromCurrentWorkspace(edgeId) {
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord || !edgeId) return false;
+  if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) {
+    return false;
+  }
+  workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((id) => id !== edgeId);
+  if (countWorkspaceReferencesForEdge(edgeId) === 0) {
+    allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
+  }
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  persistStoreToLocalStorage();
+  hasAppliedWorkspace = false;
+  return true;
+}
+
+function reverseEdgeInCurrentWorkspace(edgeId) {
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord || !edgeId) return false;
+  if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) {
+    return false;
+  }
+  const edgeIndex = allEdgesRuntime.findIndex((edge) => edge.id === edgeId);
+  if (edgeIndex === -1) return false;
+  const edgeRecord = allEdgesRuntime[edgeIndex];
+  if (!edgeRecord || !edgeRecord.sourceId || !edgeRecord.targetId) return false;
+  if (
+    workspaceHasEdgeBetweenNodes(
+      workspaceRecord,
+      edgeRecord.targetId,
+      edgeRecord.sourceId,
+      { excludeEdgeId: edgeRecord.id }
+    )
+  ) {
+    return false;
+  }
+
+  const sharedCount = countWorkspaceReferencesForEdge(edgeId);
+  if (sharedCount > 1) {
+    const sourceNode = nodeById.get(edgeRecord.targetId);
+    const targetNode = nodeById.get(edgeRecord.sourceId);
+    const nextEdge = {
+      ...edgeRecord,
+      id: generateGlobalEdgeId(edgeRecord.targetId, edgeRecord.sourceId),
+      sourceId: edgeRecord.targetId,
+      targetId: edgeRecord.sourceId,
+      kind: inferEdgeKindForPair(sourceNode, targetNode)
+    };
+    allEdgesRuntime.push(nextEdge);
+    workspaceRecord.edgeIds = workspaceRecord.edgeIds.map((id) => (id === edgeId ? nextEdge.id : id));
+  } else {
+    const nextSourceId = edgeRecord.targetId;
+    const nextTargetId = edgeRecord.sourceId;
+    const sourceNode = nodeById.get(nextSourceId);
+    const targetNode = nodeById.get(nextTargetId);
+    allEdgesRuntime[edgeIndex] = {
+      ...edgeRecord,
+      sourceId: nextSourceId,
+      targetId: nextTargetId,
+      kind: inferEdgeKindForPair(sourceNode, targetNode)
+    };
+  }
+
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  persistStoreToLocalStorage();
+  hasAppliedWorkspace = false;
+  return true;
+}
+
+function requestEdgeDelete(edgeId) {
+  if (!edgeId) return;
+  const deleted = deleteEdgeFromCurrentWorkspace(edgeId);
+  if (!deleted) return;
+  hideEdgeActionMenu({ clearIntent: true });
+  renderAll();
+}
+
+function requestEdgeReverse(edgeId) {
+  if (!edgeId) return;
+  const reversed = reverseEdgeInCurrentWorkspace(edgeId);
+  if (!reversed) return;
+  hideEdgeActionMenu({ clearIntent: true });
+  renderAll();
+}
+
+function updateEdgeDraftFromPointer(event) {
+  if (!edgeCreateDraft.active) return false;
+  const { worldX, worldY } = getWorldPointFromClient(event.clientX, event.clientY);
+  edgeCreateDraft.endX = worldX;
+  edgeCreateDraft.endY = worldY;
+  edgeCreateDraft.targetId = null;
+  if (event.target instanceof Element) {
+    const targetId = getNodeIdFromTarget(event.target);
+    if (targetId && targetId !== edgeCreateDraft.sourceId) {
+      const sourceNode = getNodeById(edgeCreateDraft.sourceId);
+      const targetNode = getNodeById(targetId);
+      const sourceFrame = lastVisibleNodeFrames.get(edgeCreateDraft.sourceId);
+      const targetFrame = lastVisibleNodeFrames.get(targetId);
+      if (sourceNode && targetNode && sourceFrame && targetFrame) {
+        const sourceCx = sourceFrame.x + (sourceFrame.w / 2);
+        const sourceCy = sourceFrame.y + (sourceFrame.h / 2);
+        const targetAnchor = getBorderAnchorToward(targetNode, targetFrame, sourceCx, sourceCy);
+        edgeCreateDraft.endX = targetAnchor.x;
+        edgeCreateDraft.endY = targetAnchor.y;
+        edgeCreateDraft.targetId = targetId;
+      }
+    }
+  }
+  applyEdgeCreateHighlights(edgeCreateDraft.sourceId, edgeCreateDraft.targetId);
+  requestRender({ edges: true });
+  return true;
+}
+
+function finalizeEdgeCreateDraft(event) {
+  if (!edgeCreateDraft.active) return false;
+  if (event && event.clientX !== undefined && event.clientY !== undefined) {
+    updateEdgeDraftFromPointer(event);
+  }
+  const { sourceId, targetId } = edgeCreateDraft;
+  const created = !!(sourceId && targetId && createEdgeInCurrentWorkspace(sourceId, targetId));
+  cancelEdgeCreateDraft({ clearHover: true, redraw: true });
+  return created;
 }
 
 function getWorkspaceMembershipCount(nodeId) {
@@ -790,6 +1599,7 @@ function requestNodeEdit(nodeId) {
 }
 
 function openNodeActionMenu(clientX, clientY, nodeId) {
+  cancelEdgeCreateInteractions();
   createNodeMenuOpen = true;
   createNodeMenuMode = "node";
   createNodeMenuNodeId = nodeId;
@@ -869,6 +1679,7 @@ function renderCreateNodeMenu() {
 }
 
 function openCreateNodeMenu(clientX, clientY, worldX, worldY) {
+  cancelEdgeCreateInteractions();
   createNodeMenuOpen = true;
   createNodeMenuMode = "create";
   createNodeMenuNodeId = null;
@@ -1120,6 +1931,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const GRID_PATTERN_TRANSFORM = "skewX(-18) rotate(12)";
     const DRAG_CLICK_SUPPRESS_THRESHOLD = 3;
     const RESIZE_CLICK_SUPPRESS_THRESHOLD = 3;
+    const EDGE_HANDLE_BORDER_HIT_PX = 14;
+    const EDGE_HANDLE_INTENT_DELAY_MS = 140;
+    const EDGE_HANDLE_INTENT_MOVE_PX = 5;
+    const EDGE_ACTION_INTENT_DELAY_MS = 140;
+    const EDGE_ACTION_HIDE_GRACE_MS = 180;
+    const EDGE_ACTION_BUTTON_OFFSET_PX = 20;
     const RESIZE_HANDLE_SIZE = 12;
     const MIN_EXPANDED_ASPECT = 0.5;
     const MAX_EXPANDED_ASPECT = 3;
@@ -1154,6 +1971,64 @@ function applyWorkspaceData(workspaceId, options = {}) {
       aspect: 1,
       moved: false
     };
+    let edgeCreateHover = {
+      visible: false,
+      nodeId: null,
+      anchorX: 0,
+      anchorY: 0,
+      angleDeg: 0
+    };
+    let edgeCreateDraft = {
+      active: false,
+      sourceId: null,
+      startX: 0,
+      startY: 0,
+      endX: 0,
+      endY: 0,
+      targetId: null
+    };
+    let edgeHoverIntent = {
+      armed: false,
+      timerId: null,
+      startedAt: 0,
+      candidateNodeId: null,
+      candidateAnchorX: 0,
+      candidateAnchorY: 0,
+      candidateAngleDeg: 0,
+      startClientX: 0,
+      startClientY: 0
+    };
+    let edgeActionIntent = {
+      armed: false,
+      timerId: null,
+      edgeId: null,
+      sourceId: null,
+      targetId: null,
+      startClientX: 0,
+      startClientY: 0,
+      candidateClientX: 0,
+      candidateClientY: 0,
+      startX: 0,
+      startY: 0,
+      controlX: 0,
+      controlY: 0,
+      endX: 0,
+      endY: 0
+    };
+    let edgeActionMenuState = {
+      visible: false,
+      edgeId: null,
+      sourceId: null,
+      targetId: null,
+      anchorX: 0,
+      anchorY: 0,
+      normalX: 0,
+      normalY: -1
+    };
+    let edgeActionHideTimerId = null;
+    let edgeActionPinned = false;
+    let edgeCreateHighlightedSourceId = null;
+    let edgeCreateHighlightedTargetId = null;
     let leftPanelOpen = false;
     let rightPanelOpen = false;
     let layoutMode = "force";
@@ -1189,6 +2064,56 @@ function applyWorkspaceData(workspaceId, options = {}) {
     createNodeMenuEl.className = "map-create-menu";
     createNodeMenuEl.setAttribute("aria-hidden", "true");
     document.body.appendChild(createNodeMenuEl);
+    const edgeCreateHandleEl = document.createElement("button");
+    edgeCreateHandleEl.type = "button";
+    edgeCreateHandleEl.id = "edgeCreateHandle";
+    edgeCreateHandleEl.className = "edge-create-handle";
+    edgeCreateHandleEl.setAttribute("aria-label", "Create edge");
+    edgeCreateHandleEl.setAttribute("aria-hidden", "true");
+    edgeCreateHandleEl.innerHTML = "<span class=\"edge-create-handle-glyph\" aria-hidden=\"true\">➤</span>";
+    if (worldEl) {
+      worldEl.appendChild(edgeCreateHandleEl);
+    }
+    const edgeActionMenuEl = document.createElement("div");
+    edgeActionMenuEl.id = "edgeActionMenu";
+    edgeActionMenuEl.className = "edge-action-menu";
+    edgeActionMenuEl.setAttribute("aria-hidden", "true");
+    const edgeActionReverseBtnEl = document.createElement("button");
+    edgeActionReverseBtnEl.type = "button";
+    edgeActionReverseBtnEl.className = "edge-action-btn reverse";
+    edgeActionReverseBtnEl.setAttribute("aria-label", "Reverse edge direction");
+    edgeActionReverseBtnEl.textContent = "↺";
+    const edgeActionDeleteBtnEl = document.createElement("button");
+    edgeActionDeleteBtnEl.type = "button";
+    edgeActionDeleteBtnEl.className = "edge-action-btn delete";
+    edgeActionDeleteBtnEl.setAttribute("aria-label", "Delete edge");
+    edgeActionDeleteBtnEl.textContent = "✕";
+    edgeActionMenuEl.appendChild(edgeActionReverseBtnEl);
+    edgeActionMenuEl.appendChild(edgeActionDeleteBtnEl);
+    if (worldEl) {
+      worldEl.appendChild(edgeActionMenuEl);
+    }
+    edgeActionMenuEl.addEventListener("pointerenter", () => {
+      edgeActionPinned = true;
+      clearEdgeActionHideTimer();
+    });
+    edgeActionMenuEl.addEventListener("pointerleave", () => {
+      edgeActionPinned = false;
+      scheduleEdgeActionHide();
+    });
+    edgeActionMenuEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    edgeActionReverseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      requestEdgeReverse(edgeActionMenuState.edgeId);
+    });
+    edgeActionDeleteBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      requestEdgeDelete(edgeActionMenuState.edgeId);
+    });
     const CREATE_NODE_MENU_ITEMS = [
       { type: "location", label: "Location" },
       { type: "process", label: "Process" },
@@ -1233,6 +2158,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     if (workspaceMenuBtnEl) {
       workspaceMenuBtnEl.addEventListener("click", (event) => {
         event.stopPropagation();
+        cancelEdgeCreateInteractions();
         closeCreateNodeMenu();
         workspaceMenuOpen = !workspaceMenuOpen;
         userMenuOpen = false;
@@ -1252,6 +2178,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
+      cancelEdgeCreateInteractions();
       if (createNodeMenuOpen) {
         closeCreateNodeMenu();
       }
@@ -1284,6 +2211,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
         resetWorkspaceCreateState();
         resetWorkspaceRenameState();
         renderWorkspaceMenu();
+      }
+      if (
+        edgeActionMenuState.visible &&
+        clickTarget instanceof Node &&
+        edgeActionMenuEl &&
+        !edgeActionMenuEl.contains(clickTarget)
+      ) {
+        hideEdgeActionMenu({ clearIntent: true });
       }
 
       if (!state.notificationsOpen) return;
@@ -1378,7 +2313,28 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
     window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("mouseup", onWindowMouseUp);
-    window.addEventListener("blur", onWindowMouseUp);
+    window.addEventListener("blur", () => onWindowMouseUp(null));
+    edgeCreateHandleEl.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (!edgeCreateHover.visible || !edgeCreateHover.nodeId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEdgeActionInteractions();
+      clearEdgeHoverIntent();
+      edgeCreateDraft = {
+        active: true,
+        sourceId: edgeCreateHover.nodeId,
+        startX: edgeCreateHover.anchorX,
+        startY: edgeCreateHover.anchorY,
+        endX: edgeCreateHover.anchorX,
+        endY: edgeCreateHover.anchorY,
+        targetId: null
+      };
+      clearEdgeCreateHover();
+      applyEdgeCreateHighlights(edgeCreateDraft.sourceId, null);
+      closeCreateNodeMenu();
+      requestRender({ edges: true });
+    });
 
     let renderRafId = null;
     let pendingCameraRender = false;
@@ -1805,6 +2761,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function onViewportWheel(event) {
+      cancelEdgeCreateInteractions();
       closeCreateNodeMenu();
       event.preventDefault();
       const { mx, my } = getViewportPoint(event);
@@ -1813,6 +2770,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function onViewportContextMenu(event) {
+      cancelEdgeCreateInteractions();
       if (!viewportEl) return;
       if (!currentWorkspaceId) return;
       const nodeId = getNodeIdFromTarget(event.target);
@@ -1840,6 +2798,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       if (dragState.isDragging) return;
       if (resizeState.isResizing) return;
       if (event.target.closest(".node-card")) return;
+      cancelEdgeCreateInteractions();
       closeCreateNodeMenu();
       isPanning = true;
       lastPanClientX = event.clientX;
@@ -1869,6 +2828,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         aspect,
         moved: false
       };
+      cancelEdgeCreateInteractions();
       isPanning = false;
       event.preventDefault();
       event.stopPropagation();
@@ -1997,6 +2957,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         startTop: Number.isFinite(currentTop) ? currentTop : cardEl.offsetTop,
         moved: false
       };
+      cancelEdgeCreateInteractions();
       isPanning = false;
       cardEl.classList.add("dragging");
       event.preventDefault();
@@ -2075,11 +3036,41 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function onWindowMouseMove(event) {
+      if (edgeCreateDraft.active) {
+        updateEdgeDraftFromPointer(event);
+        event.preventDefault();
+        return;
+      }
       if (updateLocationResize(event)) {
         return;
       }
       if (updateDraggedNodePosition(event)) {
         return;
+      }
+      if (
+        !isPanning &&
+        !dragState.isDragging &&
+        !resizeState.isResizing &&
+        !createNodeMenuOpen &&
+        !workspaceMenuOpen &&
+        !userMenuOpen
+      ) {
+        const candidate = resolveEdgeHoverCandidate(event);
+        updateEdgeHoverIntent(candidate);
+        if (
+          edgeActionMenuState.visible &&
+          !edgeActionPinned &&
+          isPointerNearAnyVisibleNodeBorder(event.clientX, event.clientY)
+        ) {
+          hideEdgeActionMenu({ clearIntent: false });
+        }
+      } else if (!isPanning) {
+        clearEdgeHoverIntent();
+        clearEdgeCreateHover();
+        clearEdgeActionIntent();
+        if (!edgeActionPinned) {
+          hideEdgeActionMenu({ clearIntent: false });
+        }
       }
       if (!isPanning) return;
       const dx = event.clientX - lastPanClientX;
@@ -2094,7 +3085,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.preventDefault();
     }
 
-    function onWindowMouseUp() {
+    function onWindowMouseUp(event) {
+      finalizeEdgeCreateDraft(event);
       stopLocationResize();
       stopNodeDrag();
       isPanning = false;
@@ -3801,6 +4793,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
         maxX = Math.max(maxX, frame.x + frame.w);
         maxY = Math.max(maxY, frame.y + frame.h);
       });
+      if (edgeCreateDraft.active) {
+        minX = Math.min(minX, edgeCreateDraft.startX, edgeCreateDraft.endX);
+        minY = Math.min(minY, edgeCreateDraft.startY, edgeCreateDraft.endY);
+        maxX = Math.max(maxX, edgeCreateDraft.startX, edgeCreateDraft.endX);
+        maxY = Math.max(maxY, edgeCreateDraft.startY, edgeCreateDraft.endY);
+      }
 
       if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
         edgesLayerEl.innerHTML = "";
@@ -3829,7 +4827,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
         const ax = sourceFrame.x + (sourceFrame.w / 2);
         const ay = sourceFrame.y + (sourceFrame.h / 2);
 
-        sourceNode.linkedNodeIds.forEach((targetId) => {
+        getOutgoingEdges(sourceNode.id).forEach((edgeRecord) => {
+          const targetId = edgeRecord.targetId;
           if (targetId === sourceNode.id) return;
           if (!lastVisibleNodeIds.has(targetId)) return;
           const targetFrame = lastVisibleNodeFrames.get(targetId);
@@ -3855,19 +4854,70 @@ function applyWorkspaceData(workspaceId, options = {}) {
           });
           edgesLayerEl.appendChild(chevron);
 
+          const edgeMeta = {
+            edgeId: edgeRecord.id,
+            sourceId: edgeRecord.sourceId,
+            targetId: edgeRecord.targetId,
+            startX: borderA.x,
+            startY: borderA.y,
+            controlX: cx,
+            controlY: cy,
+            endX: borderB.x,
+            endY: borderB.y
+          };
           const hitEdge = createSvgElement("path", {
             class: "edge-hit",
             d: curveD
           });
-          const handleEdgeEnter = () => setEdgeHoverState(visibleEdge, chevron, sourceNode.id, targetId, true);
-          const handleEdgeLeave = () => setEdgeHoverState(visibleEdge, chevron, sourceNode.id, targetId, false);
+          const handleEdgeEnter = (event) => {
+            setEdgeHoverState(visibleEdge, chevron, sourceNode.id, targetId, true);
+            const candidate = buildEdgeActionCandidate(event, edgeMeta);
+            updateEdgeActionIntent(candidate);
+          };
+          const handleEdgeMove = (event) => {
+            const candidate = buildEdgeActionCandidate(event, edgeMeta);
+            updateEdgeActionIntent(candidate);
+          };
+          const handleEdgeLeave = () => {
+            setEdgeHoverState(visibleEdge, chevron, sourceNode.id, targetId, false);
+            updateEdgeActionIntent(null);
+          };
           hitEdge.addEventListener("pointerenter", handleEdgeEnter);
+          hitEdge.addEventListener("pointermove", handleEdgeMove);
           hitEdge.addEventListener("pointerleave", handleEdgeLeave);
-          hitEdge.addEventListener("mouseenter", handleEdgeEnter);
-          hitEdge.addEventListener("mouseleave", handleEdgeLeave);
           edgesLayerEl.appendChild(hitEdge);
         });
       });
+      if (edgeCreateDraft.active) {
+        const { cx, cy } = getQuadraticControlPoint(
+          edgeCreateDraft.startX,
+          edgeCreateDraft.startY,
+          edgeCreateDraft.endX,
+          edgeCreateDraft.endY
+        );
+        const draftCurveD = `M ${edgeCreateDraft.startX} ${edgeCreateDraft.startY} Q ${cx} ${cy} ${edgeCreateDraft.endX} ${edgeCreateDraft.endY}`;
+        const draftEdge = createSvgElement("path", {
+          class: "edge-line edge-line--draft",
+          d: draftCurveD
+        });
+        edgesLayerEl.appendChild(draftEdge);
+        const midpoint = getQuadraticPointAndTangentAt(
+          edgeCreateDraft.startX,
+          edgeCreateDraft.startY,
+          cx,
+          cy,
+          edgeCreateDraft.endX,
+          edgeCreateDraft.endY,
+          0.5
+        );
+        const angleDeg = Math.atan2(midpoint.ty, midpoint.tx) * (180 / Math.PI);
+        const draftChevron = createSvgElement("path", {
+          class: "edge-chevron edge-chevron--draft",
+          d: "M -4 -3 L 0 0 L -4 3",
+          transform: `translate(${midpoint.px} ${midpoint.py}) rotate(${angleDeg})`
+        });
+        edgesLayerEl.appendChild(draftChevron);
+      }
     }
 
     function renderGraphEdges(plane) {
@@ -4027,9 +5077,16 @@ function applyWorkspaceData(workspaceId, options = {}) {
       lastVisibleNodeIds = new Set(visibleNodeIds);
       lastVisibleNodeFrames = visibleNodeFrames;
       lastRenderedCardsById = renderedCardsById;
+      if (edgeCreateDraft.active) {
+        applyEdgeCreateHighlights(edgeCreateDraft.sourceId, edgeCreateDraft.targetId);
+      } else {
+        clearEdgeCreateHighlights();
+      }
 
       if (worldEl) worldEl.appendChild(plane);
       renderLenses();
+      updateEdgeCreateHandleVisual();
+      updateEdgeActionMenuVisual();
       requestRender({ edges: true });
     }
 
@@ -4476,6 +5533,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function renderWorkspace(workspaceId) {
+      cancelEdgeCreateInteractions({ redraw: false });
       closeCreateNodeMenu();
       const targetWorkspaceId = workspaceId || currentWorkspaceId;
       if (!hasAppliedWorkspace || appliedWorkspaceId !== targetWorkspaceId) {
