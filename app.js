@@ -8,7 +8,15 @@ const CURRENT_USER_HANDLE = "@Hannah";
 
 // type NodeType =
 //   "location" | "process" | "standard" | "portal" | "handover"
-// type Task = { id: string, text: string, done: boolean, assignedTo: string }
+// type Task = {
+//   id: string,
+//   text: string,
+//   done: boolean,
+//   assignedTo: string,
+//   taskGroupId?: string,
+//   originNodeId?: string,
+//   linkedObjectIds?: string[]
+// }
 // type Comment = { author: string, text: string, timestamp: string, isNew: boolean }
 // type Node = {
 //   id: string,
@@ -18,6 +26,8 @@ const CURRENT_USER_HANDLE = "@Hannah";
 //   ownerId: string,
 //   owner: string, // runtime alias resolved from users
 //   sharedWithIds?: string[],
+//   handoverCollaborators?: Array<{ kind: "user" | "org", refId: string, shareWorkspace: boolean }>,
+//   handoverNodeIds?: string[],
 //   kind?: "lab" | "room" | "bench" | "fume" | "freezer" | "sink" | "glovebox" | "shelf" | "generic",
 //   locationId: string | null,
 //   status?: string,
@@ -38,9 +48,13 @@ const TYPE_ORDER = [
   "process",
   "standard",
   "handover",
-  "portal"
+  "portal",
+  "entity",
+  "collaboration"
 ];
 const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
+const HANDOVER_STATUSES = ["Draft", "Active", "Blocked", "Withdrawn", "Complete"];
+const HANDOVER_COLLABORATOR_EDITABLE_STATUSES = ["Active", "Blocked", "Complete"];
     const SVG_NS = "http://www.w3.org/2000/svg";
     const CANVAS_WIDTH = 1320;
     const CANVAS_HEIGHT = 760;
@@ -50,20 +64,39 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
     const LAYOUT_MARGIN = 24;
     const COL_GAP = 40;
     const ROW_GAP = 16;
+    const GRAPH_NODE_TEXT_INSET_PX = 14;
+    const PORTAL_LABEL_GAP_PX = 8;
+    const PORTAL_LABEL_FONT_SIZE_PX = 11;
+    const PORTAL_LABEL_FONT_WEIGHT = 600;
+    const PORTAL_LABEL_LINE_HEIGHT_PX = 14;
+    const ENTITY_LABEL_FONT_SIZE_PX = 12;
+    const ENTITY_LABEL_FONT_WEIGHT = 700;
+    const ENTITY_LABEL_LINE_HEIGHT_PX = 14;
+    const ENTITY_DIAMOND_MIN_WIDTH_PX = 168;
+    const ENTITY_DIAMOND_MAX_WIDTH_PX = 240;
+    const ENTITY_DIAMOND_HEIGHT_PX = 112;
+    const ENTITY_DIAMOND_TEXT_WIDTH_RATIO = 0.62;
+    const ENTITY_DIAMOND_TEXT_WIDTH_FUDGE_PX = 12;
+    const PORTAL_GRAPH_POS_SCHEMA_VERSION = 2;
+    const LEGACY_PORTAL_GRAPH_POS_Y_OFFSET_PX = 12;
     const COLLAPSED_CARD_W = 172;
     const COLLAPSED_CARD_WIDTH_BY_TYPE = {
       location: 172,
       process: 172,
       standard: 188,
       handover: 206,
-      portal: 92
+      portal: 92,
+      entity: ENTITY_DIAMOND_MIN_WIDTH_PX,
+      collaboration: 184
     };
     const COLLAPSED_CARD_HEIGHT_BY_TYPE = {
       location: 72,
       process: 72,
       standard: 64,
       handover: 72,
-      portal: 92
+      portal: 92,
+      entity: ENTITY_DIAMOND_HEIGHT_PX,
+      collaboration: 184
     };
     const EXPANDED_CARD_MIN_W = 320;
     const EXPANDED_CARD_MIN_H = 220;
@@ -83,7 +116,9 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
       process: 350,
       standard: 700,
       handover: 1050,
-      portal: 1400
+      portal: 1400,
+      entity: 1750,
+      collaboration: 2100
     };
     const HYBRID_LANE_GAP_Y = 28;
     const HYBRID_LANE_MAX_HEIGHT = 900;
@@ -96,6 +131,19 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
     ];
 
     const STORE_KEY = "amytis_store_v1";
+    const LEGACY_ENTITY_LINK_BY_NODE_ID = Object.freeze({
+      org_evans_lab: { entityKind: "org", entityRefId: "org-evans-lab" },
+      org_genomics_core: { entityKind: "org", entityRefId: "org-genomics-core" },
+      person_alex: { entityKind: "user", entityRefId: "user-alex-patel" },
+      person_hannah: { entityKind: "user", entityRefId: "user-hannah-lewis" },
+      person_evan: { entityKind: "user", entityRefId: "user-evans" }
+    });
+    const LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID = Object.freeze({
+      portal_genomics_core: { kind: "org", refId: "org-genomics-core" }
+    });
+    const REQUIRED_ORG_RECORDS = Object.freeze([
+      { id: "org-genomics-core", name: "Genomics Core (External)" }
+    ]);
 
     function extractEntityArray(data, key) {
       if (!data || typeof data !== "object") return [];
@@ -166,6 +214,9 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
       const workspaces = extractEntityArray(data, "workspaces")
         .filter((entry) => entry && typeof entry.id === "string")
         .map((entry) => ({ ...entry }));
+      const meta = data && typeof data === "object" && data.meta && typeof data.meta === "object"
+        ? { ...data.meta }
+        : {};
 
       return {
         users,
@@ -173,6 +224,7 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
         nodes,
         edges,
         workspaces,
+        meta,
         usersById: new Map(users.map((entry) => [entry.id, entry])),
         orgsById: new Map(orgs.map((entry) => [entry.id, entry])),
         nodesById: new Map(nodes.map((entry) => [entry.id, entry])),
@@ -212,6 +264,48 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
   let createNodeMenuWorldY = 0;
   let newNodeInlineEditId = null;
   let suppressNextWorkspaceAutoFit = false;
+  let portalLinkModalState = {
+    open: false,
+    nodeId: null,
+    selectedWorkspaceId: "",
+    flow: "edit"
+  };
+  let entityLinkModalState = {
+    open: false,
+    nodeId: null,
+    selectedEntityKind: "user",
+    selectedEntityRefId: "",
+    flow: "edit"
+  };
+  let detailsTitleEditNodeId = null;
+  let detailsTitleDraft = "";
+  let detailsSummaryEditNodeId = null;
+  let detailsSummaryDraft = "";
+  let collaboratorPickerModalState = {
+    open: false,
+    nodeId: null,
+    selectedCollaboratorKeys: []
+  };
+  let handoverObjectPickerModalState = {
+    open: false,
+    nodeId: null,
+    selectedNodeIds: []
+  };
+  let detailsTaskComposerState = {
+    nodeId: null,
+    text: "",
+    assignedTo: "",
+    linkedObjectIds: [],
+    slashRange: null
+  };
+  let detailsTaskEditState = {
+    nodeId: null,
+    taskId: null,
+    text: "",
+    assignedTo: "",
+    linkedObjectIds: [],
+    slashRange: null
+  };
 
     function normalizeWorkspaceKind(rawKind) {
       if (rawKind === "collab" || rawKind === "collaboration") return "collab";
@@ -224,6 +318,8 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
       if (type === "location") return "location";
       if (type === "portal") return "portal";
       if (type === "handover") return "handover";
+      if (type === "entity" || type === "person" || type === "organization" || type === "organisation") return "entity";
+      if (type === "collaboration" || type === "hub") return "collaboration";
       if (type === "process" || type === "experiment") return "process";
       if (type === "standard" || type === "protocol") return "standard";
       return "standard";
@@ -236,6 +332,16 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
       if (status === "complete" || status === "completed") return "Complete";
       if (status === "abandoned") return "Abandoned";
       return "Planned";
+    }
+
+    function normalizeHandoverStatus(rawStatus) {
+      const status = String(rawStatus || "").trim().toLowerCase();
+      if (status === "draft" || status === "prepared") return "Draft";
+      if (status === "active") return "Active";
+      if (status === "blocked") return "Blocked";
+      if (status === "withdrawn" || status === "abandoned" || status === "cancelled" || status === "canceled") return "Withdrawn";
+      if (status === "complete" || status === "completed") return "Complete";
+      return "Draft";
     }
 
     function getNextProcessStatus(status) {
@@ -261,6 +367,7 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
 
     function initializeRuntimeDataFromStore(nextStore) {
       store = nextStore;
+      const seededOrgRecords = seedRequiredOrgRecordsInStore(store);
 
       users = Array.from(store.usersById.values()).map((user) => ({ ...user }));
       orgs = Array.from(store.orgsById.values()).map((org) => ({ ...org }));
@@ -283,28 +390,73 @@ const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
       orgById = new Map(orgs.map((org) => [org.id, org]));
       void orgById;
 
+      let migratedNodeData = false;
       allNodesRuntime = Array.from(store.nodesById.values())
-        .map((node) => ({
-          ...node,
-          type: normalizeNodeType(node.type),
-          title: typeof node.title === "string" ? node.title : "",
-          label: typeof node.title === "string" ? node.title : "",
-          status: normalizeNodeType(node.type) === "process"
-            ? normalizeProcessStatus(node.status)
-            : node.status,
-          owner: (node.ownerId && userById.get(node.ownerId)
-            ? userById.get(node.ownerId).name
-            : (node.ownerId || "Unknown")),
-          summary: typeof node.summary === "string" && node.summary.trim()
-            ? node.summary
-            : `${typeof node.title === "string" ? node.title : node.id} node`,
-          tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => ({ ...task })) : [],
-          comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
-          locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
-        }));
+        .map((node) => {
+          const normalizedType = normalizeNodeType(node.type);
+          const runtimeNode = {
+            ...node,
+            type: normalizedType,
+            title: typeof node.title === "string" ? node.title : "",
+            label: typeof node.title === "string" ? node.title : "",
+            status: normalizedType === "process"
+              ? normalizeProcessStatus(node.status)
+              : (normalizedType === "handover"
+                ? normalizeHandoverStatus(node.status)
+                : node.status),
+            linkedWorkspaceId:
+              normalizedType === "portal" && typeof node.linkedWorkspaceId === "string" && node.linkedWorkspaceId
+                ? node.linkedWorkspaceId
+                : null,
+            owner: (node.ownerId && userById.get(node.ownerId)
+              ? userById.get(node.ownerId).name
+              : (node.ownerId || "Unknown")),
+            summary: typeof node.summary === "string" && node.summary.trim()
+              ? node.summary
+              : `${typeof node.title === "string" ? node.title : node.id} node`,
+            tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => normalizeTaskRecord(task)) : [],
+            comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
+            locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
+          };
+          if (normalizedType === "entity") {
+            runtimeNode.entityKind = normalizeEntityKind(node.entityKind);
+            runtimeNode.entityRefId = typeof node.entityRefId === "string" && node.entityRefId ? node.entityRefId : null;
+            if (normalizeEntityLinkFieldsForNode(runtimeNode)) {
+              migratedNodeData = true;
+            }
+          }
+          if (normalizedType === "handover") {
+            runtimeNode.handoverCollaborators = Array.isArray(node.handoverCollaborators)
+              ? node.handoverCollaborators.map((collaborator) => ({ ...collaborator }))
+              : [];
+            runtimeNode.handoverNodeIds = Array.isArray(node.handoverNodeIds)
+              ? node.handoverNodeIds.filter((linkedNodeId) => typeof linkedNodeId === "string")
+              : [];
+          }
+          if (normalizedType === "collaboration") {
+            if (runtimeNode.title || runtimeNode.label || node.type !== normalizedType) {
+              migratedNodeData = true;
+            }
+            runtimeNode.title = "";
+            runtimeNode.label = "";
+          } else if (node.type !== normalizedType) {
+            migratedNodeData = true;
+          }
+          return runtimeNode;
+        });
+      allNodesRuntime.forEach((node) => {
+        if (node.type === "handover" && normalizeHandoverFieldsForNode(node)) {
+          migratedNodeData = true;
+        }
+      });
       allEdgesRuntime = Array.from(store.edgesById.values())
         .map((edge) => ({ ...edge }));
       workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+      if (seededOrgRecords || migratedNodeData) {
+        syncNodeRuntimeAndStore();
+        persistStoreToLocalStorage();
+      }
+      reconcileLegacyPortalGraphPositions();
 
       if (userById.has("user-hannah-lewis")) {
         currentUserId = "user-hannah-lewis";
@@ -330,6 +482,10 @@ let edgeById = new Map();
 let outgoingEdgeIdsBySourceId = new Map();
 let incomingEdgeIdsByTargetId = new Map();
 let edgeRuntimeCounter = 0;
+let portalLabelMeasureContext = null;
+let portalLabelWidthCache = new Map();
+let entityLabelWidthCache = new Map();
+let hasWarnedPortalBodyFrameMismatch = false;
 
 function inferEdgeKindForPair(sourceNode, targetNode) {
   if (!sourceNode || !targetNode) return "link";
@@ -493,6 +649,10 @@ function getCurrentUserRecord() {
   return userById.get(currentUserId) || null;
 }
 
+function getCurrentUserOrgId() {
+  return getCurrentUserRecord()?.orgId || null;
+}
+
 function getCurrentUserName() {
   const currentUser = getCurrentUserRecord();
   return currentUser?.name || "None";
@@ -508,9 +668,1179 @@ function getSortedUsersForMenu() {
   });
 }
 
+function getSortedOrgsForMenu() {
+  return [...orgs].sort((leftOrg, rightOrg) => {
+    const leftName = leftOrg?.name || "";
+    const rightName = rightOrg?.name || "";
+    const nameComparison = leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+    if (nameComparison !== 0) return nameComparison;
+    return (leftOrg?.id || "").localeCompare(rightOrg?.id || "");
+  });
+}
+
+function getOrgDisplayName(orgId) {
+  if (!orgId || !orgById.has(orgId)) return "";
+  return orgById.get(orgId)?.name || "";
+}
+
+function getUserDisplayNameWithOrg(userId) {
+  if (!userId || !userById.has(userId)) return "";
+  const userRecord = userById.get(userId);
+  if (!userRecord) return "";
+  const orgName = getOrgDisplayName(userRecord.orgId);
+  return orgName ? `${orgName} / ${userRecord.name || userId}` : (userRecord.name || userId);
+}
+
+function getOwnerDisplayName(node) {
+  if (!node) return "";
+  if (node.ownerId && userById.has(node.ownerId)) {
+    return getUserDisplayNameWithOrg(node.ownerId) || node.owner || node.ownerId;
+  }
+  return node.owner || node.ownerId || "Unknown";
+}
+
+function isNodeOwnedByCurrentUser(node) {
+  return !!node && !!currentUserId && node.ownerId === currentUserId;
+}
+
+function getCurrentUserTaskAssignmentLabels() {
+  const labels = new Set();
+  if (CURRENT_USER) labels.add(CURRENT_USER);
+  const currentUser = getCurrentUserRecord();
+  if (currentUser?.name) labels.add(currentUser.name);
+  const currentUserWithOrg = currentUserId ? getUserDisplayNameWithOrg(currentUserId) : "";
+  if (currentUserWithOrg) labels.add(currentUserWithOrg);
+  return labels;
+}
+
+function isTaskAssignedToCurrentUser(assignedTo) {
+  return getCurrentUserTaskAssignmentLabels().has(String(assignedTo || "").trim());
+}
+
+function getCurrentUserCommentAuthorLabels() {
+  const labels = new Set();
+  if (CURRENT_USER) labels.add(CURRENT_USER);
+  const currentUserName = getCurrentUserName();
+  if (currentUserName) labels.add(currentUserName);
+  const currentUserWithOrg = currentUserId ? getUserDisplayNameWithOrg(currentUserId) : "";
+  if (currentUserWithOrg) labels.add(currentUserWithOrg);
+  return labels;
+}
+
+function normalizeEntityKind(rawKind) {
+  const kind = String(rawKind || "").trim().toLowerCase();
+  if (kind === "user" || kind === "person") return "user";
+  if (kind === "org" || kind === "organisation" || kind === "organization") return "org";
+  return null;
+}
+
+function isSelectableNode(node) {
+  return !!node && node.type !== "collaboration";
+}
+
+function canInlineEditNodeTitle(node) {
+  return !!node && (
+    node.type === "location" ||
+    node.type === "process" ||
+    node.type === "standard" ||
+    node.type === "handover"
+  );
+}
+
+function getNodeDisplayTitle(node, options = {}) {
+  const fallback = typeof options.fallback === "string" && options.fallback ? options.fallback : "Untitled";
+  if (!node) return fallback;
+  if (node.type === "portal") {
+    return getPortalLinkedWorkspaceName(node) || node.label || node.title || "Portal";
+  }
+  if (node.type === "entity") {
+    return getEntityDisplayName(node.entityKind, node.entityRefId) || node.label || node.title || "Entity";
+  }
+  if (node.type === "collaboration") {
+    return node.label || node.title || "Collaboration";
+  }
+  return String(node.label || node.title || "").trim() || fallback;
+}
+
+function isCircularNodeType(node) {
+  return !!node && (node.type === "portal" || node.type === "collaboration");
+}
+
+function isDiamondNodeType(node) {
+  return !!node && node.type === "entity";
+}
+
+function getLegacyEntityLinkForNode(node) {
+  if (!node || typeof node.id !== "string") return null;
+  return LEGACY_ENTITY_LINK_BY_NODE_ID[node.id] || null;
+}
+
+function getEntityLinkRecord(entityKind, entityRefId) {
+  const normalizedKind = normalizeEntityKind(entityKind);
+  if (!normalizedKind || !entityRefId) return null;
+  if (normalizedKind === "user") {
+    return userById.get(entityRefId) || null;
+  }
+  if (normalizedKind === "org") {
+    return orgById.get(entityRefId) || null;
+  }
+  return null;
+}
+
+function getEntityDisplayName(entityKind, entityRefId) {
+  const record = getEntityLinkRecord(entityKind, entityRefId);
+  return record?.name || "";
+}
+
+function getEntityLabelFallback(node) {
+  if (!node) return "";
+  return String(node.title || node.label || "").trim() || "Entity";
+}
+
+function applyDerivedEntityIdentity(node) {
+  if (!node || node.type !== "entity") return false;
+  const displayName = getEntityDisplayName(node.entityKind, node.entityRefId);
+  const nextLabel = displayName || getEntityLabelFallback(node);
+  const nextTitle = displayName || "";
+  const entityKindLabel = node.entityKind === "org" ? "organisation" : "user";
+  let changed = false;
+  if (node.label !== nextLabel) {
+    node.label = nextLabel;
+    changed = true;
+  }
+  if (node.title !== nextTitle) {
+    node.title = nextTitle;
+    changed = true;
+  }
+  if ((!node.summary || !String(node.summary).trim()) && nextLabel) {
+    node.summary = `${nextLabel} ${entityKindLabel} entity`;
+    changed = true;
+  }
+  return changed;
+}
+
+function normalizeEntityLinkFieldsForNode(node) {
+  if (!node || node.type !== "entity") return false;
+  const legacyLink = getLegacyEntityLinkForNode(node);
+  const nextEntityKind = normalizeEntityKind(node.entityKind) || legacyLink?.entityKind || null;
+  const nextEntityRefId = typeof node.entityRefId === "string" && node.entityRefId
+    ? node.entityRefId
+    : (legacyLink?.entityRefId || null);
+  let changed = false;
+  if (node.entityKind !== nextEntityKind) {
+    node.entityKind = nextEntityKind;
+    changed = true;
+  }
+  if (node.entityRefId !== nextEntityRefId) {
+    node.entityRefId = nextEntityRefId;
+    changed = true;
+  }
+  if (applyDerivedEntityIdentity(node)) {
+    changed = true;
+  }
+  return changed;
+}
+
+function getHandoverCollaboratorSignature(kind, refId) {
+  const normalizedKind = normalizeEntityKind(kind);
+  return normalizedKind && refId ? `${normalizedKind}:${refId}` : "";
+}
+
+function normalizeHandoverCollaboratorEntry(rawCollaborator) {
+  if (!rawCollaborator || typeof rawCollaborator !== "object") return null;
+  const kind = normalizeEntityKind(rawCollaborator.kind || rawCollaborator.entityKind);
+  const refId = typeof rawCollaborator.refId === "string" && rawCollaborator.refId
+    ? rawCollaborator.refId
+    : (typeof rawCollaborator.entityRefId === "string" && rawCollaborator.entityRefId ? rawCollaborator.entityRefId : "");
+  if (!kind || !refId) return null;
+  if (kind === "user" && !userById.has(refId)) return null;
+  if (kind === "org" && !orgById.has(refId)) return null;
+  return {
+    kind,
+    refId,
+    shareWorkspace: !!rawCollaborator.shareWorkspace
+  };
+}
+
+function getLegacyHandoverCollaboratorForTargetId(targetId) {
+  if (typeof targetId !== "string" || !targetId) return null;
+  if (userById.has(targetId)) {
+    return { kind: "user", refId: targetId, shareWorkspace: false };
+  }
+  if (orgById.has(targetId)) {
+    return { kind: "org", refId: targetId, shareWorkspace: false };
+  }
+  if (Object.prototype.hasOwnProperty.call(LEGACY_ENTITY_LINK_BY_NODE_ID, targetId)) {
+    const legacyEntity = LEGACY_ENTITY_LINK_BY_NODE_ID[targetId];
+    return {
+      kind: legacyEntity.entityKind,
+      refId: legacyEntity.entityRefId,
+      shareWorkspace: false
+    };
+  }
+  if (Object.prototype.hasOwnProperty.call(LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID, targetId)) {
+    const legacyCollaborator = LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID[targetId];
+    return {
+      kind: legacyCollaborator.kind,
+      refId: legacyCollaborator.refId,
+      shareWorkspace: false
+    };
+  }
+  const targetNode = allNodesRuntime.find((candidateNode) => candidateNode.id === targetId) || null;
+  if (targetNode?.type === "entity") {
+    const collaborator = normalizeHandoverCollaboratorEntry({
+      kind: targetNode.entityKind,
+      refId: targetNode.entityRefId,
+      shareWorkspace: false
+    });
+    if (collaborator) return collaborator;
+  }
+  return null;
+}
+
+function normalizeHandoverCollaboratorsForNode(node) {
+  if (!node || node.type !== "handover") return false;
+  const nextCollaborators = [];
+  const seenCollaborators = new Set();
+  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  rawCollaborators.forEach((rawCollaborator) => {
+    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
+    if (!normalizedCollaborator) return;
+    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
+    if (!signature || seenCollaborators.has(signature)) return;
+    seenCollaborators.add(signature);
+    nextCollaborators.push(normalizedCollaborator);
+  });
+  const legacyTargetId = typeof node.meta?.to === "string" ? node.meta.to : "";
+  const legacyCollaborator = getLegacyHandoverCollaboratorForTargetId(legacyTargetId);
+  if (legacyCollaborator) {
+    const legacySignature = getHandoverCollaboratorSignature(legacyCollaborator.kind, legacyCollaborator.refId);
+    if (legacySignature && !seenCollaborators.has(legacySignature)) {
+      seenCollaborators.add(legacySignature);
+      nextCollaborators.push(legacyCollaborator);
+    }
+  }
+  const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  const changed = JSON.stringify(currentCollaborators) !== JSON.stringify(nextCollaborators);
+  node.handoverCollaborators = nextCollaborators;
+  return changed;
+}
+
+function normalizeHandoverFieldsForNode(node) {
+  if (!node || node.type !== "handover") return false;
+  let changed = false;
+  const nextStatus = normalizeHandoverStatus(node.status);
+  if (node.status !== nextStatus) {
+    node.status = nextStatus;
+    changed = true;
+  }
+  if (node.locationId !== null) {
+    node.locationId = null;
+    changed = true;
+  }
+  const currentHandoverNodeIds = Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [];
+  const nextHandoverNodeIds = [...new Set(
+    currentHandoverNodeIds
+      .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
+  )];
+  if (JSON.stringify(currentHandoverNodeIds) !== JSON.stringify(nextHandoverNodeIds)) {
+    node.handoverNodeIds = nextHandoverNodeIds;
+    changed = true;
+  } else if (!Array.isArray(node.handoverNodeIds)) {
+    node.handoverNodeIds = nextHandoverNodeIds;
+    changed = true;
+  }
+  if (normalizeHandoverCollaboratorsForNode(node)) {
+    changed = true;
+  }
+  return changed;
+}
+
+function getResolvedHandoverCollaborators(node) {
+  if (!node || node.type !== "handover") return [];
+  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  const resolvedCollaborators = [];
+  rawCollaborators.forEach((rawCollaborator) => {
+    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
+    if (!normalizedCollaborator) return;
+    const label = normalizedCollaborator.kind === "user"
+      ? getUserDisplayNameWithOrg(normalizedCollaborator.refId)
+      : getOrgDisplayName(normalizedCollaborator.refId);
+    if (!label) return;
+    resolvedCollaborators.push({
+      ...normalizedCollaborator,
+      label
+    });
+  });
+  return resolvedCollaborators;
+}
+
+function isCurrentUserRepresentedByHandoverCollaborator(collaborator) {
+  if (!collaborator) return false;
+  if (collaborator.kind === "user") {
+    return !!currentUserId && collaborator.refId === currentUserId;
+  }
+  if (collaborator.kind === "org") {
+    return !!getCurrentUserOrgId() && collaborator.refId === getCurrentUserOrgId();
+  }
+  return false;
+}
+
+function isCurrentUserHandoverCollaborator(node) {
+  return getResolvedHandoverCollaborators(node).some((collaborator) => isCurrentUserRepresentedByHandoverCollaborator(collaborator));
+}
+
+function getEditableHandoverStatusesForCurrentUser(node) {
+  if (!node || node.type !== "handover") return [];
+  if (isNodeOwnedByCurrentUser(node)) return [...HANDOVER_STATUSES];
+  if (!isCurrentUserHandoverCollaborator(node)) return [];
+  return [...HANDOVER_COLLABORATOR_EDITABLE_STATUSES];
+}
+
+function getNodeStatusValue(node) {
+  if (!node) return "";
+  if (node.type === "process") return normalizeProcessStatus(node.status);
+  if (node.type === "handover") return normalizeHandoverStatus(node.status);
+  return typeof node.status === "string" ? node.status : "";
+}
+
+function getStatusOptionsForNode(node) {
+  if (!node) return [];
+  if (node.type === "process") return [...PROCESS_STATUSES];
+  if (node.type === "handover") return getEditableHandoverStatusesForCurrentUser(node);
+  return [];
+}
+
+function seedRequiredOrgRecordsInStore(targetStore) {
+  if (!targetStore) return false;
+  const nextOrgMap = targetStore.orgsById instanceof Map
+    ? new Map(targetStore.orgsById)
+    : new Map(extractEntityArray(targetStore, "orgs").map((orgRecord) => [orgRecord.id, { ...orgRecord }]));
+  let changed = false;
+  REQUIRED_ORG_RECORDS.forEach((orgRecord) => {
+    if (nextOrgMap.has(orgRecord.id)) return;
+    nextOrgMap.set(orgRecord.id, { ...orgRecord });
+    changed = true;
+  });
+  if (!changed) return false;
+  const nextOrgs = Array.from(nextOrgMap.values());
+  targetStore.orgs = nextOrgs.map((orgRecord) => ({ ...orgRecord }));
+  targetStore.orgsById = new Map(nextOrgs.map((orgRecord) => [orgRecord.id, { ...orgRecord }]));
+  return true;
+}
+
+function getEntityOptionsForKind(entityKind) {
+  if (entityKind === "org") {
+    return getSortedOrgsForMenu().map((orgRecord) => ({
+      id: orgRecord.id,
+      label: orgRecord.name || orgRecord.id
+    }));
+  }
+  return getSortedUsersForMenu().map((userRecord) => {
+    const orgName = userRecord.orgId && orgById.get(userRecord.orgId) ? orgById.get(userRecord.orgId).name : "";
+    return {
+      id: userRecord.id,
+      label: orgName ? `${userRecord.name || userRecord.id} (${orgName})` : (userRecord.name || userRecord.id)
+    };
+  });
+}
+
+function getInitialEntitySelectionForNode(node) {
+  if (node?.type === "entity") {
+    const existingKind = normalizeEntityKind(node.entityKind);
+    const existingRefId = typeof node.entityRefId === "string" ? node.entityRefId : "";
+    if (existingKind && existingRefId) {
+      return {
+        entityKind: existingKind,
+        entityRefId: existingRefId
+      };
+    }
+  }
+  const defaultKind = "user";
+  const defaultRefId = currentUserId && userById.has(currentUserId)
+    ? currentUserId
+    : (getEntityOptionsForKind(defaultKind)[0]?.id || "");
+  return {
+    entityKind: defaultKind,
+    entityRefId: defaultRefId
+  };
+}
+
+function getDirectlyLinkedNodeIds(nodeId) {
+  if (!nodeId) return [];
+  const seenIds = new Set();
+  const linkedIds = [];
+  getOutgoingEdges(nodeId).forEach((edge) => {
+    if (edge.targetId && !seenIds.has(edge.targetId)) {
+      seenIds.add(edge.targetId);
+      linkedIds.push(edge.targetId);
+    }
+  });
+  getIncomingEdges(nodeId).forEach((edge) => {
+    if (edge.sourceId && !seenIds.has(edge.sourceId)) {
+      seenIds.add(edge.sourceId);
+      linkedIds.push(edge.sourceId);
+    }
+  });
+  return linkedIds;
+}
+
+function getAnyNodeById(nodeId) {
+  return allNodesRuntime.find((node) => node.id === nodeId) || null;
+}
+
+function getNodeTitleFallback(node) {
+  if (!node) return "Untitled";
+  if (node.type === "portal") return "Portal";
+  if (node.type === "entity") return "Entity";
+  if (node.type === "location") return "Untitled location";
+  if (node.type === "process") return "Untitled process";
+  if (node.type === "standard") return "Untitled standard";
+  if (node.type === "handover") return "Untitled handover";
+  return "Untitled";
+}
+
+function compareNodesByDisplayLabel(leftNode, rightNode) {
+  const leftLabel = getNodeDisplayTitle(leftNode, { fallback: getNodeTitleFallback(leftNode) });
+  const rightLabel = getNodeDisplayTitle(rightNode, { fallback: getNodeTitleFallback(rightNode) });
+  const labelComparison = leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+  if (labelComparison !== 0) return labelComparison;
+  return (leftNode?.id || "").localeCompare(rightNode?.id || "");
+}
+
+function getExplicitHandoverObjectIds(node) {
+  if (!node || node.type !== "handover") return [];
+  return [...new Set(
+    (Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [])
+      .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
+      .filter((nodeId) => {
+        const candidateNode = getNodeById(nodeId);
+        return !!candidateNode && isSelectableNode(candidateNode);
+      })
+  )];
+}
+
+function getImplicitHandoverObjectIds(node) {
+  if (!node || node.type !== "handover") return [];
+  return getDirectlyLinkedNodeIds(node.id)
+    .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
+    .filter((nodeId) => {
+      const candidateNode = getNodeById(nodeId);
+      return !!candidateNode && isSelectableNode(candidateNode) && candidateNode.type !== "portal" && candidateNode.type !== "entity";
+    });
+}
+
+function getHandoverObjectCandidates(node) {
+  if (!node || node.type !== "handover") return [];
+  const resolvedNodeIds = [
+    ...getImplicitHandoverObjectIds(node),
+    ...getExplicitHandoverObjectIds(node)
+  ];
+  const seenIds = new Set();
+  return resolvedNodeIds
+    .filter((nodeId) => nodeId && nodeId !== node.id && !seenIds.has(nodeId) && seenIds.add(nodeId))
+    .map((nodeId) => getNodeById(nodeId))
+    .filter(Boolean)
+    .sort(compareNodesByDisplayLabel);
+}
+
+function getHandoverObjectPickerOptions(node) {
+  if (!node || node.type !== "handover") return [];
+  const visibleObjectIds = new Set(getHandoverObjectCandidates(node).map((candidateNode) => candidateNode.id));
+  return nodes
+    .filter((candidateNode) => isSelectableNode(candidateNode) && candidateNode.id !== node.id && !visibleObjectIds.has(candidateNode.id))
+    .sort(compareNodesByDisplayLabel);
+}
+
+function addHandoverObjectIds(nodeId, nextNodeIds) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const selectableNodeIds = new Set(
+    nodes
+      .filter((candidateNode) => isSelectableNode(candidateNode) && candidateNode.id !== node.id)
+      .map((candidateNode) => candidateNode.id)
+  );
+  const normalizedNodeIds = [...new Set(
+    (Array.isArray(nextNodeIds) ? nextNodeIds : [])
+      .filter((candidateNodeId) => typeof candidateNodeId === "string" && candidateNodeId && selectableNodeIds.has(candidateNodeId))
+  )];
+  if (!normalizedNodeIds.length) return false;
+  const currentNodeIds = Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [];
+  const mergedNodeIds = [...currentNodeIds];
+  normalizedNodeIds.forEach((candidateNodeId) => {
+    if (!mergedNodeIds.includes(candidateNodeId)) {
+      mergedNodeIds.push(candidateNodeId);
+    }
+  });
+  if (JSON.stringify(currentNodeIds) === JSON.stringify(mergedNodeIds)) return false;
+  node.handoverNodeIds = mergedNodeIds;
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function getCollaboratorPickerGroups(node) {
+  if (!node || node.type !== "handover") return [];
+  const existingCollaboratorKeys = new Set(
+    getResolvedHandoverCollaborators(node).map((collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId))
+  );
+  const userOptions = getSortedUsersForMenu()
+    .filter((userRecord) => userRecord.id !== node.ownerId)
+    .map((userRecord) => ({
+      key: getHandoverCollaboratorSignature("user", userRecord.id),
+      kind: "user",
+      refId: userRecord.id,
+      label: getUserDisplayNameWithOrg(userRecord.id) || userRecord.name || userRecord.id
+    }))
+    .filter((option) => option.key && !existingCollaboratorKeys.has(option.key));
+  const orgOptions = getSortedOrgsForMenu()
+    .map((orgRecord) => ({
+      key: getHandoverCollaboratorSignature("org", orgRecord.id),
+      kind: "org",
+      refId: orgRecord.id,
+      label: orgRecord.name || orgRecord.id
+    }))
+    .filter((option) => option.key && !existingCollaboratorKeys.has(option.key));
+  return [
+    {
+      id: "users",
+      label: "Users",
+      options: userOptions
+    },
+    {
+      id: "orgs",
+      label: "Organisations",
+      options: orgOptions
+    }
+  ].filter((group) => group.options.length > 0);
+}
+
+function generateTaskId() {
+  return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateTaskGroupId() {
+  return `task-group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeTaskRecord(task) {
+  const normalizedTask = {
+    id: typeof task?.id === "string" && task.id ? task.id : generateTaskId(),
+    text: typeof task?.text === "string" ? task.text : "",
+    done: !!task?.done,
+    assignedTo: typeof task?.assignedTo === "string" ? task.assignedTo : ""
+  };
+  if (typeof task?.taskGroupId === "string" && task.taskGroupId) {
+    normalizedTask.taskGroupId = task.taskGroupId;
+  }
+  if (typeof task?.originNodeId === "string" && task.originNodeId) {
+    normalizedTask.originNodeId = task.originNodeId;
+  }
+  const linkedObjectIds = [...new Set(
+    (Array.isArray(task?.linkedObjectIds) ? task.linkedObjectIds : [])
+      .filter((nodeId) => typeof nodeId === "string" && nodeId)
+  )];
+  if (linkedObjectIds.length) {
+    normalizedTask.linkedObjectIds = linkedObjectIds;
+  }
+  return normalizedTask;
+}
+
+function findTaskRecord(nodeId, taskId, options = {}) {
+  const targetNode = options.searchAllNodes ? getAnyNodeById(nodeId) : getNodeById(nodeId);
+  if (!targetNode || !Array.isArray(targetNode.tasks)) return null;
+  const taskIndex = targetNode.tasks.findIndex((task) => task.id === taskId);
+  if (taskIndex < 0) return null;
+  return {
+    node: targetNode,
+    taskIndex,
+    task: targetNode.tasks[taskIndex]
+  };
+}
+
+function getTaskGroupCopies(taskGroupId) {
+  if (!taskGroupId) return [];
+  const copies = [];
+  allNodesRuntime.forEach((node) => {
+    if (!Array.isArray(node.tasks)) return;
+    node.tasks.forEach((task, taskIndex) => {
+      if (task.taskGroupId !== taskGroupId) return;
+      copies.push({
+        node,
+        taskIndex,
+        task
+      });
+    });
+  });
+  return copies;
+}
+
+function getTaskHandoverContextNode(node, task = null) {
+  if (node?.type === "handover") return node;
+  if (task?.originNodeId) {
+    const originNode = getAnyNodeById(task.originNodeId);
+    if (originNode?.type === "handover") {
+      return originNode;
+    }
+  }
+  return null;
+}
+
+function getTaskAssigneeOptionsForContext(node, task = null) {
+  const handoverContextNode = getTaskHandoverContextNode(node, task);
+  if (handoverContextNode) {
+    return getTaskAssigneeOptions(handoverContextNode);
+  }
+  return getTaskAssigneeOptions(node);
+}
+
+function normalizeTaskLinkedObjectIds(handoverNode, linkedObjectIds) {
+  if (!handoverNode || handoverNode.type !== "handover") return [];
+  const validObjectIds = new Set(getHandoverObjectCandidates(handoverNode).map((candidateNode) => candidateNode.id));
+  return [...new Set(
+    (Array.isArray(linkedObjectIds) ? linkedObjectIds : [])
+      .filter((nodeId) => typeof nodeId === "string" && validObjectIds.has(nodeId))
+  )].sort((leftNodeId, rightNodeId) => {
+    const leftNode = getNodeById(leftNodeId);
+    const rightNode = getNodeById(rightNodeId);
+    return compareNodesByDisplayLabel(leftNode, rightNode);
+  });
+}
+
+function syncSeenStateForTask(task) {
+  if (!task?.id) return;
+  if (!task.done && isTaskAssignedToCurrentUser(task.assignedTo)) {
+    state.seenTaskIds.delete(task.id);
+    return;
+  }
+  if (task.done || !isTaskAssignedToCurrentUser(task.assignedTo)) {
+    state.seenTaskIds.delete(task.id);
+  }
+}
+
+function removeTaskCopiesByGroupId(taskGroupId) {
+  if (!taskGroupId) return false;
+  const taskCopies = getTaskGroupCopies(taskGroupId);
+  if (!taskCopies.length) return false;
+  const removalsByNode = new Map();
+  taskCopies.forEach((taskCopy) => {
+    if (!removalsByNode.has(taskCopy.node.id)) {
+      removalsByNode.set(taskCopy.node.id, []);
+    }
+    removalsByNode.get(taskCopy.node.id).push(taskCopy.taskIndex);
+  });
+  removalsByNode.forEach((taskIndexes, nodeId) => {
+    const node = getAnyNodeById(nodeId);
+    if (!node || !Array.isArray(node.tasks)) return;
+    [...taskIndexes].sort((leftIndex, rightIndex) => rightIndex - leftIndex).forEach((taskIndex) => {
+      const removedTasks = node.tasks.splice(taskIndex, 1);
+      removedTasks.forEach((task) => {
+        if (task?.id) {
+          state.seenTaskIds.delete(task.id);
+        }
+      });
+    });
+  });
+  return true;
+}
+
+function applyGroupedTaskUpdate(originHandoverNode, taskGroupId, payload, linkedObjectIds, options = {}) {
+  if (!originHandoverNode || originHandoverNode.type !== "handover" || !taskGroupId) return false;
+  const normalizedLinkedObjectIds = normalizeTaskLinkedObjectIds(originHandoverNode, linkedObjectIds);
+  const targetNodeIds = [originHandoverNode.id, ...normalizedLinkedObjectIds];
+  const targetNodeIdSet = new Set(targetNodeIds);
+  const existingCopies = getTaskGroupCopies(taskGroupId);
+  const existingCopyByNodeId = new Map(existingCopies.map((taskCopy) => [taskCopy.node.id, taskCopy]));
+
+  const removalsByNode = new Map();
+  existingCopies.forEach((taskCopy) => {
+    if (targetNodeIdSet.has(taskCopy.node.id)) return;
+    if (!removalsByNode.has(taskCopy.node.id)) {
+      removalsByNode.set(taskCopy.node.id, []);
+    }
+    removalsByNode.get(taskCopy.node.id).push(taskCopy.taskIndex);
+  });
+  removalsByNode.forEach((taskIndexes, nodeId) => {
+    const node = getAnyNodeById(nodeId);
+    if (!node || !Array.isArray(node.tasks)) return;
+    [...taskIndexes].sort((leftIndex, rightIndex) => rightIndex - leftIndex).forEach((taskIndex) => {
+      const removedTasks = node.tasks.splice(taskIndex, 1);
+      removedTasks.forEach((task) => {
+        if (task?.id) {
+          state.seenTaskIds.delete(task.id);
+        }
+      });
+    });
+  });
+
+  targetNodeIds.forEach((targetNodeId) => {
+    const targetNode = getAnyNodeById(targetNodeId);
+    if (!targetNode) return;
+    if (!Array.isArray(targetNode.tasks)) {
+      targetNode.tasks = [];
+    }
+    const existingCopy = existingCopyByNodeId.get(targetNodeId);
+    const nextTask = normalizeTaskRecord({
+      id: existingCopy?.task?.id || (targetNodeId === originHandoverNode.id && options.preferredTaskId ? options.preferredTaskId : generateTaskId()),
+      text: payload.text,
+      done: !!payload.done,
+      assignedTo: payload.assignedTo,
+      taskGroupId,
+      originNodeId: originHandoverNode.id,
+      linkedObjectIds: normalizedLinkedObjectIds
+    });
+    if (existingCopy) {
+      targetNode.tasks[existingCopy.taskIndex] = nextTask;
+    } else {
+      targetNode.tasks.push(nextTask);
+    }
+    syncSeenStateForTask(nextTask);
+  });
+  return true;
+}
+
+function saveTaskDraft(node, draft, existingTask = null) {
+  if (!node) return false;
+  const text = String(draft?.text || "").trim();
+  if (!text) return false;
+  const assigneeOptions = getTaskAssigneeOptionsForContext(node, existingTask);
+  const assignedTo = assigneeOptions.includes(String(draft?.assignedTo || "")) ? String(draft.assignedTo || "") : (assigneeOptions[0] || "");
+  const handoverContextNode = getTaskHandoverContextNode(node, existingTask);
+  const linkedObjectIds = handoverContextNode
+    ? normalizeTaskLinkedObjectIds(handoverContextNode, draft?.linkedObjectIds)
+    : [];
+
+  if (existingTask?.taskGroupId && handoverContextNode) {
+    return applyGroupedTaskUpdate(
+      handoverContextNode,
+      existingTask.taskGroupId,
+      {
+        text,
+        done: !!existingTask.done,
+        assignedTo
+      },
+      linkedObjectIds,
+      {
+        preferredTaskId: existingTask.id
+      }
+    );
+  }
+
+  if (!existingTask && handoverContextNode && linkedObjectIds.length) {
+    return applyGroupedTaskUpdate(
+      handoverContextNode,
+      generateTaskGroupId(),
+      {
+        text,
+        done: false,
+        assignedTo
+      },
+      linkedObjectIds
+    );
+  }
+
+  if (existingTask && handoverContextNode && linkedObjectIds.length) {
+    return applyGroupedTaskUpdate(
+      handoverContextNode,
+      existingTask.taskGroupId || generateTaskGroupId(),
+      {
+        text,
+        done: !!existingTask.done,
+        assignedTo
+      },
+      linkedObjectIds,
+      {
+        preferredTaskId: existingTask.id
+      }
+    );
+  }
+
+  if (!Array.isArray(node.tasks)) {
+    node.tasks = [];
+  }
+  const nextTask = normalizeTaskRecord({
+    id: existingTask?.id || generateTaskId(),
+    text,
+    done: !!existingTask?.done,
+    assignedTo
+  });
+  if (existingTask) {
+    const taskRecord = findTaskRecord(node.id, existingTask.id, { searchAllNodes: true });
+    if (!taskRecord) return false;
+    taskRecord.node.tasks[taskRecord.taskIndex] = nextTask;
+  } else {
+    node.tasks.push(nextTask);
+  }
+  syncSeenStateForTask(nextTask);
+  return true;
+}
+
+function setTaskDoneState(nodeId, taskId, done) {
+  const taskRecord = findTaskRecord(nodeId, taskId, { searchAllNodes: true });
+  if (!taskRecord) return false;
+  if (taskRecord.task.taskGroupId) {
+    const handoverContextNode = getTaskHandoverContextNode(taskRecord.node, taskRecord.task);
+    if (handoverContextNode) {
+      return applyGroupedTaskUpdate(
+        handoverContextNode,
+        taskRecord.task.taskGroupId,
+        {
+          text: taskRecord.task.text,
+          done: !!done,
+          assignedTo: taskRecord.task.assignedTo
+        },
+        taskRecord.task.linkedObjectIds
+      );
+    }
+    getTaskGroupCopies(taskRecord.task.taskGroupId).forEach((taskCopy) => {
+      taskCopy.task.done = !!done;
+      syncSeenStateForTask(taskCopy.task);
+    });
+    return true;
+  }
+  taskRecord.task.done = !!done;
+  syncSeenStateForTask(taskRecord.task);
+  return true;
+}
+
+function deleteTaskById(nodeId, taskId) {
+  const taskRecord = findTaskRecord(nodeId, taskId, { searchAllNodes: true });
+  if (!taskRecord) return false;
+  if (taskRecord.task.taskGroupId) {
+    return removeTaskCopiesByGroupId(taskRecord.task.taskGroupId);
+  }
+  const removedTasks = taskRecord.node.tasks.splice(taskRecord.taskIndex, 1);
+  removedTasks.forEach((task) => {
+    if (task?.id) {
+      state.seenTaskIds.delete(task.id);
+    }
+  });
+  return removedTasks.length > 0;
+}
+
+function getTaskObjectNodes(task, node) {
+  const handoverContextNode = getTaskHandoverContextNode(node, task);
+  if (!handoverContextNode) return [];
+  return normalizeTaskLinkedObjectIds(handoverContextNode, task?.linkedObjectIds)
+    .map((nodeId) => getNodeById(nodeId))
+    .filter(Boolean)
+    .sort(compareNodesByDisplayLabel);
+}
+
+function getTaskSlashRange(text, selectionStart) {
+  if (typeof selectionStart !== "number") return null;
+  const beforeCursor = String(text || "").slice(0, selectionStart);
+  const match = beforeCursor.match(/(^|\s)\\([^\s\\]*)$/);
+  if (!match) return null;
+  const query = match[2] || "";
+  return {
+    start: selectionStart - query.length - 1,
+    end: selectionStart,
+    query
+  };
+}
+
+function getTaskSlashOptions(node, draftState, task = null) {
+  const handoverContextNode = getTaskHandoverContextNode(node, task);
+  if (!handoverContextNode || !draftState?.slashRange) return [];
+  const selectedObjectIds = new Set(Array.isArray(draftState.linkedObjectIds) ? draftState.linkedObjectIds : []);
+  const query = String(draftState.slashRange.query || "").trim().toLowerCase();
+  return getHandoverObjectCandidates(handoverContextNode)
+    .filter((candidateNode) => !selectedObjectIds.has(candidateNode.id))
+    .filter((candidateNode) => {
+      if (!query) return true;
+      const label = getNodeDisplayTitle(candidateNode, { fallback: getNodeTitleFallback(candidateNode) }).toLowerCase();
+      return label.includes(query) || candidateNode.type.toLowerCase().includes(query);
+    })
+    .sort(compareNodesByDisplayLabel);
+}
+
+function applyTaskSlashSelection(draftState, inputEl, objectNodeId) {
+  if (!draftState || !inputEl || !draftState.slashRange) return;
+  const nextLinkedObjectIds = [...new Set([...(draftState.linkedObjectIds || []), objectNodeId])];
+  const beforeSlash = draftState.text.slice(0, draftState.slashRange.start);
+  const afterSlash = draftState.text.slice(draftState.slashRange.end);
+  let nextText = `${beforeSlash}${afterSlash}`;
+  nextText = nextText.replace(/\s{2,}/g, " ").trim();
+  if (beforeSlash && !beforeSlash.endsWith(" ") && afterSlash && !afterSlash.startsWith(" ")) {
+    nextText = `${beforeSlash} ${afterSlash}`.replace(/\s{2,}/g, " ").trim();
+  }
+  draftState.text = nextText;
+  draftState.linkedObjectIds = nextLinkedObjectIds;
+  draftState.slashRange = null;
+  inputEl.value = nextText;
+  const caretPosition = nextText.length;
+  inputEl.focus();
+  if (typeof inputEl.setSelectionRange === "function") {
+    inputEl.setSelectionRange(caretPosition, caretPosition);
+  }
+}
+
+function createTaskDraftState(node, task = null) {
+  const assigneeOptions = getTaskAssigneeOptionsForContext(node, task);
+  const selectedAssignee = assigneeOptions.includes(String(task?.assignedTo || ""))
+    ? String(task.assignedTo || "")
+    : (assigneeOptions[0] || "");
+  const handoverContextNode = getTaskHandoverContextNode(node, task);
+  return {
+    nodeId: node?.id || null,
+    taskId: task?.id || null,
+    text: typeof task?.text === "string" ? task.text : "",
+    assignedTo: selectedAssignee,
+    linkedObjectIds: handoverContextNode ? normalizeTaskLinkedObjectIds(handoverContextNode, task?.linkedObjectIds) : [],
+    slashRange: null
+  };
+}
+
+function formatCommentTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function canCurrentUserDeleteComment(node, comment) {
+  if (!node || !comment) return false;
+  if (isNodeOwnedByCurrentUser(node)) return true;
+  return getCurrentUserCommentAuthorLabels().has(String(comment.author || "").trim());
+}
+
+function getTaskAssigneeOptions(node = null) {
+  if (node?.type === "handover") {
+    const options = [];
+    const seenLabels = new Set();
+    const ownerLabel = getOwnerDisplayName(node);
+    if (ownerLabel && !seenLabels.has(ownerLabel)) {
+      seenLabels.add(ownerLabel);
+      options.push(ownerLabel);
+    }
+    getResolvedHandoverCollaborators(node)
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }))
+      .forEach((collaborator) => {
+        if (!collaborator.label || seenLabels.has(collaborator.label)) return;
+        seenLabels.add(collaborator.label);
+        options.push(collaborator.label);
+      });
+    return options;
+  }
+  const owners = [...new Set(nodes.map((nodeRecord) => nodeRecord.owner))];
+  if (!owners.includes(CURRENT_USER)) owners.push(CURRENT_USER);
+  return owners.sort((a, b) => a.localeCompare(b));
+}
+
+function canCurrentUserManageHandoverTasks(node) {
+  if (!node || node.type !== "handover") return true;
+  return isNodeOwnedByCurrentUser(node) || isCurrentUserHandoverCollaborator(node);
+}
+
+function getFirstSelectableNodeId(nodeList = nodes) {
+  const firstSelectable = (nodeList || []).find((node) => isSelectableNode(node));
+  return firstSelectable ? firstSelectable.id : null;
+}
+
 function getWorkspaceOptionsForCurrentUser() {
   if (!currentUserId) return [];
   return workspaceOptions.filter((workspace) => workspace.ownerId === currentUserId);
+}
+
+function getLinkableWorkspaceOptionsForCurrentUser(excludeWorkspaceId = currentWorkspaceId) {
+  const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
+  if (!visibleWorkspaceOptions.length) return [];
+  if (!excludeWorkspaceId) return [...visibleWorkspaceOptions];
+  return visibleWorkspaceOptions.filter((workspace) => workspace.id !== excludeWorkspaceId);
+}
+
+function getPortalLinkedWorkspaceName(node) {
+  if (!node || node.type !== "portal") return "";
+  const linkedWorkspaceId = typeof node.linkedWorkspaceId === "string" ? node.linkedWorkspaceId : "";
+  if (!linkedWorkspaceId) return "";
+  const workspaceRecord = workspaceById.get(linkedWorkspaceId);
+  if (!workspaceRecord) return "";
+  return workspaceRecord.name || linkedWorkspaceId;
+}
+
+function getPortalLabelFontShorthand() {
+  const bodyStyle = document.body ? window.getComputedStyle(document.body) : null;
+  const fontFamily = bodyStyle?.fontFamily || "system-ui, sans-serif";
+  return `${PORTAL_LABEL_FONT_WEIGHT} ${PORTAL_LABEL_FONT_SIZE_PX}px ${fontFamily}`;
+}
+
+function measurePortalLabelWidth(label) {
+  const normalizedLabel = String(label || "").trim();
+  if (!normalizedLabel) return 0;
+  const font = getPortalLabelFontShorthand();
+  const cacheKey = `${font}::${normalizedLabel}`;
+  if (portalLabelWidthCache.has(cacheKey)) {
+    return portalLabelWidthCache.get(cacheKey);
+  }
+  if (!portalLabelMeasureContext) {
+    portalLabelMeasureContext = document.createElement("canvas").getContext("2d");
+  }
+  const fallbackWidth = Math.ceil(normalizedLabel.length * (PORTAL_LABEL_FONT_SIZE_PX * 0.68));
+  if (!portalLabelMeasureContext) {
+    portalLabelWidthCache.set(cacheKey, fallbackWidth);
+    return fallbackWidth;
+  }
+  portalLabelMeasureContext.font = font;
+  const width = Math.max(1, Math.ceil(portalLabelMeasureContext.measureText(normalizedLabel).width));
+  portalLabelWidthCache.set(cacheKey, width);
+  return width;
+}
+
+function getEntityLabelFontShorthand() {
+  const bodyStyle = document.body ? window.getComputedStyle(document.body) : null;
+  const fontFamily = bodyStyle?.fontFamily || "system-ui, sans-serif";
+  return `${ENTITY_LABEL_FONT_WEIGHT} ${ENTITY_LABEL_FONT_SIZE_PX}px ${fontFamily}`;
+}
+
+function measureEntityLabelWidth(label) {
+  const normalizedLabel = String(label || "").trim();
+  if (!normalizedLabel) return 0;
+  const font = getEntityLabelFontShorthand();
+  const cacheKey = `${font}::${normalizedLabel}`;
+  if (entityLabelWidthCache.has(cacheKey)) {
+    return entityLabelWidthCache.get(cacheKey);
+  }
+  if (!portalLabelMeasureContext) {
+    portalLabelMeasureContext = document.createElement("canvas").getContext("2d");
+  }
+  const fallbackWidth = Math.ceil(normalizedLabel.length * (ENTITY_LABEL_FONT_SIZE_PX * 0.62));
+  if (!portalLabelMeasureContext) {
+    entityLabelWidthCache.set(cacheKey, fallbackWidth);
+    return fallbackWidth;
+  }
+  portalLabelMeasureContext.font = font;
+  const width = Math.max(1, Math.ceil(portalLabelMeasureContext.measureText(normalizedLabel).width));
+  entityLabelWidthCache.set(cacheKey, width);
+  return width;
+}
+
+function getEntityDiamondSize(node) {
+  const label = node?.label || getEntityLabelFallback(node) || "Entity";
+  const measuredTextWidth = measureEntityLabelWidth(label) + ENTITY_DIAMOND_TEXT_WIDTH_FUDGE_PX;
+  const width = clamp(
+    Math.ceil(measuredTextWidth / ENTITY_DIAMOND_TEXT_WIDTH_RATIO),
+    ENTITY_DIAMOND_MIN_WIDTH_PX,
+    ENTITY_DIAMOND_MAX_WIDTH_PX
+  );
+  const availableTextWidth = Math.max(
+    1,
+    Math.floor((width * ENTITY_DIAMOND_TEXT_WIDTH_RATIO) - GRAPH_NODE_TEXT_INSET_PX)
+  );
+  const estimatedLineCount = clamp(
+    Math.ceil(measuredTextWidth / availableTextWidth),
+    1,
+    3
+  );
+  return {
+    width,
+    height: ENTITY_DIAMOND_HEIGHT_PX + ((estimatedLineCount - 1) * Math.round(ENTITY_LABEL_LINE_HEIGHT_PX * 0.9))
+  };
+}
+
+function getNodeOccupiedExtents(node, expandedLocationId = null) {
+  const size = getCardSize(node, expandedLocationId);
+  const halfWidth = size.width / 2;
+  const halfHeight = size.height / 2;
+  const extents = {
+    left: -halfWidth,
+    right: halfWidth,
+    top: -halfHeight,
+    bottom: halfHeight
+  };
+  if (!node || node.type !== "portal") {
+    return {
+      ...extents,
+      width: extents.right - extents.left,
+      height: extents.bottom - extents.top
+    };
+  }
+  const linkedWorkspaceName = getPortalLinkedWorkspaceName(node);
+  if (!linkedWorkspaceName) {
+    return {
+      ...extents,
+      width: extents.right - extents.left,
+      height: extents.bottom - extents.top
+    };
+  }
+  const halfLabelWidth = measurePortalLabelWidth(linkedWorkspaceName) / 2;
+  extents.left = Math.min(extents.left, -halfLabelWidth);
+  extents.right = Math.max(extents.right, halfLabelWidth);
+  extents.top -= PORTAL_LABEL_GAP_PX + PORTAL_LABEL_LINE_HEIGHT_PX;
+  return {
+    ...extents,
+    width: extents.right - extents.left,
+    height: extents.bottom - extents.top
+  };
+}
+
+function getNodeOccupiedSize(node, expandedLocationId = null) {
+  const extents = getNodeOccupiedExtents(node, expandedLocationId);
+  return {
+    width: extents.width,
+    height: extents.height
+  };
+}
+
+function getNodeOccupiedRect(node, frame, expandedLocationId = null) {
+  if (!node || !frame) {
+    return { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+  const center = getNodeVisualCenter(node, frame);
+  const extents = getNodeOccupiedExtents(node, expandedLocationId);
+  return {
+    left: center.x + extents.left,
+    top: center.y + extents.top,
+    right: center.x + extents.right,
+    bottom: center.y + extents.bottom
+  };
+}
+
+function getNodeOccupiedCollisionRadius(node, expandedLocationId = null) {
+  const extents = getNodeOccupiedExtents(node, expandedLocationId);
+  const corners = [
+    [extents.left, extents.top],
+    [extents.right, extents.top],
+    [extents.left, extents.bottom],
+    [extents.right, extents.bottom]
+  ];
+  return corners.reduce((maxRadius, [x, y]) => {
+    const radius = Math.sqrt((x * x) + (y * y));
+    return Math.max(maxRadius, radius);
+  }, 0);
+}
+
+function reconcileLegacyPortalGraphPositions() {
+  if (!store) return false;
+  const storeMeta = store.meta && typeof store.meta === "object" ? { ...store.meta } : {};
+  const currentVersion = Number(storeMeta.portalGraphPosSchemaVersion || 0);
+  if (currentVersion >= PORTAL_GRAPH_POS_SCHEMA_VERSION) {
+    return false;
+  }
+
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "portal") return;
+    if (!node.graphPos || !Number.isFinite(node.graphPos.x) || !Number.isFinite(node.graphPos.y)) return;
+    node.graphPos = {
+      x: node.graphPos.x,
+      y: node.graphPos.y + LEGACY_PORTAL_GRAPH_POS_Y_OFFSET_PX
+    };
+    changed = true;
+  });
+
+  storeMeta.portalGraphPosSchemaVersion = PORTAL_GRAPH_POS_SCHEMA_VERSION;
+  store.meta = storeMeta;
+  if (changed) {
+    syncNodeRuntimeAndStore();
+    persistStoreToLocalStorage();
+  }
+  return changed;
 }
 
 function setCurrentWorkspaceForCurrentUser() {
@@ -527,6 +1857,28 @@ function resetWorkspaceCreateState() {
 function resetWorkspaceRenameState() {
   workspaceRenameId = null;
   workspaceRenameDraft = "";
+}
+
+function resetDetailsEditState() {
+  detailsTitleEditNodeId = null;
+  detailsTitleDraft = "";
+  detailsSummaryEditNodeId = null;
+  detailsSummaryDraft = "";
+  detailsTaskComposerState = {
+    nodeId: null,
+    text: "",
+    assignedTo: "",
+    linkedObjectIds: [],
+    slashRange: null
+  };
+  detailsTaskEditState = {
+    nodeId: null,
+    taskId: null,
+    text: "",
+    assignedTo: "",
+    linkedObjectIds: [],
+    slashRange: null
+  };
 }
 
 function syncNodeRuntimeAndStore() {
@@ -552,6 +1904,7 @@ function generateNodeId(type) {
 function setNodeTitleById(nodeId, nextTitle, options = {}) {
   const node = getNodeById(nodeId);
   if (!node) return false;
+  if (!canInlineEditNodeTitle(node)) return false;
   const normalizedTitle = String(nextTitle ?? "").trim();
   node.title = normalizedTitle;
   node.label = normalizedTitle;
@@ -561,6 +1914,18 @@ function setNodeTitleById(nodeId, nextTitle, options = {}) {
   if (!node.summary.trim() && normalizedTitle) {
     node.summary = `${normalizedTitle} node`;
   }
+  syncNodeRuntimeAndStore();
+  if (options.persist !== false) {
+    persistStoreToLocalStorage();
+  }
+  return true;
+}
+
+function setNodeSummaryById(nodeId, nextSummary, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node) return false;
+  if (!isNodeOwnedByCurrentUser(node)) return false;
+  node.summary = String(nextSummary ?? "").trim();
   syncNodeRuntimeAndStore();
   if (options.persist !== false) {
     persistStoreToLocalStorage();
@@ -579,6 +1944,76 @@ function setProcessStatusById(nodeId, nextStatus, options = {}) {
   return true;
 }
 
+function setHandoverStatusById(nodeId, nextStatus, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover") return false;
+  const allowedStatuses = getEditableHandoverStatusesForCurrentUser(node);
+  const normalizedStatus = normalizeHandoverStatus(nextStatus);
+  if (!allowedStatuses.includes(normalizedStatus)) return false;
+  node.status = normalizedStatus;
+  syncNodeRuntimeAndStore();
+  if (options.persist !== false) {
+    persistStoreToLocalStorage();
+  }
+  return true;
+}
+
+function addHandoverCollaborator(nodeId, kind, refId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const normalizedCollaborator = normalizeHandoverCollaboratorEntry({ kind, refId, shareWorkspace: false });
+  if (!normalizedCollaborator) return false;
+  const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
+  const nextCollaborators = Array.isArray(node.handoverCollaborators)
+    ? node.handoverCollaborators.map((collaborator) => ({ ...collaborator }))
+    : [];
+  if (nextCollaborators.some((collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId) === signature)) {
+    return false;
+  }
+  nextCollaborators.push(normalizedCollaborator);
+  node.handoverCollaborators = nextCollaborators;
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function removeHandoverCollaborator(nodeId, kind, refId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const collaboratorSignature = getHandoverCollaboratorSignature(kind, refId);
+  const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  const nextCollaborators = currentCollaborators.filter(
+    (collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId) !== collaboratorSignature
+  );
+  if (nextCollaborators.length === currentCollaborators.length) return false;
+  node.handoverCollaborators = nextCollaborators;
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function toggleHandoverCollaboratorShare(nodeId, kind, refId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const collaboratorSignature = getHandoverCollaboratorSignature(kind, refId);
+  const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  let changed = false;
+  node.handoverCollaborators = currentCollaborators.map((collaborator) => {
+    if (getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId) !== collaboratorSignature) {
+      return collaborator;
+    }
+    changed = true;
+    return {
+      ...collaborator,
+      shareWorkspace: !collaborator.shareWorkspace
+    };
+  });
+  if (!changed) return false;
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
 function cycleProcessStatus(nodeId) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "process") return;
@@ -592,6 +2027,7 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
   if (!workspaceRecord) return null;
 
   const normalizedType = normalizeNodeType(type);
+  if (normalizedType === "collaboration") return null;
   const owner = getCurrentUserRecord();
   const nodeId = generateNodeId(normalizedType);
   const nodeTitle = "";
@@ -618,6 +2054,18 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
   if (normalizedType === "process") {
     nextNode.status = "Planned";
   }
+  if (normalizedType === "handover") {
+    nextNode.status = "Draft";
+    nextNode.handoverCollaborators = [];
+    nextNode.handoverNodeIds = [];
+  }
+  if (normalizedType === "portal") {
+    nextNode.linkedWorkspaceId = null;
+  }
+  if (normalizedType === "entity") {
+    nextNode.entityKind = null;
+    nextNode.entityRefId = null;
+  }
 
   allNodesRuntime.push(nextNode);
   if (!Array.isArray(workspaceRecord.nodeIds)) {
@@ -632,8 +2080,8 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
   persistStoreToLocalStorage();
 
   suppressNextWorkspaceAutoFit = true;
-  newNodeInlineEditId = normalizedType === "portal" ? null : nodeId;
-  state.selectedNodeId = nodeId;
+  newNodeInlineEditId = (normalizedType === "portal" || normalizedType === "entity") ? null : nodeId;
+  state.selectedNodeId = isSelectableNode(nextNode) ? nodeId : null;
   hasAppliedWorkspace = false;
   renderAll();
   return getNodeById(nodeId);
@@ -642,7 +2090,7 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
 function shouldOpenCreateNodeMenuForTarget(target) {
   if (!(target instanceof Element)) return false;
   return !target.closest(
-    ".node-card, .edge-line, .edge-hit, .edge-chevron, .lens-card, #workspaceMenu, .panel, .panel-pill, .notif-wrap, .layout-mode-controls, #mapCreateMenu, #edgeCreateHandle, #edgeActionMenu"
+    ".node-card, .edge-line, .edge-hit, .edge-chevron, .lens-card, #workspaceMenu, .panel, .panel-pill, .notif-wrap, .layout-mode-controls, #mapCreateMenu, #edgeCreateHandle, #edgeActionMenu, #portalLinkModalOverlay, #entityLinkModalOverlay, .portal-link-modal, .portal-link-modal-overlay"
   );
 }
 
@@ -913,14 +2361,26 @@ function getWorldPointFromClient(clientX, clientY) {
 
 function isPointNearNodeBorder(node, frame, worldX, worldY, thresholdPx = EDGE_HANDLE_BORDER_HIT_PX) {
   if (!node || !frame) return false;
-  if (node.type === "portal") {
-    const cx = frame.x + (frame.w / 2);
-    const cy = frame.y + (frame.h / 2);
-    const radius = Math.min(frame.w, frame.h) / 2;
+  if (isCircularNodeType(node)) {
+    const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = worldX - cx;
     const dy = worldY - cy;
     const dist = Math.sqrt((dx * dx) + (dy * dy));
-    return Math.abs(dist - radius) <= thresholdPx;
+    const circleThresholdPx = node.type === "portal"
+      ? (
+        Number.isFinite(thresholdPx)
+          ? Math.min(thresholdPx, EDGE_HANDLE_BORDER_HIT_PORTAL_PX)
+          : EDGE_HANDLE_BORDER_HIT_PORTAL_PX
+      )
+      : thresholdPx;
+    return Math.abs(dist - radius) <= circleThresholdPx;
+  }
+  if (isDiamondNodeType(node)) {
+    const diamondThresholdPx = Number.isFinite(thresholdPx)
+      ? Math.min(thresholdPx, EDGE_HANDLE_BORDER_HIT_ENTITY_PX)
+      : EDGE_HANDLE_BORDER_HIT_ENTITY_PX;
+    return isPointInsideDiamond(frame, worldX, worldY, diamondThresholdPx)
+      && !isPointInsideDiamond(frame, worldX, worldY, -diamondThresholdPx);
   }
   if (
     worldX < frame.x - thresholdPx ||
@@ -1022,6 +2482,8 @@ function isEdgeActionBlocked() {
     dragState.isDragging ||
     resizeState.isResizing ||
     createNodeMenuOpen ||
+    portalLinkModalState.open ||
+    entityLinkModalState.open ||
     workspaceMenuOpen ||
     userMenuOpen
   );
@@ -1117,12 +2579,98 @@ function updateEdgeActionIntent(candidate) {
   edgeActionIntent.endY = candidate.endY;
 }
 
+function getPortalBodyFrameFromWrapperFrame(node, frame, expandedLocationId = null) {
+  if (!node || !frame) {
+    return { x: 0, y: 0, w: 0, h: 0 };
+  }
+  const size = getCardSize(node, expandedLocationId);
+  const extents = getNodeOccupiedExtents(node, expandedLocationId);
+  return {
+    x: frame.x - extents.left - (size.width / 2),
+    y: frame.y - extents.top - (size.height / 2),
+    w: size.width,
+    h: size.height
+  };
+}
+
+function getPortalBodyFrame(node, frame, expandedLocationId = null) {
+  if (!node || !frame || node.type !== "portal") {
+    return frame || { x: 0, y: 0, w: 0, h: 0 };
+  }
+  const size = getCardSize(node, expandedLocationId);
+  if (frame.w <= size.width && frame.h <= size.height) {
+    return {
+      x: frame.x,
+      y: frame.y,
+      w: size.width,
+      h: size.height
+    };
+  }
+  const cachedFrame = lastVisibleNodeBodyFrames.get(node.id);
+  if (cachedFrame) {
+    return cachedFrame;
+  }
+  return getPortalBodyFrameFromWrapperFrame(node, frame, expandedLocationId);
+}
+
+function getCircleMetrics(node, frame) {
+  const circleFrame = node?.type === "portal"
+    ? getPortalBodyFrame(node, frame)
+    : frame;
+  const diameter = Math.min(circleFrame.w, circleFrame.h);
+  const radius = diameter / 2;
+  return {
+    cx: circleFrame.x + (circleFrame.w / 2),
+    cy: circleFrame.y + (circleFrame.h / 2),
+    radius
+  };
+}
+
+function isPointInsideDiamond(frame, worldX, worldY, paddingPx = 0) {
+  if (!frame) return false;
+  const halfWidth = (frame.w / 2) + paddingPx;
+  const halfHeight = (frame.h / 2) + paddingPx;
+  if (!(halfWidth > 0) || !(halfHeight > 0)) return false;
+  const centerX = frame.x + (frame.w / 2);
+  const centerY = frame.y + (frame.h / 2);
+  const normalized = (Math.abs(worldX - centerX) / halfWidth) + (Math.abs(worldY - centerY) / halfHeight);
+  return normalized <= 1;
+}
+
+function getDiamondBorderAnchor(frame, towardX, towardY) {
+  if (!frame) return { x: towardX, y: towardY };
+  const centerX = frame.x + (frame.w / 2);
+  const centerY = frame.y + (frame.h / 2);
+  const dx = towardX - centerX;
+  const dy = towardY - centerY;
+  if (dx === 0 && dy === 0) {
+    return { x: centerX, y: frame.y };
+  }
+  const halfWidth = Math.max(frame.w / 2, 1);
+  const halfHeight = Math.max(frame.h / 2, 1);
+  const scale = 1 / ((Math.abs(dx) / halfWidth) + (Math.abs(dy) / halfHeight) || 1);
+  return {
+    x: centerX + (dx * scale),
+    y: centerY + (dy * scale)
+  };
+}
+
+function getNodeVisualCenter(node, frame) {
+  if (!node || !frame) return { x: 0, y: 0 };
+  if (isCircularNodeType(node)) {
+    const { cx, cy } = getCircleMetrics(node, frame);
+    return { x: cx, y: cy };
+  }
+  return {
+    x: frame.x + (frame.w / 2),
+    y: frame.y + (frame.h / 2)
+  };
+}
+
 function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
   if (!node || !frame) return { x: worldX, y: worldY };
-  if (node.type === "portal") {
-    const cx = frame.x + (frame.w / 2);
-    const cy = frame.y + (frame.h / 2);
-    const radius = Math.min(frame.w, frame.h) / 2;
+  if (isCircularNodeType(node)) {
+    const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = worldX - cx;
     const dy = worldY - cy;
     const len = Math.sqrt((dx * dx) + (dy * dy)) || 1;
@@ -1130,6 +2678,9 @@ function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
       x: cx + ((dx / len) * radius),
       y: cy + ((dy / len) * radius)
     };
+  }
+  if (isDiamondNodeType(node)) {
+    return getDiamondBorderAnchor(frame, worldX, worldY);
   }
   const left = frame.x;
   const right = frame.x + frame.w;
@@ -1154,10 +2705,8 @@ function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
 
 function getBorderAnchorToward(node, frame, towardX, towardY) {
   if (!node || !frame) return { x: towardX, y: towardY };
-  if (node.type === "portal") {
-    const cx = frame.x + (frame.w / 2);
-    const cy = frame.y + (frame.h / 2);
-    const radius = Math.min(frame.w, frame.h) / 2;
+  if (isCircularNodeType(node)) {
+    const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = towardX - cx;
     const dy = towardY - cy;
     const len = Math.sqrt((dx * dx) + (dy * dy)) || 1;
@@ -1166,12 +2715,16 @@ function getBorderAnchorToward(node, frame, towardX, towardY) {
       y: cy + ((dy / len) * radius)
     };
   }
+  if (isDiamondNodeType(node)) {
+    return getDiamondBorderAnchor(frame, towardX, towardY);
+  }
   return getBorderPointToward(frame, towardX, towardY);
 }
 
-function getAnchorAngleFromCenter(frame, anchorX, anchorY) {
-  const cx = frame.x + (frame.w / 2);
-  const cy = frame.y + (frame.h / 2);
+function getAnchorAngleFromCenter(node, frame, anchorX, anchorY) {
+  const center = getNodeVisualCenter(node, frame);
+  const cx = center.x;
+  const cy = center.y;
   return Math.atan2(anchorY - cy, anchorX - cx) * (180 / Math.PI);
 }
 
@@ -1204,7 +2757,7 @@ function resolveEdgeHoverCandidate(event) {
     nodeId,
     anchorX: anchor.x,
     anchorY: anchor.y,
-    angleDeg: getAnchorAngleFromCenter(frame, anchor.x, anchor.y),
+    angleDeg: getAnchorAngleFromCenter(node, frame, anchor.x, anchor.y),
     clientX: event.clientX,
     clientY: event.clientY
   };
@@ -1448,8 +3001,9 @@ function updateEdgeDraftFromPointer(event) {
       const sourceFrame = lastVisibleNodeFrames.get(edgeCreateDraft.sourceId);
       const targetFrame = lastVisibleNodeFrames.get(targetId);
       if (sourceNode && targetNode && sourceFrame && targetFrame) {
-        const sourceCx = sourceFrame.x + (sourceFrame.w / 2);
-        const sourceCy = sourceFrame.y + (sourceFrame.h / 2);
+        const sourceCenter = getNodeVisualCenter(sourceNode, sourceFrame);
+        const sourceCx = sourceCenter.x;
+        const sourceCy = sourceCenter.y;
         const targetAnchor = getBorderAnchorToward(targetNode, targetFrame, sourceCx, sourceCy);
         edgeCreateDraft.endX = targetAnchor.x;
         edgeCreateDraft.endY = targetAnchor.y;
@@ -1495,15 +3049,24 @@ function sanitizeAfterNodeDelete() {
   hasAppliedWorkspace = false;
   if (state.selectedNodeId && !allNodesRuntime.some((node) => node.id === state.selectedNodeId)) {
     state.selectedNodeId = null;
+    resetDetailsEditState();
   }
   if (newNodeInlineEditId && !allNodesRuntime.some((node) => node.id === newNodeInlineEditId)) {
     newNodeInlineEditId = null;
+  }
+  if (portalLinkModalState.open && portalLinkModalState.nodeId && !allNodesRuntime.some((node) => node.id === portalLinkModalState.nodeId)) {
+    closePortalLinkModal({ keepNode: true });
+  }
+  if (entityLinkModalState.open && entityLinkModalState.nodeId && !allNodesRuntime.some((node) => node.id === entityLinkModalState.nodeId)) {
+    closeEntityLinkModal({ keepNode: true });
   }
 }
 
 function deleteNodeFromCurrentWorkspace(nodeId) {
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
   if (!workspaceRecord || !nodeId) return false;
+  const node = allNodesRuntime.find((entry) => entry.id === nodeId);
+  if (node?.type === "collaboration") return false;
   if (!Array.isArray(workspaceRecord.nodeIds)) {
     workspaceRecord.nodeIds = [];
   }
@@ -1529,8 +3092,10 @@ function deleteNodeFromCurrentWorkspace(nodeId) {
 
 function deleteNodeGlobally(nodeId) {
   if (!nodeId) return false;
-  const nodeExists = allNodesRuntime.some((node) => node.id === nodeId);
+  const nodeRecord = allNodesRuntime.find((node) => node.id === nodeId);
+  const nodeExists = !!nodeRecord;
   if (!nodeExists) return false;
+  if (nodeRecord?.type === "collaboration") return false;
 
   allNodesRuntime = allNodesRuntime.filter((node) => node.id !== nodeId);
   const removedEdgeIds = new Set(
@@ -1560,6 +3125,7 @@ function deleteNodeGlobally(nodeId) {
 function requestNodeDelete(nodeId) {
   const node = getNodeById(nodeId);
   if (!node) return;
+  if (node.type === "collaboration") return;
   const membershipCount = getWorkspaceMembershipCount(nodeId);
   let deleted = false;
 
@@ -1588,10 +3154,638 @@ function requestNodeDelete(nodeId) {
   renderAll();
 }
 
+function renderPortalLinkModal() {
+  if (!portalLinkModalOverlayEl || !portalLinkModalEl || !portalLinkModalSelectEl || !portalLinkModalConfirmBtnEl) return;
+  const isOpen = !!portalLinkModalState.open;
+  portalLinkModalOverlayEl.classList.toggle("is-open", isOpen);
+  portalLinkModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const portalNode = getNodeById(portalLinkModalState.nodeId);
+  if (!portalNode || portalNode.type !== "portal") {
+    portalLinkModalState.open = false;
+    portalLinkModalState.nodeId = null;
+    portalLinkModalState.selectedWorkspaceId = "";
+    portalLinkModalState.flow = "edit";
+    portalLinkModalOverlayEl.classList.remove("is-open");
+    portalLinkModalOverlayEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const linkableWorkspaces = getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId);
+  const linkedWorkspaceId = typeof portalNode.linkedWorkspaceId === "string" ? portalNode.linkedWorkspaceId : "";
+  let selectedWorkspaceId = portalLinkModalState.selectedWorkspaceId || "";
+  if (!linkableWorkspaces.some((workspace) => workspace.id === selectedWorkspaceId)) {
+    if (linkedWorkspaceId && linkableWorkspaces.some((workspace) => workspace.id === linkedWorkspaceId)) {
+      selectedWorkspaceId = linkedWorkspaceId;
+    } else {
+      selectedWorkspaceId = linkableWorkspaces[0]?.id || "";
+    }
+    portalLinkModalState.selectedWorkspaceId = selectedWorkspaceId;
+  }
+
+  portalLinkModalSelectEl.innerHTML = "";
+  if (!linkableWorkspaces.length) {
+    const optionEl = document.createElement("option");
+    optionEl.value = "";
+    optionEl.textContent = "No destination workspaces available";
+    portalLinkModalSelectEl.appendChild(optionEl);
+    portalLinkModalSelectEl.value = "";
+    portalLinkModalSelectEl.disabled = true;
+    portalLinkModalConfirmBtnEl.disabled = true;
+    portalLinkModalHintEl.textContent = "No other workspaces are currently available for this user.";
+  } else {
+    linkableWorkspaces.forEach((workspace) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = workspace.id;
+      optionEl.textContent = workspace.name || workspace.id;
+      portalLinkModalSelectEl.appendChild(optionEl);
+    });
+    portalLinkModalSelectEl.disabled = false;
+    portalLinkModalSelectEl.value = selectedWorkspaceId;
+    portalLinkModalConfirmBtnEl.disabled = !selectedWorkspaceId;
+    portalLinkModalHintEl.textContent = "Select a destination workspace.";
+  }
+}
+
+function openPortalLinkModal(nodeId, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "portal") return false;
+  state.selectedNodeId = node.id;
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  workspaceMenuOpen = false;
+  userMenuOpen = false;
+  renderWorkspaceMenu();
+  const linkableWorkspaces = getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId);
+  const existingLinkedWorkspaceId = typeof node.linkedWorkspaceId === "string" ? node.linkedWorkspaceId : "";
+  let selectedWorkspaceId = "";
+  if (existingLinkedWorkspaceId && linkableWorkspaces.some((workspace) => workspace.id === existingLinkedWorkspaceId)) {
+    selectedWorkspaceId = existingLinkedWorkspaceId;
+  } else {
+    selectedWorkspaceId = linkableWorkspaces[0]?.id || "";
+  }
+  portalLinkModalState = {
+    open: true,
+    nodeId: node.id,
+    selectedWorkspaceId,
+    flow: options.flow || "edit"
+  };
+  renderPortalLinkModal();
+  requestAnimationFrame(() => {
+    if (!portalLinkModalState.open) return;
+    if (!portalLinkModalSelectEl.disabled) {
+      portalLinkModalSelectEl.focus();
+      return;
+    }
+    portalLinkModalCloseBtnEl.focus();
+  });
+  return true;
+}
+
+function closePortalLinkModal(options = {}) {
+  const keepNode = options.keepNode !== false;
+  const modalNodeId = portalLinkModalState.nodeId;
+  portalLinkModalState = {
+    open: false,
+    nodeId: null,
+    selectedWorkspaceId: "",
+    flow: "edit"
+  };
+  renderPortalLinkModal();
+  if (!keepNode && modalNodeId) {
+    deleteNodeFromCurrentWorkspace(modalNodeId);
+  }
+}
+
+function confirmPortalLinkModal() {
+  if (!portalLinkModalState.open) return;
+  const node = getNodeById(portalLinkModalState.nodeId);
+  if (!node || node.type !== "portal") {
+    closePortalLinkModal({ keepNode: true });
+    return;
+  }
+  const selectedWorkspaceId = String(portalLinkModalState.selectedWorkspaceId || "");
+  const linkableWorkspaceIds = new Set(
+    getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId).map((workspace) => workspace.id)
+  );
+  if (!selectedWorkspaceId || !linkableWorkspaceIds.has(selectedWorkspaceId)) {
+    return;
+  }
+  node.linkedWorkspaceId = selectedWorkspaceId;
+  node.title = "";
+  node.label = "";
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  closePortalLinkModal({ keepNode: true });
+  renderAll();
+}
+
+function cancelPortalLinkModalAndDeleteNode() {
+  if (!portalLinkModalState.open) return;
+  const nodeId = portalLinkModalState.nodeId;
+  closePortalLinkModal({ keepNode: true });
+  if (!nodeId) return;
+  const deleted = deleteNodeFromCurrentWorkspace(nodeId);
+  if (!deleted) return;
+  closeCreateNodeMenu();
+  renderAll();
+}
+
+function applyEntityLinkToNode(node, entityKind, entityRefId) {
+  if (!node || node.type !== "entity") return false;
+  const normalizedKind = normalizeEntityKind(entityKind);
+  const displayName = getEntityDisplayName(normalizedKind, entityRefId);
+  if (!normalizedKind || !entityRefId || !displayName) return false;
+  let changed = false;
+  if (node.entityKind !== normalizedKind) {
+    node.entityKind = normalizedKind;
+    changed = true;
+  }
+  if (node.entityRefId !== entityRefId) {
+    node.entityRefId = entityRefId;
+    changed = true;
+  }
+  if (applyDerivedEntityIdentity(node)) {
+    changed = true;
+  }
+  return changed;
+}
+
+function renderEntityLinkModal() {
+  if (
+    !entityLinkModalOverlayEl ||
+    !entityLinkModalEl ||
+    !entityLinkModalKindSelectEl ||
+    !entityLinkModalRefSelectEl ||
+    !entityLinkModalConfirmBtnEl
+  ) {
+    return;
+  }
+  const isOpen = !!entityLinkModalState.open;
+  entityLinkModalOverlayEl.classList.toggle("is-open", isOpen);
+  entityLinkModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const entityNode = getNodeById(entityLinkModalState.nodeId);
+  if (!entityNode || entityNode.type !== "entity") {
+    entityLinkModalState = {
+      open: false,
+      nodeId: null,
+      selectedEntityKind: "user",
+      selectedEntityRefId: "",
+      flow: "edit"
+    };
+    entityLinkModalOverlayEl.classList.remove("is-open");
+    entityLinkModalOverlayEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const selectedEntityKind = normalizeEntityKind(entityLinkModalState.selectedEntityKind) || "user";
+  const entityOptions = getEntityOptionsForKind(selectedEntityKind);
+  let selectedEntityRefId = entityLinkModalState.selectedEntityRefId || "";
+  if (!entityOptions.some((option) => option.id === selectedEntityRefId)) {
+    selectedEntityRefId = entityOptions[0]?.id || "";
+    entityLinkModalState.selectedEntityRefId = selectedEntityRefId;
+  }
+  entityLinkModalState.selectedEntityKind = selectedEntityKind;
+
+  entityLinkModalKindSelectEl.innerHTML = "";
+  [
+    { value: "user", label: "User" },
+    { value: "org", label: "Organisation" }
+  ].forEach((option) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = option.value;
+    optionEl.textContent = option.label;
+    entityLinkModalKindSelectEl.appendChild(optionEl);
+  });
+  entityLinkModalKindSelectEl.value = selectedEntityKind;
+
+  entityLinkModalRefSelectEl.innerHTML = "";
+  if (!entityOptions.length) {
+    const optionEl = document.createElement("option");
+    optionEl.value = "";
+    optionEl.textContent = selectedEntityKind === "org" ? "No organisations available" : "No users available";
+    entityLinkModalRefSelectEl.appendChild(optionEl);
+    entityLinkModalRefSelectEl.value = "";
+    entityLinkModalRefSelectEl.disabled = true;
+    entityLinkModalConfirmBtnEl.disabled = true;
+    entityLinkModalHintEl.textContent = selectedEntityKind === "org"
+      ? "No organisations are currently available."
+      : "No users are currently available.";
+  } else {
+    entityOptions.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.id;
+      optionEl.textContent = option.label;
+      entityLinkModalRefSelectEl.appendChild(optionEl);
+    });
+    entityLinkModalRefSelectEl.disabled = false;
+    entityLinkModalRefSelectEl.value = selectedEntityRefId;
+    entityLinkModalConfirmBtnEl.disabled = !selectedEntityRefId;
+    entityLinkModalHintEl.textContent = "Select an existing user or organisation to link.";
+  }
+}
+
+function openEntityLinkModal(nodeId, options = {}) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "entity") return false;
+  state.selectedNodeId = node.id;
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  workspaceMenuOpen = false;
+  userMenuOpen = false;
+  renderWorkspaceMenu();
+  const initialSelection = getInitialEntitySelectionForNode(node);
+  entityLinkModalState = {
+    open: true,
+    nodeId: node.id,
+    selectedEntityKind: initialSelection.entityKind,
+    selectedEntityRefId: initialSelection.entityRefId,
+    flow: options.flow || "edit"
+  };
+  renderEntityLinkModal();
+  requestAnimationFrame(() => {
+    if (!entityLinkModalState.open) return;
+    if (!entityLinkModalRefSelectEl.disabled) {
+      entityLinkModalRefSelectEl.focus();
+      return;
+    }
+    entityLinkModalKindSelectEl.focus();
+  });
+  return true;
+}
+
+function closeEntityLinkModal(options = {}) {
+  const keepNode = options.keepNode !== false;
+  const modalNodeId = entityLinkModalState.nodeId;
+  entityLinkModalState = {
+    open: false,
+    nodeId: null,
+    selectedEntityKind: "user",
+    selectedEntityRefId: "",
+    flow: "edit"
+  };
+  renderEntityLinkModal();
+  if (!keepNode && modalNodeId) {
+    deleteNodeFromCurrentWorkspace(modalNodeId);
+  }
+}
+
+function cancelEntityLinkModal() {
+  if (entityLinkModalState.flow === "create") {
+    cancelEntityLinkModalAndDeleteNode();
+    return;
+  }
+  closeEntityLinkModal({ keepNode: true });
+}
+
+function confirmEntityLinkModal() {
+  if (!entityLinkModalState.open) return;
+  const node = getNodeById(entityLinkModalState.nodeId);
+  if (!node || node.type !== "entity") {
+    closeEntityLinkModal({ keepNode: true });
+    return;
+  }
+  const selectedEntityKind = normalizeEntityKind(entityLinkModalState.selectedEntityKind);
+  const selectedEntityRefId = String(entityLinkModalState.selectedEntityRefId || "");
+  const optionIds = new Set(getEntityOptionsForKind(selectedEntityKind).map((option) => option.id));
+  if (!selectedEntityKind || !selectedEntityRefId || !optionIds.has(selectedEntityRefId)) {
+    return;
+  }
+  const changed = applyEntityLinkToNode(node, selectedEntityKind, selectedEntityRefId);
+  if (changed) {
+    syncNodeRuntimeAndStore();
+    persistStoreToLocalStorage();
+  }
+  closeEntityLinkModal({ keepNode: true });
+  renderAll();
+}
+
+function cancelEntityLinkModalAndDeleteNode() {
+  if (!entityLinkModalState.open) return;
+  const nodeId = entityLinkModalState.nodeId;
+  closeEntityLinkModal({ keepNode: true });
+  if (!nodeId) return;
+  const deleted = deleteNodeFromCurrentWorkspace(nodeId);
+  if (!deleted) return;
+  closeCreateNodeMenu();
+  renderAll();
+}
+
+function renderCollaboratorPickerModal() {
+  if (
+    !collaboratorPickerModalOverlayEl ||
+    !collaboratorPickerModalEl ||
+    !collaboratorPickerModalBodyEl ||
+    !collaboratorPickerModalConfirmBtnEl
+  ) {
+    return;
+  }
+  const isOpen = !!collaboratorPickerModalState.open;
+  collaboratorPickerModalOverlayEl.classList.toggle("is-open", isOpen);
+  collaboratorPickerModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const handoverNode = getNodeById(collaboratorPickerModalState.nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
+    collaboratorPickerModalState = {
+      open: false,
+      nodeId: null,
+      selectedCollaboratorKeys: []
+    };
+    collaboratorPickerModalOverlayEl.classList.remove("is-open");
+    collaboratorPickerModalOverlayEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const groups = getCollaboratorPickerGroups(handoverNode);
+  const validKeys = new Set(groups.flatMap((group) => group.options.map((option) => option.key)));
+  collaboratorPickerModalState.selectedCollaboratorKeys = collaboratorPickerModalState.selectedCollaboratorKeys
+    .filter((key) => validKeys.has(key));
+
+  collaboratorPickerModalBodyEl.innerHTML = "";
+  collaboratorPickerModalConfirmBtnEl.disabled = collaboratorPickerModalState.selectedCollaboratorKeys.length === 0;
+  collaboratorPickerModalHintEl.textContent = groups.length
+    ? "Select one or more users or organisations."
+    : "All available collaborators have already been added.";
+
+  if (!groups.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "picker-modal-empty";
+    emptyState.textContent = "No additional collaborators are available.";
+    collaboratorPickerModalBodyEl.appendChild(emptyState);
+    collaboratorPickerModalConfirmBtnEl.disabled = true;
+    return;
+  }
+
+  groups.forEach((group) => {
+    const groupEl = document.createElement("section");
+    groupEl.className = "picker-modal-group";
+    const titleEl = document.createElement("h4");
+    titleEl.className = "picker-modal-group-title";
+    titleEl.textContent = group.label;
+    groupEl.appendChild(titleEl);
+    group.options.forEach((option) => {
+      const optionLabelEl = document.createElement("label");
+      optionLabelEl.className = "picker-modal-option";
+      const checkboxEl = document.createElement("input");
+      checkboxEl.type = "checkbox";
+      checkboxEl.checked = collaboratorPickerModalState.selectedCollaboratorKeys.includes(option.key);
+      checkboxEl.addEventListener("change", () => {
+        if (checkboxEl.checked) {
+          if (!collaboratorPickerModalState.selectedCollaboratorKeys.includes(option.key)) {
+            collaboratorPickerModalState.selectedCollaboratorKeys = [
+              ...collaboratorPickerModalState.selectedCollaboratorKeys,
+              option.key
+            ];
+          }
+        } else {
+          collaboratorPickerModalState.selectedCollaboratorKeys = collaboratorPickerModalState.selectedCollaboratorKeys
+            .filter((selectedKey) => selectedKey !== option.key);
+        }
+        renderCollaboratorPickerModal();
+      });
+      const textWrapEl = document.createElement("span");
+      textWrapEl.className = "picker-modal-option-text";
+      textWrapEl.textContent = option.label;
+      optionLabelEl.appendChild(checkboxEl);
+      optionLabelEl.appendChild(textWrapEl);
+      groupEl.appendChild(optionLabelEl);
+    });
+    collaboratorPickerModalBodyEl.appendChild(groupEl);
+  });
+}
+
+function openCollaboratorPickerModal(nodeId) {
+  const handoverNode = getNodeById(nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) return false;
+  collaboratorPickerModalState = {
+    open: true,
+    nodeId: handoverNode.id,
+    selectedCollaboratorKeys: []
+  };
+  renderCollaboratorPickerModal();
+  requestAnimationFrame(() => {
+    if (!collaboratorPickerModalState.open) return;
+    const firstInput = collaboratorPickerModalBodyEl.querySelector("input[type=\"checkbox\"]");
+    if (firstInput) {
+      firstInput.focus();
+      return;
+    }
+    collaboratorPickerModalCloseBtnEl.focus();
+  });
+  return true;
+}
+
+function closeCollaboratorPickerModal() {
+  collaboratorPickerModalState = {
+    open: false,
+    nodeId: null,
+    selectedCollaboratorKeys: []
+  };
+  renderCollaboratorPickerModal();
+}
+
+function confirmCollaboratorPickerModal() {
+  if (!collaboratorPickerModalState.open) return;
+  const handoverNode = getNodeById(collaboratorPickerModalState.nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
+    closeCollaboratorPickerModal();
+    return;
+  }
+  const optionByKey = new Map(
+    getCollaboratorPickerGroups(handoverNode)
+      .flatMap((group) => group.options)
+      .map((option) => [option.key, option])
+  );
+  let changed = false;
+  collaboratorPickerModalState.selectedCollaboratorKeys.forEach((selectedKey) => {
+    const option = optionByKey.get(selectedKey);
+    if (!option) return;
+    if (addHandoverCollaborator(handoverNode.id, option.kind, option.refId)) {
+      changed = true;
+    }
+  });
+  closeCollaboratorPickerModal();
+  if (changed) {
+    renderAll();
+    return;
+  }
+  renderDetailsPane();
+}
+
+function renderHandoverObjectPickerModal() {
+  if (
+    !handoverObjectPickerModalOverlayEl ||
+    !handoverObjectPickerModalEl ||
+    !handoverObjectPickerModalBodyEl ||
+    !handoverObjectPickerModalConfirmBtnEl
+  ) {
+    return;
+  }
+  const isOpen = !!handoverObjectPickerModalState.open;
+  handoverObjectPickerModalOverlayEl.classList.toggle("is-open", isOpen);
+  handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const handoverNode = getNodeById(handoverObjectPickerModalState.nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
+    handoverObjectPickerModalState = {
+      open: false,
+      nodeId: null,
+      selectedNodeIds: []
+    };
+    handoverObjectPickerModalOverlayEl.classList.remove("is-open");
+    handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const options = getHandoverObjectPickerOptions(handoverNode);
+  const validNodeIds = new Set(options.map((option) => option.id));
+  handoverObjectPickerModalState.selectedNodeIds = handoverObjectPickerModalState.selectedNodeIds
+    .filter((nodeId) => validNodeIds.has(nodeId));
+
+  handoverObjectPickerModalBodyEl.innerHTML = "";
+  handoverObjectPickerModalConfirmBtnEl.disabled = handoverObjectPickerModalState.selectedNodeIds.length === 0;
+  handoverObjectPickerModalHintEl.textContent = options.length
+    ? "Select one or more objects to add explicitly."
+    : "No additional objects are currently available.";
+
+  if (!options.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "picker-modal-empty";
+    emptyState.textContent = "No additional objects can be added right now.";
+    handoverObjectPickerModalBodyEl.appendChild(emptyState);
+    handoverObjectPickerModalConfirmBtnEl.disabled = true;
+    return;
+  }
+
+  const groupEl = document.createElement("section");
+  groupEl.className = "picker-modal-group";
+  const titleEl = document.createElement("h4");
+  titleEl.className = "picker-modal-group-title";
+  titleEl.textContent = "Objects";
+  groupEl.appendChild(titleEl);
+  options.forEach((optionNode) => {
+    const optionLabelEl = document.createElement("label");
+    optionLabelEl.className = "picker-modal-option";
+    const checkboxEl = document.createElement("input");
+    checkboxEl.type = "checkbox";
+    checkboxEl.checked = handoverObjectPickerModalState.selectedNodeIds.includes(optionNode.id);
+    checkboxEl.addEventListener("change", () => {
+      if (checkboxEl.checked) {
+        if (!handoverObjectPickerModalState.selectedNodeIds.includes(optionNode.id)) {
+          handoverObjectPickerModalState.selectedNodeIds = [
+            ...handoverObjectPickerModalState.selectedNodeIds,
+            optionNode.id
+          ];
+        }
+      } else {
+        handoverObjectPickerModalState.selectedNodeIds = handoverObjectPickerModalState.selectedNodeIds
+          .filter((selectedNodeId) => selectedNodeId !== optionNode.id);
+      }
+      renderHandoverObjectPickerModal();
+    });
+    const textWrapEl = document.createElement("span");
+    textWrapEl.className = "picker-modal-option-text";
+    textWrapEl.textContent = `${getNodeDisplayTitle(optionNode, { fallback: getNodeTitleFallback(optionNode) })} (${optionNode.type})`;
+    optionLabelEl.appendChild(checkboxEl);
+    optionLabelEl.appendChild(textWrapEl);
+    groupEl.appendChild(optionLabelEl);
+  });
+  handoverObjectPickerModalBodyEl.appendChild(groupEl);
+}
+
+function openHandoverObjectPickerModal(nodeId) {
+  const handoverNode = getNodeById(nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) return false;
+  handoverObjectPickerModalState = {
+    open: true,
+    nodeId: handoverNode.id,
+    selectedNodeIds: []
+  };
+  renderHandoverObjectPickerModal();
+  requestAnimationFrame(() => {
+    if (!handoverObjectPickerModalState.open) return;
+    const firstInput = handoverObjectPickerModalBodyEl.querySelector("input[type=\"checkbox\"]");
+    if (firstInput) {
+      firstInput.focus();
+      return;
+    }
+    handoverObjectPickerModalCloseBtnEl.focus();
+  });
+  return true;
+}
+
+function closeHandoverObjectPickerModal() {
+  handoverObjectPickerModalState = {
+    open: false,
+    nodeId: null,
+    selectedNodeIds: []
+  };
+  renderHandoverObjectPickerModal();
+}
+
+function confirmHandoverObjectPickerModal() {
+  if (!handoverObjectPickerModalState.open) return;
+  const handoverNode = getNodeById(handoverObjectPickerModalState.nodeId);
+  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
+    closeHandoverObjectPickerModal();
+    return;
+  }
+  const changed = addHandoverObjectIds(handoverNode.id, handoverObjectPickerModalState.selectedNodeIds);
+  closeHandoverObjectPickerModal();
+  if (changed) {
+    renderAll();
+    return;
+  }
+  renderDetailsPane();
+}
+
+function handlePortalDoubleClick(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "portal") return;
+  const linkedWorkspaceId = typeof node.linkedWorkspaceId === "string" ? node.linkedWorkspaceId : "";
+  if (!linkedWorkspaceId) {
+    openPortalLinkModal(node.id, { flow: "dblclick" });
+    return;
+  }
+  const visibleWorkspaceIds = new Set(getWorkspaceOptionsForCurrentUser().map((workspace) => workspace.id));
+  if (!visibleWorkspaceIds.has(linkedWorkspaceId)) {
+    openPortalLinkModal(node.id, { flow: "dblclick" });
+    return;
+  }
+  if (linkedWorkspaceId === currentWorkspaceId) return;
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  workspaceMenuOpen = false;
+  userMenuOpen = false;
+  resetWorkspaceCreateState();
+  resetWorkspaceRenameState();
+  currentWorkspaceId = linkedWorkspaceId;
+  hasAppliedWorkspace = false;
+  closePortalLinkModal({ keepNode: true });
+  renderAll();
+}
+
 function requestNodeEdit(nodeId) {
   const node = getNodeById(nodeId);
   if (!node) return;
-  if (node.type === "portal") return;
+  if (node.type === "portal") {
+    state.selectedNodeId = nodeId;
+    openPortalLinkModal(node.id, { flow: "edit" });
+    return;
+  }
+  if (node.type === "entity") {
+    state.selectedNodeId = nodeId;
+    openEntityLinkModal(node.id, { flow: "edit" });
+    return;
+  }
+  if (node.type === "collaboration") {
+    return;
+  }
   state.selectedNodeId = nodeId;
   newNodeInlineEditId = nodeId;
   closeCreateNodeMenu();
@@ -1623,33 +3817,36 @@ function renderCreateNodeMenu() {
       return;
     }
 
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "map-create-menu-item";
-    if (node.type === "portal") {
-      editButton.classList.add("is-disabled");
-      editButton.textContent = "Edit link (coming soon)";
-      editButton.disabled = true;
+    if (node.type === "collaboration") {
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "map-create-menu-item";
+      label.textContent = "Collaboration anchor";
+      label.disabled = true;
+      createNodeMenuEl.appendChild(label);
     } else {
-      editButton.textContent = "Edit";
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "map-create-menu-item";
+      editButton.textContent = (node.type === "portal" || node.type === "entity") ? "Edit link" : "Edit";
       editButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         requestNodeEdit(node.id);
       });
-    }
-    createNodeMenuEl.appendChild(editButton);
+      createNodeMenuEl.appendChild(editButton);
 
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "map-create-menu-item is-danger";
-    deleteButton.textContent = "Delete";
-    deleteButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      requestNodeDelete(node.id);
-    });
-    createNodeMenuEl.appendChild(deleteButton);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "map-create-menu-item is-danger";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        requestNodeDelete(node.id);
+      });
+      createNodeMenuEl.appendChild(deleteButton);
+    }
   } else {
     CREATE_NODE_MENU_ITEMS.forEach((menuItem) => {
       const itemButton = document.createElement("button");
@@ -1659,8 +3856,13 @@ function renderCreateNodeMenu() {
       itemButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        createNodeAtWorldPosition(menuItem.type, createNodeMenuWorldX, createNodeMenuWorldY);
+        const createdNode = createNodeAtWorldPosition(menuItem.type, createNodeMenuWorldX, createNodeMenuWorldY);
         closeCreateNodeMenu();
+        if (createdNode && createdNode.type === "portal") {
+          openPortalLinkModal(createdNode.id, { flow: "create" });
+        } else if (createdNode && createdNode.type === "entity") {
+          openEntityLinkModal(createdNode.id, { flow: "create" });
+        }
       });
       createNodeMenuEl.appendChild(itemButton);
     });
@@ -1744,6 +3946,7 @@ function toPersistableNode(node) {
 
 function buildPersistableDataSnapshot() {
   return {
+    meta: store && store.meta && typeof store.meta === "object" ? { ...store.meta } : {},
     users: users.map((user) => ({ ...user })),
     orgs: orgs.map((org) => ({ ...org })),
     nodes: allNodesRuntime.map((node) => toPersistableNode(node)),
@@ -1823,12 +4026,28 @@ function deleteWorkspace(workspaceId) {
 }
 
 function sanitizeStateForWorkspace() {
-  const hasNodes = nodes.length > 0;
+  const firstSelectableNodeId = getFirstSelectableNodeId(nodes);
   if (!state.selectedNodeId || !nodeById.has(state.selectedNodeId)) {
-    state.selectedNodeId = hasNodes ? nodes[0].id : null;
+    state.selectedNodeId = firstSelectableNodeId;
+    resetDetailsEditState();
+  }
+  if (state.selectedNodeId) {
+    const selectedNode = getNodeById(state.selectedNodeId);
+    if (!isSelectableNode(selectedNode)) {
+      state.selectedNodeId = firstSelectableNodeId;
+      resetDetailsEditState();
+    }
   }
   if (!newNodeInlineEditId || !nodeById.has(newNodeInlineEditId)) {
     newNodeInlineEditId = null;
+  }
+  if (detailsTitleEditNodeId && !nodeById.has(detailsTitleEditNodeId)) {
+    detailsTitleEditNodeId = null;
+    detailsTitleDraft = "";
+  }
+  if (detailsSummaryEditNodeId && !nodeById.has(detailsSummaryEditNodeId)) {
+    detailsSummaryEditNodeId = null;
+    detailsSummaryDraft = "";
   }
 
   state.expandedLocationIds = new Set(
@@ -1932,11 +4151,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const DRAG_CLICK_SUPPRESS_THRESHOLD = 3;
     const RESIZE_CLICK_SUPPRESS_THRESHOLD = 3;
     const EDGE_HANDLE_BORDER_HIT_PX = 14;
+    const EDGE_HANDLE_BORDER_HIT_PORTAL_PX = 8;
+    const EDGE_HANDLE_BORDER_HIT_ENTITY_PX = 10;
     const EDGE_HANDLE_INTENT_DELAY_MS = 140;
     const EDGE_HANDLE_INTENT_MOVE_PX = 5;
     const EDGE_ACTION_INTENT_DELAY_MS = 140;
     const EDGE_ACTION_HIDE_GRACE_MS = 180;
     const EDGE_ACTION_BUTTON_OFFSET_PX = 20;
+    const EDGE_CHEVRON_T = 0.5;
     const RESIZE_HANDLE_SIZE = 12;
     const MIN_EXPANDED_ASPECT = 0.5;
     const MAX_EXPANDED_ASPECT = 3;
@@ -1948,6 +4170,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
     let lastLocationClick = {
       nodeId: null,
       context: null,
+      at: 0
+    };
+    let lastPortalClick = {
+      nodeId: null,
       at: 0
     };
     let dragState = {
@@ -2114,11 +4340,347 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.stopPropagation();
       requestEdgeDelete(edgeActionMenuState.edgeId);
     });
+    const portalLinkModalOverlayEl = document.createElement("div");
+    portalLinkModalOverlayEl.id = "portalLinkModalOverlay";
+    portalLinkModalOverlayEl.className = "portal-link-modal-overlay";
+    portalLinkModalOverlayEl.setAttribute("aria-hidden", "true");
+    const portalLinkModalEl = document.createElement("div");
+    portalLinkModalEl.className = "portal-link-modal";
+    portalLinkModalEl.setAttribute("role", "dialog");
+    portalLinkModalEl.setAttribute("aria-modal", "true");
+    portalLinkModalEl.setAttribute("aria-labelledby", "portalLinkModalTitle");
+    const portalLinkModalCloseBtnEl = document.createElement("button");
+    portalLinkModalCloseBtnEl.type = "button";
+    portalLinkModalCloseBtnEl.className = "portal-link-modal-close";
+    portalLinkModalCloseBtnEl.setAttribute("aria-label", "Close");
+    portalLinkModalCloseBtnEl.textContent = "✕";
+    const portalLinkModalTitleEl = document.createElement("h3");
+    portalLinkModalTitleEl.id = "portalLinkModalTitle";
+    portalLinkModalTitleEl.className = "portal-link-modal-title";
+    portalLinkModalTitleEl.textContent = "Link portal";
+    const portalLinkModalHintEl = document.createElement("p");
+    portalLinkModalHintEl.className = "portal-link-modal-hint";
+    portalLinkModalHintEl.textContent = "Select a destination workspace.";
+    const portalLinkModalFieldEl = document.createElement("label");
+    portalLinkModalFieldEl.className = "portal-link-modal-field";
+    portalLinkModalFieldEl.setAttribute("for", "portalLinkWorkspaceSelect");
+    portalLinkModalFieldEl.textContent = "Workspace";
+    const portalLinkModalSelectEl = document.createElement("select");
+    portalLinkModalSelectEl.id = "portalLinkWorkspaceSelect";
+    portalLinkModalSelectEl.className = "portal-link-modal-select";
+    const portalLinkModalActionsEl = document.createElement("div");
+    portalLinkModalActionsEl.className = "portal-link-modal-actions";
+    const portalLinkModalCancelBtnEl = document.createElement("button");
+    portalLinkModalCancelBtnEl.type = "button";
+    portalLinkModalCancelBtnEl.className = "portal-link-modal-btn is-cancel";
+    portalLinkModalCancelBtnEl.textContent = "Cancel";
+    const portalLinkModalConfirmBtnEl = document.createElement("button");
+    portalLinkModalConfirmBtnEl.type = "button";
+    portalLinkModalConfirmBtnEl.className = "portal-link-modal-btn is-confirm";
+    portalLinkModalConfirmBtnEl.textContent = "Confirm";
+    portalLinkModalActionsEl.appendChild(portalLinkModalCancelBtnEl);
+    portalLinkModalActionsEl.appendChild(portalLinkModalConfirmBtnEl);
+    portalLinkModalEl.appendChild(portalLinkModalCloseBtnEl);
+    portalLinkModalEl.appendChild(portalLinkModalTitleEl);
+    portalLinkModalEl.appendChild(portalLinkModalHintEl);
+    portalLinkModalEl.appendChild(portalLinkModalFieldEl);
+    portalLinkModalEl.appendChild(portalLinkModalSelectEl);
+    portalLinkModalEl.appendChild(portalLinkModalActionsEl);
+    portalLinkModalOverlayEl.appendChild(portalLinkModalEl);
+    document.body.appendChild(portalLinkModalOverlayEl);
+    const entityLinkModalOverlayEl = document.createElement("div");
+    entityLinkModalOverlayEl.id = "entityLinkModalOverlay";
+    entityLinkModalOverlayEl.className = "portal-link-modal-overlay";
+    entityLinkModalOverlayEl.setAttribute("aria-hidden", "true");
+    const entityLinkModalEl = document.createElement("div");
+    entityLinkModalEl.className = "portal-link-modal";
+    entityLinkModalEl.setAttribute("role", "dialog");
+    entityLinkModalEl.setAttribute("aria-modal", "true");
+    entityLinkModalEl.setAttribute("aria-labelledby", "entityLinkModalTitle");
+    const entityLinkModalCloseBtnEl = document.createElement("button");
+    entityLinkModalCloseBtnEl.type = "button";
+    entityLinkModalCloseBtnEl.className = "portal-link-modal-close";
+    entityLinkModalCloseBtnEl.setAttribute("aria-label", "Close");
+    entityLinkModalCloseBtnEl.textContent = "✕";
+    const entityLinkModalTitleEl = document.createElement("h3");
+    entityLinkModalTitleEl.id = "entityLinkModalTitle";
+    entityLinkModalTitleEl.className = "portal-link-modal-title";
+    entityLinkModalTitleEl.textContent = "Link entity";
+    const entityLinkModalHintEl = document.createElement("p");
+    entityLinkModalHintEl.className = "portal-link-modal-hint";
+    entityLinkModalHintEl.textContent = "Select an existing user or organisation to link.";
+    const entityLinkModalKindFieldEl = document.createElement("label");
+    entityLinkModalKindFieldEl.className = "portal-link-modal-field";
+    entityLinkModalKindFieldEl.setAttribute("for", "entityLinkKindSelect");
+    entityLinkModalKindFieldEl.textContent = "Type";
+    const entityLinkModalKindSelectEl = document.createElement("select");
+    entityLinkModalKindSelectEl.id = "entityLinkKindSelect";
+    entityLinkModalKindSelectEl.className = "portal-link-modal-select";
+    const entityLinkModalRefFieldEl = document.createElement("label");
+    entityLinkModalRefFieldEl.className = "portal-link-modal-field";
+    entityLinkModalRefFieldEl.setAttribute("for", "entityLinkRefSelect");
+    entityLinkModalRefFieldEl.textContent = "Link target";
+    const entityLinkModalRefSelectEl = document.createElement("select");
+    entityLinkModalRefSelectEl.id = "entityLinkRefSelect";
+    entityLinkModalRefSelectEl.className = "portal-link-modal-select";
+    const entityLinkModalActionsEl = document.createElement("div");
+    entityLinkModalActionsEl.className = "portal-link-modal-actions";
+    const entityLinkModalCancelBtnEl = document.createElement("button");
+    entityLinkModalCancelBtnEl.type = "button";
+    entityLinkModalCancelBtnEl.className = "portal-link-modal-btn is-cancel";
+    entityLinkModalCancelBtnEl.textContent = "Cancel";
+    const entityLinkModalConfirmBtnEl = document.createElement("button");
+    entityLinkModalConfirmBtnEl.type = "button";
+    entityLinkModalConfirmBtnEl.className = "portal-link-modal-btn is-confirm";
+    entityLinkModalConfirmBtnEl.textContent = "Confirm";
+    entityLinkModalActionsEl.appendChild(entityLinkModalCancelBtnEl);
+    entityLinkModalActionsEl.appendChild(entityLinkModalConfirmBtnEl);
+    entityLinkModalEl.appendChild(entityLinkModalCloseBtnEl);
+    entityLinkModalEl.appendChild(entityLinkModalTitleEl);
+    entityLinkModalEl.appendChild(entityLinkModalHintEl);
+    entityLinkModalEl.appendChild(entityLinkModalKindFieldEl);
+    entityLinkModalEl.appendChild(entityLinkModalKindSelectEl);
+    entityLinkModalEl.appendChild(entityLinkModalRefFieldEl);
+    entityLinkModalEl.appendChild(entityLinkModalRefSelectEl);
+    entityLinkModalEl.appendChild(entityLinkModalActionsEl);
+    entityLinkModalOverlayEl.appendChild(entityLinkModalEl);
+    document.body.appendChild(entityLinkModalOverlayEl);
+    const collaboratorPickerModalOverlayEl = document.createElement("div");
+    collaboratorPickerModalOverlayEl.id = "collaboratorPickerModalOverlay";
+    collaboratorPickerModalOverlayEl.className = "portal-link-modal-overlay";
+    collaboratorPickerModalOverlayEl.setAttribute("aria-hidden", "true");
+    const collaboratorPickerModalEl = document.createElement("div");
+    collaboratorPickerModalEl.className = "portal-link-modal picker-modal";
+    collaboratorPickerModalEl.setAttribute("role", "dialog");
+    collaboratorPickerModalEl.setAttribute("aria-modal", "true");
+    collaboratorPickerModalEl.setAttribute("aria-labelledby", "collaboratorPickerModalTitle");
+    const collaboratorPickerModalCloseBtnEl = document.createElement("button");
+    collaboratorPickerModalCloseBtnEl.type = "button";
+    collaboratorPickerModalCloseBtnEl.className = "portal-link-modal-close";
+    collaboratorPickerModalCloseBtnEl.setAttribute("aria-label", "Close");
+    collaboratorPickerModalCloseBtnEl.textContent = "✕";
+    const collaboratorPickerModalTitleEl = document.createElement("h3");
+    collaboratorPickerModalTitleEl.id = "collaboratorPickerModalTitle";
+    collaboratorPickerModalTitleEl.className = "portal-link-modal-title";
+    collaboratorPickerModalTitleEl.textContent = "Add collaborators";
+    const collaboratorPickerModalHintEl = document.createElement("p");
+    collaboratorPickerModalHintEl.className = "portal-link-modal-hint";
+    collaboratorPickerModalHintEl.textContent = "Select one or more users or organisations.";
+    const collaboratorPickerModalBodyEl = document.createElement("div");
+    collaboratorPickerModalBodyEl.className = "picker-modal-body";
+    const collaboratorPickerModalActionsEl = document.createElement("div");
+    collaboratorPickerModalActionsEl.className = "portal-link-modal-actions";
+    const collaboratorPickerModalCancelBtnEl = document.createElement("button");
+    collaboratorPickerModalCancelBtnEl.type = "button";
+    collaboratorPickerModalCancelBtnEl.className = "portal-link-modal-btn is-cancel";
+    collaboratorPickerModalCancelBtnEl.textContent = "Cancel";
+    const collaboratorPickerModalConfirmBtnEl = document.createElement("button");
+    collaboratorPickerModalConfirmBtnEl.type = "button";
+    collaboratorPickerModalConfirmBtnEl.className = "portal-link-modal-btn is-confirm";
+    collaboratorPickerModalConfirmBtnEl.textContent = "Add";
+    collaboratorPickerModalActionsEl.appendChild(collaboratorPickerModalCancelBtnEl);
+    collaboratorPickerModalActionsEl.appendChild(collaboratorPickerModalConfirmBtnEl);
+    collaboratorPickerModalEl.appendChild(collaboratorPickerModalCloseBtnEl);
+    collaboratorPickerModalEl.appendChild(collaboratorPickerModalTitleEl);
+    collaboratorPickerModalEl.appendChild(collaboratorPickerModalHintEl);
+    collaboratorPickerModalEl.appendChild(collaboratorPickerModalBodyEl);
+    collaboratorPickerModalEl.appendChild(collaboratorPickerModalActionsEl);
+    collaboratorPickerModalOverlayEl.appendChild(collaboratorPickerModalEl);
+    document.body.appendChild(collaboratorPickerModalOverlayEl);
+    const handoverObjectPickerModalOverlayEl = document.createElement("div");
+    handoverObjectPickerModalOverlayEl.id = "handoverObjectPickerModalOverlay";
+    handoverObjectPickerModalOverlayEl.className = "portal-link-modal-overlay";
+    handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", "true");
+    const handoverObjectPickerModalEl = document.createElement("div");
+    handoverObjectPickerModalEl.className = "portal-link-modal picker-modal";
+    handoverObjectPickerModalEl.setAttribute("role", "dialog");
+    handoverObjectPickerModalEl.setAttribute("aria-modal", "true");
+    handoverObjectPickerModalEl.setAttribute("aria-labelledby", "handoverObjectPickerModalTitle");
+    const handoverObjectPickerModalCloseBtnEl = document.createElement("button");
+    handoverObjectPickerModalCloseBtnEl.type = "button";
+    handoverObjectPickerModalCloseBtnEl.className = "portal-link-modal-close";
+    handoverObjectPickerModalCloseBtnEl.setAttribute("aria-label", "Close");
+    handoverObjectPickerModalCloseBtnEl.textContent = "✕";
+    const handoverObjectPickerModalTitleEl = document.createElement("h3");
+    handoverObjectPickerModalTitleEl.id = "handoverObjectPickerModalTitle";
+    handoverObjectPickerModalTitleEl.className = "portal-link-modal-title";
+    handoverObjectPickerModalTitleEl.textContent = "Add handover objects";
+    const handoverObjectPickerModalHintEl = document.createElement("p");
+    handoverObjectPickerModalHintEl.className = "portal-link-modal-hint";
+    handoverObjectPickerModalHintEl.textContent = "Select one or more objects to add explicitly.";
+    const handoverObjectPickerModalBodyEl = document.createElement("div");
+    handoverObjectPickerModalBodyEl.className = "picker-modal-body";
+    const handoverObjectPickerModalActionsEl = document.createElement("div");
+    handoverObjectPickerModalActionsEl.className = "portal-link-modal-actions";
+    const handoverObjectPickerModalCancelBtnEl = document.createElement("button");
+    handoverObjectPickerModalCancelBtnEl.type = "button";
+    handoverObjectPickerModalCancelBtnEl.className = "portal-link-modal-btn is-cancel";
+    handoverObjectPickerModalCancelBtnEl.textContent = "Cancel";
+    const handoverObjectPickerModalConfirmBtnEl = document.createElement("button");
+    handoverObjectPickerModalConfirmBtnEl.type = "button";
+    handoverObjectPickerModalConfirmBtnEl.className = "portal-link-modal-btn is-confirm";
+    handoverObjectPickerModalConfirmBtnEl.textContent = "Add";
+    handoverObjectPickerModalActionsEl.appendChild(handoverObjectPickerModalCancelBtnEl);
+    handoverObjectPickerModalActionsEl.appendChild(handoverObjectPickerModalConfirmBtnEl);
+    handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalCloseBtnEl);
+    handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalTitleEl);
+    handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalHintEl);
+    handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalBodyEl);
+    handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalActionsEl);
+    handoverObjectPickerModalOverlayEl.appendChild(handoverObjectPickerModalEl);
+    document.body.appendChild(handoverObjectPickerModalOverlayEl);
+    portalLinkModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    entityLinkModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    collaboratorPickerModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    handoverObjectPickerModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    portalLinkModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closePortalLinkModal({ keepNode: true });
+    });
+    entityLinkModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEntityLinkModal();
+    });
+    collaboratorPickerModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCollaboratorPickerModal();
+    });
+    handoverObjectPickerModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeHandoverObjectPickerModal();
+    });
+    portalLinkModalCancelBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelPortalLinkModalAndDeleteNode();
+    });
+    entityLinkModalCancelBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEntityLinkModal();
+    });
+    collaboratorPickerModalCancelBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCollaboratorPickerModal();
+    });
+    handoverObjectPickerModalCancelBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeHandoverObjectPickerModal();
+    });
+    portalLinkModalConfirmBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmPortalLinkModal();
+    });
+    entityLinkModalConfirmBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmEntityLinkModal();
+    });
+    collaboratorPickerModalConfirmBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmCollaboratorPickerModal();
+    });
+    handoverObjectPickerModalConfirmBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmHandoverObjectPickerModal();
+    });
+    portalLinkModalSelectEl.addEventListener("change", () => {
+      portalLinkModalState.selectedWorkspaceId = portalLinkModalSelectEl.value;
+    });
+    entityLinkModalKindSelectEl.addEventListener("change", () => {
+      entityLinkModalState.selectedEntityKind = entityLinkModalKindSelectEl.value;
+      entityLinkModalState.selectedEntityRefId = "";
+      renderEntityLinkModal();
+    });
+    entityLinkModalRefSelectEl.addEventListener("change", () => {
+      entityLinkModalState.selectedEntityRefId = entityLinkModalRefSelectEl.value;
+      entityLinkModalConfirmBtnEl.disabled = !entityLinkModalState.selectedEntityRefId;
+    });
+    portalLinkModalEl.addEventListener("keydown", (event) => {
+      if (!portalLinkModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closePortalLinkModal({ keepNode: true });
+        return;
+      }
+      if (event.key === "Enter") {
+        if (event.target instanceof HTMLButtonElement) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        confirmPortalLinkModal();
+      }
+    });
+    entityLinkModalEl.addEventListener("keydown", (event) => {
+      if (!entityLinkModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelEntityLinkModal();
+        return;
+      }
+      if (event.key === "Enter") {
+        if (event.target instanceof HTMLButtonElement) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        confirmEntityLinkModal();
+      }
+    });
+    collaboratorPickerModalEl.addEventListener("keydown", (event) => {
+      if (!collaboratorPickerModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCollaboratorPickerModal();
+        return;
+      }
+      if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+        event.stopPropagation();
+        confirmCollaboratorPickerModal();
+      }
+    });
+    handoverObjectPickerModalEl.addEventListener("keydown", (event) => {
+      if (!handoverObjectPickerModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeHandoverObjectPickerModal();
+        return;
+      }
+      if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+        event.stopPropagation();
+        confirmHandoverObjectPickerModal();
+      }
+    });
     const CREATE_NODE_MENU_ITEMS = [
       { type: "location", label: "Location" },
       { type: "process", label: "Process" },
       { type: "standard", label: "Standard" },
       { type: "portal", label: "Portal" },
+      { type: "entity", label: "Entity" },
       { type: "handover", label: "Handover" }
     ];
     let gridPatternInverse2x2 = null;
@@ -2129,6 +4691,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
     let lastVisibleNodeIds = new Set();
     let lastVisibleNodeFrames = new Map();
+    let lastVisibleNodeBodyFrames = new Map();
     let lastRenderedCardsById = new Map();
 
     byLocationBtn.addEventListener("click", () => {
@@ -2182,6 +4745,22 @@ function applyWorkspaceData(workspaceId, options = {}) {
       if (createNodeMenuOpen) {
         closeCreateNodeMenu();
       }
+      if (collaboratorPickerModalState.open) {
+        closeCollaboratorPickerModal();
+        return;
+      }
+      if (handoverObjectPickerModalState.open) {
+        closeHandoverObjectPickerModal();
+        return;
+      }
+      if (portalLinkModalState.open) {
+        closePortalLinkModal({ keepNode: true });
+        return;
+      }
+      if (entityLinkModalState.open) {
+        cancelEntityLinkModal();
+        return;
+      }
       if (!workspaceMenuOpen) return;
       workspaceMenuOpen = false;
       userMenuOpen = false;
@@ -2211,6 +4790,38 @@ function applyWorkspaceData(workspaceId, options = {}) {
         resetWorkspaceCreateState();
         resetWorkspaceRenameState();
         renderWorkspaceMenu();
+      }
+      if (
+        portalLinkModalState.open &&
+        clickTarget instanceof Node &&
+        portalLinkModalOverlayEl &&
+        portalLinkModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        entityLinkModalState.open &&
+        clickTarget instanceof Node &&
+        entityLinkModalOverlayEl &&
+        entityLinkModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        collaboratorPickerModalState.open &&
+        clickTarget instanceof Node &&
+        collaboratorPickerModalOverlayEl &&
+        collaboratorPickerModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        handoverObjectPickerModalState.open &&
+        clickTarget instanceof Node &&
+        handoverObjectPickerModalOverlayEl &&
+        handoverObjectPickerModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
       }
       if (
         edgeActionMenuState.visible &&
@@ -2360,6 +4971,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         applyCameraTransform();
       }
       if (shouldRedrawEdges) {
+        refreshVisiblePortalBodyFramesFromDOM();
         drawEdgesFromModel();
       }
     }
@@ -2760,19 +5372,28 @@ function applyWorkspaceData(workspaceId, options = {}) {
       requestRender({ edges: false });
     }
 
-    function onViewportWheel(event) {
-      cancelEdgeCreateInteractions();
-      closeCreateNodeMenu();
-      event.preventDefault();
+function onViewportWheel(event) {
+  if (portalLinkModalState.open || entityLinkModalState.open) {
+    event.preventDefault();
+    return;
+  }
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  event.preventDefault();
       const { mx, my } = getViewportPoint(event);
       const zoomMultiplier = Math.exp(-event.deltaY * ZOOM_SENSITIVITY);
       applyZoomAtCursor(mx, my, zoomMultiplier);
     }
 
-    function onViewportContextMenu(event) {
-      cancelEdgeCreateInteractions();
-      if (!viewportEl) return;
-      if (!currentWorkspaceId) return;
+function onViewportContextMenu(event) {
+  if (portalLinkModalState.open || entityLinkModalState.open) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  cancelEdgeCreateInteractions();
+  if (!viewportEl) return;
+  if (!currentWorkspaceId) return;
       const nodeId = getNodeIdFromTarget(event.target);
       if (nodeId) {
         event.preventDefault();
@@ -2793,11 +5414,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       openCreateNodeMenu(event.clientX, event.clientY, worldX, worldY);
     }
 
-    function onViewportMouseDown(event) {
-      if (event.button !== 0) return;
-      if (dragState.isDragging) return;
-      if (resizeState.isResizing) return;
-      if (event.target.closest(".node-card")) return;
+function onViewportMouseDown(event) {
+  if (event.button !== 0) return;
+  if (portalLinkModalState.open || entityLinkModalState.open) {
+    event.preventDefault();
+    return;
+  }
+  if (dragState.isDragging) return;
+  if (resizeState.isResizing) return;
+  if (event.target.closest(".node-card")) return;
       cancelEdgeCreateInteractions();
       closeCreateNodeMenu();
       isPanning = true;
@@ -2980,21 +5605,40 @@ function applyWorkspaceData(workspaceId, options = {}) {
       }
 
       const draggedNode = getNodeById(dragState.nodeId);
-      const draggedNodeSize = getCardSize(draggedNode, state.expandedCanvasLocationId);
-      if (draggedNode) {
-        draggedNode.graphPos = {
-          x: nextLeft + (draggedNodeSize.width / 2),
-          y: nextTop + (draggedNodeSize.height / 2)
-        };
-      }
       const previousFrame = lastVisibleNodeFrames.get(dragState.nodeId);
+      const parsedWidth = dragState.cardEl ? Number.parseFloat(dragState.cardEl.style.width) : Number.NaN;
+      const parsedHeight = dragState.cardEl ? Number.parseFloat(dragState.cardEl.style.height) : Number.NaN;
+      const fallbackSize = getCardSize(draggedNode, state.expandedCanvasLocationId);
+      const nextWrapperFrame = {
+        x: nextLeft,
+        y: nextTop,
+        w: Number.isFinite(parsedWidth) ? parsedWidth : previousFrame?.w || fallbackSize.width,
+        h: Number.isFinite(parsedHeight) ? parsedHeight : previousFrame?.h || fallbackSize.height
+      };
+      if (draggedNode) {
+        if (draggedNode.type === "portal") {
+          const nextBodyFrame = getRenderedPortalBodyFrame(
+            dragState.cardEl,
+            nextWrapperFrame,
+            draggedNode,
+            state.expandedCanvasLocationId
+          );
+          const nextCenter = getNodeVisualCenter(draggedNode, nextBodyFrame);
+          draggedNode.graphPos = {
+            x: nextCenter.x,
+            y: nextCenter.y
+          };
+          lastVisibleNodeBodyFrames.set(dragState.nodeId, nextBodyFrame);
+        } else {
+          draggedNode.graphPos = {
+            x: nextLeft + (fallbackSize.width / 2),
+            y: nextTop + (fallbackSize.height / 2)
+          };
+          lastVisibleNodeBodyFrames.delete(dragState.nodeId);
+        }
+      }
       if (previousFrame) {
-        lastVisibleNodeFrames.set(dragState.nodeId, {
-          x: nextLeft,
-          y: nextTop,
-          w: draggedNodeSize.width,
-          h: draggedNodeSize.height
-        });
+        lastVisibleNodeFrames.set(dragState.nodeId, nextWrapperFrame);
       }
 
       const activeExpandedRoot = state.expandedCanvasLocationId;
@@ -3003,7 +5647,13 @@ function applyWorkspaceData(workspaceId, options = {}) {
           state.expandedDragRootId = activeExpandedRoot;
           state.expandedDragOverrides = new Map();
         }
-        state.expandedDragOverrides.set(dragState.nodeId, { left: nextLeft, top: nextTop });
+        if (draggedNode?.type === "portal") {
+          const bodyFrame = lastVisibleNodeBodyFrames.get(dragState.nodeId)
+            || getPortalBodyFrameFromWrapperFrame(draggedNode, nextWrapperFrame, activeExpandedRoot);
+          state.expandedDragOverrides.set(dragState.nodeId, { left: bodyFrame.x, top: bodyFrame.y });
+        } else {
+          state.expandedDragOverrides.set(dragState.nodeId, { left: nextLeft, top: nextTop });
+        }
       }
 
       if (Math.abs(dxScreen) > DRAG_CLICK_SUPPRESS_THRESHOLD || Math.abs(dyScreen) > DRAG_CLICK_SUPPRESS_THRESHOLD) {
@@ -3052,6 +5702,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
         !dragState.isDragging &&
         !resizeState.isResizing &&
         !createNodeMenuOpen &&
+        !portalLinkModalState.open &&
+        !entityLinkModalState.open &&
         !workspaceMenuOpen &&
         !userMenuOpen
       ) {
@@ -3211,7 +5863,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
         process: "PRC",
         standard: "STD",
         handover: "HND",
-        portal: "PRTL"
+        portal: "PRTL",
+        entity: "ENT",
+        collaboration: "CLB"
       };
       return map[type] || type.toUpperCase();
     }
@@ -3233,7 +5887,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function getSelectedNode() {
-      return getNodeById(state.selectedNodeId);
+      const node = getNodeById(state.selectedNodeId);
+      return isSelectableNode(node) ? node : null;
     }
 
     function buildParentMap() {
@@ -3301,14 +5956,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       visibleIdSet.forEach((nodeId) => {
         const node = getNodeById(nodeId);
         if (!node) return;
-        const size = getCardSize(node, null);
+        const occupiedSize = getNodeOccupiedSize(node, null);
         const hasPos = hasValidGraphPos(node);
         const entry = {
           id: node.id,
           x: hasPos ? node.graphPos.x : 0,
           y: hasPos ? node.graphPos.y : 0,
-          w: size.width,
-          h: size.height
+          w: occupiedSize.width,
+          h: occupiedSize.height,
+          collisionRadius: getNodeOccupiedCollisionRadius(node, null)
         };
         nodesForSim.push(entry);
         modelById.set(node.id, node);
@@ -3354,7 +6010,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const simulation = d3.forceSimulation(nodesForSim)
         .force("link", d3.forceLink(linksForSim).id((d) => d.id).distance(180).strength(0.2))
         .force("charge", d3.forceManyBody().strength(-700))
-        .force("collide", d3.forceCollide().radius((d) => (0.5 * Math.max(d.w, d.h)) + 16).iterations(2))
+        .force("collide", d3.forceCollide().radius((d) => (d.collisionRadius || (0.5 * Math.max(d.w, d.h))) + 16).iterations(2))
         .force("center", d3.forceCenter(0, 0));
 
       for (let i = 0; i < 300; i += 1) {
@@ -3379,14 +6035,18 @@ function applyWorkspaceData(workspaceId, options = {}) {
         handover: [],
         process: [],
         standard: [],
-        portal: []
+        portal: [],
+        entity: [],
+        collaboration: []
       };
       const laneOrder = [
         "location",
         "process",
         "standard",
         "handover",
-        "portal"
+        "portal",
+        "entity",
+        "collaboration"
       ];
 
       visibleIdSet.forEach((nodeId) => {
@@ -3402,11 +6062,11 @@ function applyWorkspaceData(workspaceId, options = {}) {
         let wrapColumnIndex = 0;
 
         laneNodes.forEach((node) => {
-          const size = getCardSize(node, null);
-          const stepY = size.height + HYBRID_LANE_GAP_Y;
+          const occupiedSize = getNodeOccupiedSize(node, null);
+          const stepY = occupiedSize.height + HYBRID_LANE_GAP_Y;
           const nextTop = rowIndex * stepY;
 
-          if ((nextTop + size.height) > HYBRID_LANE_MAX_HEIGHT && rowIndex > 0) {
+          if ((nextTop + occupiedSize.height) > HYBRID_LANE_MAX_HEIGHT && rowIndex > 0) {
             rowIndex = 0;
             wrapColumnIndex += 1;
           }
@@ -3429,7 +6089,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const simulation = d3.forceSimulation(nodesForSim)
         .force("link", d3.forceLink(linksForSim).id((d) => d.id).distance(180).strength(0.15))
         .force("charge", d3.forceManyBody().strength(-600))
-        .force("collide", d3.forceCollide().radius((d) => (0.5 * Math.max(d.w, d.h)) + 16).iterations(2))
+        .force("collide", d3.forceCollide().radius((d) => (d.collisionRadius || (0.5 * Math.max(d.w, d.h))) + 16).iterations(2))
         .force("laneX", d3.forceX((d) => {
           const modelNode = modelById.get(d.id);
           return HYBRID_LANE_X[modelNode?.type] ?? 0;
@@ -3480,15 +6140,11 @@ function applyWorkspaceData(workspaceId, options = {}) {
       visibleIdSet.forEach((nodeId) => {
         const node = getNodeById(nodeId);
         if (!node || !hasValidGraphPos(node)) return;
-        const size = getCardSize(node, null);
-        const left = node.graphPos.x - (size.width / 2);
-        const top = node.graphPos.y - (size.height / 2);
-        const right = node.graphPos.x + (size.width / 2);
-        const bottom = node.graphPos.y + (size.height / 2);
-        minX = Math.min(minX, left);
-        minY = Math.min(minY, top);
-        maxX = Math.max(maxX, right);
-        maxY = Math.max(maxY, bottom);
+        const extents = getNodeOccupiedExtents(node, null);
+        minX = Math.min(minX, node.graphPos.x + extents.left);
+        minY = Math.min(minY, node.graphPos.y + extents.top);
+        maxX = Math.max(maxX, node.graphPos.x + extents.right);
+        maxY = Math.max(maxY, node.graphPos.y + extents.bottom);
       });
 
       if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
@@ -3647,36 +6303,225 @@ function applyWorkspaceData(workspaceId, options = {}) {
         });
     }
 
+    function buildCollaborationAnchorId(workspaceId) {
+      const workspaceSlug = sanitizeWorkspaceSlug(workspaceId) || "workspace";
+      return `collaboration-${workspaceSlug}`;
+    }
+
+    function getDefaultCollaborationGraphPos(workspaceRecord, excludedNodeId = null) {
+      const scopedNodeIds = Array.isArray(workspaceRecord?.nodeIds) ? workspaceRecord.nodeIds : [];
+      const positionedNodes = scopedNodeIds
+        .filter((nodeId) => nodeId !== excludedNodeId)
+        .map((nodeId) => allNodesRuntime.find((node) => node.id === nodeId))
+        .filter((node) => node && node.graphPos && Number.isFinite(node.graphPos.x) && Number.isFinite(node.graphPos.y));
+      if (!positionedNodes.length) {
+        return { x: 0, y: 0 };
+      }
+      const total = positionedNodes.reduce((acc, node) => {
+        acc.x += node.graphPos.x;
+        acc.y += node.graphPos.y;
+        return acc;
+      }, { x: 0, y: 0 });
+      return {
+        x: total.x / positionedNodes.length,
+        y: total.y / positionedNodes.length
+      };
+    }
+
+    function createAutoManagedCollaborationNode(workspaceRecord) {
+      const ownerRecord = workspaceRecord?.ownerId ? userById.get(workspaceRecord.ownerId) : null;
+      const defaultId = buildCollaborationAnchorId(workspaceRecord?.id);
+      const nodeId = allNodesRuntime.some((node) => node.id === defaultId && node.type !== "collaboration")
+        ? generateNodeId("collaboration")
+        : defaultId;
+      return {
+        id: nodeId,
+        type: "collaboration",
+        title: "",
+        label: "",
+        ownerId: workspaceRecord?.ownerId || currentUserId || null,
+        owner: ownerRecord?.name || workspaceRecord?.ownerId || "Unknown",
+        summary: "Collaboration anchor",
+        tasks: [],
+        comments: [],
+        locationId: null,
+        graphPos: getDefaultCollaborationGraphPos(workspaceRecord)
+      };
+    }
+
     function normalizeProjectWorkspaceSemantics() {
       const allIds = new Set(nodes.map((node) => node.id));
+      let changed = false;
       nodes.forEach((node) => {
-        if (!Array.isArray(node.tasks)) node.tasks = [];
-        if (!Array.isArray(node.comments)) node.comments = [];
+        if (!Array.isArray(node.tasks)) {
+          node.tasks = [];
+          changed = true;
+        }
+        if (!Array.isArray(node.comments)) {
+          node.comments = [];
+          changed = true;
+        }
         if (typeof node.summary !== "string" || !node.summary.trim()) {
           node.summary = `${node.label || node.title || node.id} node`;
+          changed = true;
         }
         if (node.type === "location") {
-          node.kind = node.kind || "generic";
+          const nextKind = node.kind || "generic";
+          if (node.kind !== nextKind) {
+            node.kind = nextKind;
+            changed = true;
+          }
         }
         if (node.type === "process") {
-          node.status = normalizeProcessStatus(node.status);
+          const nextStatus = normalizeProcessStatus(node.status);
+          if (node.status !== nextStatus) {
+            node.status = nextStatus;
+            changed = true;
+          }
+        }
+        if (node.type === "handover") {
+          if (normalizeHandoverFieldsForNode(node)) {
+            changed = true;
+          }
+        }
+        if (node.type === "entity") {
+          if (normalizeEntityLinkFieldsForNode(node)) {
+            changed = true;
+          }
+          if (node.locationId !== null) {
+            node.locationId = null;
+            changed = true;
+          }
+        }
+        if (node.type === "collaboration") {
+          if (node.title !== "" || node.label !== "") {
+            node.title = "";
+            node.label = "";
+            changed = true;
+          }
+          if (node.locationId !== null) {
+            node.locationId = null;
+            changed = true;
+          }
         }
         if (node.locationId && !allIds.has(node.locationId)) {
           node.locationId = null;
+          changed = true;
         }
       });
+      return { changed, reloadWorkspace: false };
+    }
+
+    function normalizeCollaborationWorkspaceSemantics() {
+      const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+      if (!workspaceRecord) return { changed: false, reloadWorkspace: false };
+      if (!Array.isArray(workspaceRecord.nodeIds)) {
+        workspaceRecord.nodeIds = [];
+      }
+      const runtimeNodeById = new Map(allNodesRuntime.map((node) => [node.id, node]));
+      const scopedNodeIds = workspaceRecord.nodeIds.filter((nodeId) => runtimeNodeById.has(nodeId));
+      let changed = false;
+      let reloadWorkspace = false;
+      const collaborationNodes = scopedNodeIds
+        .map((nodeId) => runtimeNodeById.get(nodeId))
+        .filter((node) => node && node.type === "collaboration");
+      let anchorNode = null;
+      if (collaborationNodes.length) {
+        anchorNode = collaborationNodes.find((node) => node.id === workspaceRecord.homeNodeId) || collaborationNodes[0];
+      } else {
+        const deterministicAnchor = runtimeNodeById.get(buildCollaborationAnchorId(workspaceRecord.id)) || null;
+        anchorNode = deterministicAnchor && deterministicAnchor.type === "collaboration"
+          ? deterministicAnchor
+          : null;
+        if (!anchorNode) {
+          anchorNode = createAutoManagedCollaborationNode(workspaceRecord);
+          allNodesRuntime.push(anchorNode);
+          runtimeNodeById.set(anchorNode.id, anchorNode);
+          changed = true;
+        }
+        workspaceRecord.nodeIds.unshift(anchorNode.id);
+        changed = true;
+        reloadWorkspace = true;
+      }
+
+      const seenCollaborationAnchor = new Set();
+      const nextWorkspaceNodeIds = workspaceRecord.nodeIds.filter((nodeId) => {
+        if (nodeId !== anchorNode.id) {
+          const node = runtimeNodeById.get(nodeId);
+          if (node?.type !== "collaboration") return true;
+          return false;
+        }
+        if (seenCollaborationAnchor.has(nodeId)) return false;
+        seenCollaborationAnchor.add(nodeId);
+        return true;
+      });
+      if (
+        nextWorkspaceNodeIds.length !== workspaceRecord.nodeIds.length ||
+        nextWorkspaceNodeIds.some((nodeId, index) => workspaceRecord.nodeIds[index] !== nodeId)
+      ) {
+        workspaceRecord.nodeIds = nextWorkspaceNodeIds;
+        changed = true;
+        reloadWorkspace = true;
+      }
+
+      if (Array.isArray(workspaceRecord.edgeIds)) {
+        const validNodeIds = new Set(workspaceRecord.nodeIds);
+        const nextEdgeIds = workspaceRecord.edgeIds.filter((edgeId) => {
+          const edge = allEdgesRuntime.find((edgeRecord) => edgeRecord.id === edgeId);
+          return !!edge && validNodeIds.has(edge.sourceId) && validNodeIds.has(edge.targetId);
+        });
+        if (
+          nextEdgeIds.length !== workspaceRecord.edgeIds.length ||
+          nextEdgeIds.some((edgeId, index) => workspaceRecord.edgeIds[index] !== edgeId)
+        ) {
+          workspaceRecord.edgeIds = nextEdgeIds;
+          changed = true;
+        }
+      }
+
+      if (workspaceRecord.homeNodeId !== anchorNode.id) {
+        workspaceRecord.homeNodeId = anchorNode.id;
+        changed = true;
+      }
+
+      if (!anchorNode.graphPos || !Number.isFinite(anchorNode.graphPos.x) || !Number.isFinite(anchorNode.graphPos.y)) {
+        anchorNode.graphPos = getDefaultCollaborationGraphPos(workspaceRecord, anchorNode.id);
+        changed = true;
+      }
+
+      const scopedRuntimeNodes = workspaceRecord.nodeIds
+        .map((nodeId) => runtimeNodeById.get(nodeId))
+        .filter(Boolean);
+      nodes = scopedRuntimeNodes;
+      nodeById = new Map(scopedRuntimeNodes.map((node) => [node.id, node]));
+
+      const baseResult = normalizeProjectWorkspaceSemantics();
+      if (baseResult.changed) {
+        changed = true;
+      }
+      scopedRuntimeNodes.forEach((node) => {
+        if (node.type === "collaboration") {
+          if (node.title !== "" || node.label !== "") {
+            node.title = "";
+            node.label = "";
+            changed = true;
+          }
+        }
+      });
+      return { changed, reloadWorkspace };
     }
 
     function normalizeActiveWorkspaceSemantics() {
-      if (currentWorkspaceKind === "collab") {
-        normalizeProjectWorkspaceSemantics();
-        return;
+      const result = currentWorkspaceKind === "collab"
+        ? normalizeCollaborationWorkspaceSemantics()
+        : normalizeProjectWorkspaceSemantics();
+      if (!result.changed) return;
+      syncNodeRuntimeAndStore();
+      syncWorkspaceRuntimeAndStore();
+      persistStoreToLocalStorage();
+      if (result.reloadWorkspace) {
+        applyWorkspaceData(currentWorkspaceId, { sanitizeState: true });
       }
-      if (currentWorkspaceKind === "normal") {
-        normalizeProjectWorkspaceSemantics();
-        return;
-      }
-      normalizeProjectWorkspaceSemantics();
     }
 
     function hasMentionForCurrentUser(text) {
@@ -3687,7 +6532,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const notifications = [];
       nodes.forEach((node) => {
         node.tasks.forEach((task) => {
-          if (task.assignedTo === CURRENT_USER && !task.done && !state.seenTaskIds.has(task.id)) {
+          if (isTaskAssignedToCurrentUser(task.assignedTo) && !task.done && !state.seenTaskIds.has(task.id)) {
             notifications.push({
               id: `task:${task.id}`,
               kind: "task",
@@ -3702,7 +6547,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         node.comments.forEach((comment, commentIndex) => {
           if (!comment.isNew) return;
           const mention = hasMentionForCurrentUser(comment.text);
-          const ownerUpdate = node.owner === CURRENT_USER;
+          const ownerUpdate = isNodeOwnedByCurrentUser(node);
           if (!mention && !ownerUpdate) return;
 
           notifications.push({
@@ -3801,14 +6646,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       return badge;
     }
 
-    function createStatusPill(status) {
+    function createStatusPill(status, extraClasses = []) {
       const pill = document.createElement("span");
-      pill.className = `status-pill ${getStatusClass(status)}`;
+      pill.className = ["status-pill", getStatusClass(status), ...extraClasses].filter(Boolean).join(" ");
       pill.textContent = status;
       return pill;
     }
 
     function createNodeRow(node, extraClasses = []) {
+      if (!node || !isSelectableNode(node)) return null;
       const row = document.createElement("button");
       row.type = "button";
       row.className = "node-row";
@@ -3915,7 +6761,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
           if (typeDiff !== 0) return typeDiff;
           return a.label.localeCompare(b.label);
         });
-        sorted.forEach((node) => nodeListEl.appendChild(createNodeRow(node)));
+        sorted
+          .filter((node) => isSelectableNode(node))
+          .forEach((node) => {
+            const row = createNodeRow(node);
+            if (row) {
+              nodeListEl.appendChild(row);
+            }
+          });
       }
     }
     function getExpandedLocationMetrics(locationNode) {
@@ -4082,13 +6935,156 @@ function applyWorkspaceData(workspaceId, options = {}) {
         const metrics = getExpandedLocationMetrics(node);
         return { width: metrics.cardWidthPx, height: metrics.cardHeightPx };
       }
+      if (node.type === "entity") {
+        return getEntityDiamondSize(node);
+      }
       return {
         width: COLLAPSED_CARD_WIDTH_BY_TYPE[node.type] || COLLAPSED_CARD_W,
         height: COLLAPSED_CARD_HEIGHT_BY_TYPE[node.type] || NODE_HEIGHT
       };
     }
 
+    function getPortalBodyOffsetWithinWrapper(node, wrapperFrame, expandedLocationId = null) {
+      const bodyFrame = getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
+      return {
+        left: bodyFrame.x - wrapperFrame.x,
+        top: bodyFrame.y - wrapperFrame.y,
+        width: bodyFrame.w,
+        height: bodyFrame.h
+      };
+    }
+
+    function getPortalBodyFrameFromCardStyles(cardEl, wrapperFrame, node, expandedLocationId = null) {
+      if (!cardEl || !wrapperFrame || !node || node.type !== "portal") {
+        return getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
+      }
+      const expectedFrame = getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
+      const bodyEl = cardEl.querySelector(".node-portal-body");
+      if (!(bodyEl instanceof HTMLElement)) {
+        return expectedFrame;
+      }
+      const parsedLeft = Number.parseFloat(bodyEl.style.left);
+      const parsedTop = Number.parseFloat(bodyEl.style.top);
+      const parsedWidth = Number.parseFloat(bodyEl.style.width);
+      const parsedHeight = Number.parseFloat(bodyEl.style.height);
+      const left = Number.isFinite(parsedLeft) ? parsedLeft : bodyEl.offsetLeft;
+      const top = Number.isFinite(parsedTop) ? parsedTop : bodyEl.offsetTop;
+      const width = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : bodyEl.offsetWidth;
+      const height = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : bodyEl.offsetHeight;
+      if (!Number.isFinite(left) || !Number.isFinite(top) || width <= 0 || height <= 0) {
+        return expectedFrame;
+      }
+      return {
+        x: wrapperFrame.x + left,
+        y: wrapperFrame.y + top,
+        w: width,
+        h: height
+      };
+    }
+
+    function getRenderedPortalBodyFrame(cardEl, wrapperFrame, node, expandedLocationId = null) {
+      if (!cardEl || !wrapperFrame || !node || node.type !== "portal") return null;
+      const expectedFrame = getPortalBodyFrameFromCardStyles(cardEl, wrapperFrame, node, expandedLocationId);
+      const bodyEl = cardEl.querySelector(".node-portal-body");
+      if (!(bodyEl instanceof HTMLElement)) {
+        return expectedFrame;
+      }
+      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+      const planeEl = cardEl.closest(".canvas-plane");
+      if (planeEl instanceof HTMLElement) {
+        const planeRect = planeEl.getBoundingClientRect();
+        const bodyRect = bodyEl.getBoundingClientRect();
+        if (
+          Number.isFinite(planeRect.left) &&
+          Number.isFinite(planeRect.top) &&
+          Number.isFinite(bodyRect.left) &&
+          Number.isFinite(bodyRect.top) &&
+          bodyRect.width > 0 &&
+          bodyRect.height > 0
+        ) {
+          const renderedFrame = {
+            x: (bodyRect.left - planeRect.left) / zoom,
+            y: (bodyRect.top - planeRect.top) / zoom,
+            w: bodyRect.width / zoom,
+            h: bodyRect.height / zoom
+          };
+          const maxDelta = Math.max(
+            Math.abs(renderedFrame.x - expectedFrame.x),
+            Math.abs(renderedFrame.y - expectedFrame.y),
+            Math.abs(renderedFrame.w - expectedFrame.w),
+            Math.abs(renderedFrame.h - expectedFrame.h)
+          );
+          if (maxDelta > 1 && !hasWarnedPortalBodyFrameMismatch) {
+            console.warn("Portal body frame differed from computed portal geometry; using rendered body frame.", {
+              nodeId: node.id,
+              expectedFrame,
+              renderedFrame
+            });
+            hasWarnedPortalBodyFrameMismatch = true;
+          }
+          return renderedFrame;
+        }
+      }
+      return expectedFrame;
+    }
+
+    function buildVisibleNodeBodyFrameCache(visibleNodeFrames, renderedCardsById, expandedLocationId = null, options = {}) {
+      const useRenderedFrame = options.useRenderedFrame === true;
+      const bodyFrames = new Map();
+      renderedCardsById.forEach((card, nodeId) => {
+        const node = getNodeById(nodeId);
+        const wrapperFrame = visibleNodeFrames.get(nodeId);
+        if (!node || node.type !== "portal" || !wrapperFrame) return;
+        bodyFrames.set(
+          nodeId,
+          useRenderedFrame
+            ? getRenderedPortalBodyFrame(card, wrapperFrame, node, expandedLocationId)
+            : getPortalBodyFrameFromCardStyles(card, wrapperFrame, node, expandedLocationId)
+        );
+      });
+      return bodyFrames;
+    }
+
+    function refreshVisiblePortalBodyFramesFromDOM() {
+      if (!lastVisibleNodeFrames || !lastVisibleNodeFrames.size) return;
+      if (!lastRenderedCardsById || !lastRenderedCardsById.size) return;
+      const expandedLocationId =
+        state.expandedCanvasLocationId && lastVisibleNodeIds.has(state.expandedCanvasLocationId)
+          ? state.expandedCanvasLocationId
+          : null;
+      lastVisibleNodeBodyFrames = buildVisibleNodeBodyFrameCache(
+        lastVisibleNodeFrames,
+        lastRenderedCardsById,
+        expandedLocationId,
+        { useRenderedFrame: true }
+      );
+    }
+
     function computeNodeFrame(node, expandedLocationId, layoutOverride = null) {
+      if (node && node.type === "portal") {
+        const size = getCardSize(node, expandedLocationId);
+        const extents = getNodeOccupiedExtents(node, expandedLocationId);
+        if (layoutOverride) {
+          const bodyLeft = layoutOverride.left;
+          const bodyTop = layoutOverride.top;
+          const centerX = bodyLeft + (size.width / 2);
+          const centerY = bodyTop + (size.height / 2);
+          return {
+            x: centerX + extents.left,
+            y: centerY + extents.top,
+            w: extents.width,
+            h: extents.height
+          };
+        }
+        const centerX = node && node.graphPos ? node.graphPos.x : 100;
+        const centerY = node && node.graphPos ? node.graphPos.y : 100;
+        return {
+          x: centerX + extents.left,
+          y: centerY + extents.top,
+          w: extents.width,
+          h: extents.height
+        };
+      }
       const size = getCardSize(node, expandedLocationId);
       const centerX = node && node.graphPos ? node.graphPos.x : 100;
       const centerY = node && node.graphPos ? node.graphPos.y : 100;
@@ -4110,30 +7106,39 @@ function applyWorkspaceData(workspaceId, options = {}) {
       return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
     }
 
-    function resolveCollisions(orderedPlacements, sizeById, canvasWidth, gridStep) {
+    function resolveCollisions(orderedPlacements, sizeById, canvasWidth, gridStep, expandedLocationId = null) {
       const placedRects = [];
       const result = new Map();
 
       orderedPlacements.forEach((placement) => {
         const size = sizeById.get(placement.id);
         if (!size) return;
+        const node = getNodeById(placement.id);
+        const extents = getNodeOccupiedExtents(node, expandedLocationId);
 
-        const maxX = Math.max(LAYOUT_MARGIN, canvasWidth - LAYOUT_MARGIN - size.width);
+        const minX = Math.max(
+          LAYOUT_MARGIN,
+          LAYOUT_MARGIN - (size.width / 2) - extents.left
+        );
+        const maxX = Math.max(
+          minX,
+          canvasWidth - LAYOUT_MARGIN - (size.width / 2) - extents.right
+        );
         let startX = snapToGrid(placement.columnX ?? placement.x, gridStep);
-        startX = Math.min(Math.max(startX, LAYOUT_MARGIN), maxX);
+        startX = Math.min(Math.max(startX, minX), maxX);
 
         let x = snapToGrid(placement.x, gridStep);
-        x = Math.min(Math.max(x, LAYOUT_MARGIN), maxX);
+        x = Math.min(Math.max(x, minX), maxX);
         let y = snapToGrid(placement.y, gridStep);
 
         let guard = 0;
         while (guard < 5000) {
-          const candidate = {
-            left: x,
-            top: y,
-            right: x + size.width,
-            bottom: y + size.height
-          };
+          const candidate = getNodeOccupiedRect(node, {
+            x,
+            y,
+            w: size.width,
+            h: size.height
+          }, expandedLocationId);
           const collides = placedRects.some((placed) => intersectsRect(candidate, placed));
           if (!collides) {
             placedRects.push(candidate);
@@ -4141,7 +7146,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
             break;
           }
           x += gridStep;
-          if (x + size.width > canvasWidth - LAYOUT_MARGIN) {
+          if (x > maxX) {
             x = startX;
             y = snapToGrid(y + gridStep, gridStep);
           }
@@ -4153,12 +7158,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
             left: startX,
             top: y
           };
-          placedRects.push({
-            left: fallback.left,
-            top: fallback.top,
-            right: fallback.left + size.width,
-            bottom: fallback.top + size.height
-          });
+          placedRects.push(getNodeOccupiedRect(node, {
+            x: fallback.left,
+            y: fallback.top,
+            w: size.width,
+            h: size.height
+          }, expandedLocationId));
           result.set(placement.id, fallback);
         }
       });
@@ -4187,10 +7192,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const parentId = parentMap.get(expandedLocationId) || null;
       const lSize = getCardSize(expandedNode, expandedLocationId);
       const sizeById = new Map();
+      const occupiedSizeById = new Map();
       visibleSet.forEach((id) => {
         const node = getNodeById(id);
         if (!node) return;
         sizeById.set(id, getCardSize(node, expandedLocationId));
+        occupiedSizeById.set(id, getNodeOccupiedSize(node, expandedLocationId));
       });
 
       const directNonLocation = expandedNode.linkedNodeIds.filter((id) => {
@@ -4260,15 +7267,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       const appendColumn = (ids, columnX, startY) => {
         let cursorY = startY;
         ids.forEach((id) => {
-          const size = sizeById.get(id);
-          if (!size) return;
+          const occupiedSize = occupiedSizeById.get(id);
+          if (!occupiedSize) return;
           orderedPlacements.push({
             id,
             x: columnX,
             y: cursorY,
             columnX
           });
-          cursorY += size.height + ROW_GAP;
+          cursorY += occupiedSize.height + ROW_GAP;
         });
       };
 
@@ -4276,15 +7283,48 @@ function applyWorkspaceData(workspaceId, options = {}) {
       appendColumn(col2Ids, col2X, anchorY);
       appendColumn(restIds, restX, anchorY);
 
-      return resolveCollisions(orderedPlacements, sizeById, CANVAS_WIDTH, GRID_STEP);
+      return resolveCollisions(orderedPlacements, sizeById, CANVAS_WIDTH, GRID_STEP, expandedLocationId);
+    }
+
+    function handleGraphNodeCardClick(node, event) {
+      if (suppressClickNodeId === node.id) {
+        suppressClickNodeId = null;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (suppressClickNodeId) {
+        suppressClickNodeId = null;
+      }
+      if (node.type === "collaboration") {
+        resetLocationClickTracker();
+        resetPortalClickTracker();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (node.type === "location") {
+        resetPortalClickTracker();
+        handleLocationCardClick(node.id);
+        return;
+      }
+      if (node.type === "portal") {
+        resetLocationClickTracker();
+        if (isPortalDoubleClick(node.id)) {
+          resetPortalClickTracker();
+          handlePortalDoubleClick(node.id);
+          return;
+        }
+        selectNode(node.id, { source: "graph" });
+        return;
+      }
+      resetLocationClickTracker();
+      resetPortalClickTracker();
+      selectNode(node.id, { source: "graph" });
     }
 
     function createNodeCard(node, isSelected, layoutOverride = null) {
-      const x = node.graphPos ? node.graphPos.x : 100;
-      const y = node.graphPos ? node.graphPos.y : 100;
-      const size = getCardSize(node, state.expandedCanvasLocationId);
-      const left = layoutOverride ? layoutOverride.left : x - (size.width / 2);
-      const top = layoutOverride ? layoutOverride.top : y - (size.height / 2);
+      const frame = computeNodeFrame(node, state.expandedCanvasLocationId, layoutOverride);
       const isExpandedLocationCard = node.type === "location" && isLocationCardExpanded(node.id);
 
       const card = document.createElement("div");
@@ -4294,35 +7334,30 @@ function applyWorkspaceData(workspaceId, options = {}) {
       } else {
         card.classList.add("drag-anywhere");
       }
-      card.style.width = `${size.width}px`;
-      card.style.height = `${size.height}px`;
-      card.style.left = `${left}px`;
-      card.style.top = `${top}px`;
+      card.style.width = `${frame.w}px`;
+      card.style.height = `${frame.h}px`;
+      card.style.left = `${frame.x}px`;
+      card.style.top = `${frame.y}px`;
+      card.style.setProperty("--graph-node-text-inset", `${GRAPH_NODE_TEXT_INSET_PX}px`);
       card.dataset.nodeId = node.id;
-      buildNodeCardContent(card, node);
+      buildNodeCardContent(card, node, frame);
       const dragHandle = card.querySelector(".node-drag-handle");
+      const portalBody = node.type === "portal" ? card.querySelector(".node-portal-body") : null;
       if (isExpandedLocationCard && dragHandle) {
         dragHandle.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
+      } else if (node.type === "portal" && portalBody) {
+        portalBody.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
       } else {
         card.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
       }
-      card.addEventListener("click", (event) => {
-        if (suppressClickNodeId === node.id) {
-          suppressClickNodeId = null;
-          event.preventDefault();
+      if (node.type === "portal" && portalBody) {
+        portalBody.addEventListener("click", (event) => {
           event.stopPropagation();
-          return;
-        }
-        if (suppressClickNodeId) {
-          suppressClickNodeId = null;
-        }
-        if (node.type === "location") {
-          handleLocationCardClick(node.id);
-          return;
-        }
-        resetLocationClickTracker();
-        selectNode(node.id, { source: "graph" });
-      });
+          handleGraphNodeCardClick(node, event);
+        });
+      } else {
+        card.addEventListener("click", (event) => handleGraphNodeCardClick(node, event));
+      }
       return card;
     }
 
@@ -4350,6 +7385,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
       lastLocationClick = { nodeId: null, context: null, at: 0 };
     }
 
+    function resetPortalClickTracker() {
+      lastPortalClick = { nodeId: null, at: 0 };
+    }
+
     function isLocationDoubleClick(nodeId, context) {
       const now = Date.now();
       const isDouble =
@@ -4357,6 +7396,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
         lastLocationClick.context === context &&
         now - lastLocationClick.at <= LOCATION_DOUBLE_CLICK_MS;
       lastLocationClick = { nodeId, context, at: now };
+      return isDouble;
+    }
+
+    function isPortalDoubleClick(nodeId) {
+      const now = Date.now();
+      const isDouble =
+        lastPortalClick.nodeId === nodeId &&
+        now - lastPortalClick.at <= LOCATION_DOUBLE_CLICK_MS;
+      lastPortalClick = { nodeId, at: now };
       return isDouble;
     }
 
@@ -4450,7 +7498,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       return { visibleNodeIds, absorbedLocationIds };
     }
 
-    function buildNodeCardContent(card, node) {
+    function buildNodeCardContent(card, node, frame) {
       if (node.type === "location") {
         buildLocationCardContent(card, node);
         return;
@@ -4464,7 +7512,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
         return;
       }
       if (node.type === "portal") {
-        buildPortalCardContent(card, node);
+        buildPortalCardContent(card, node, frame);
+        return;
+      }
+      if (node.type === "entity") {
+        buildEntityCardContent(card, node);
+        return;
+      }
+      if (node.type === "collaboration") {
+        buildCollaborationCardContent(card, node);
         return;
       }
       buildArtifactCardContent(card, node);
@@ -4646,7 +7702,23 @@ function applyWorkspaceData(workspaceId, options = {}) {
       card.appendChild(footer);
     }
 
-    function buildPortalCardContent(card, node) {
+    function buildPortalCardContent(card, node, frame) {
+      const bodyOffset = getPortalBodyOffsetWithinWrapper(node, frame, state.expandedCanvasLocationId);
+      const linkedWorkspaceName = getPortalLinkedWorkspaceName(node);
+      if (linkedWorkspaceName) {
+        const hoverLabel = document.createElement("div");
+        hoverLabel.className = "node-portal-hover-label";
+        hoverLabel.textContent = linkedWorkspaceName;
+        hoverLabel.style.left = `${bodyOffset.left + (bodyOffset.width / 2)}px`;
+        hoverLabel.style.top = `${bodyOffset.top - PORTAL_LABEL_GAP_PX}px`;
+        card.appendChild(hoverLabel);
+      }
+      const body = document.createElement("div");
+      body.className = "node-portal-body node-drag-handle";
+      body.style.left = `${bodyOffset.left}px`;
+      body.style.top = `${bodyOffset.top}px`;
+      body.style.width = `${bodyOffset.width}px`;
+      body.style.height = `${bodyOffset.height}px`;
       const icon = document.createElement("div");
       icon.className = "node-portal-glyph";
       const ring = document.createElement("span");
@@ -4656,7 +7728,388 @@ function applyWorkspaceData(workspaceId, options = {}) {
       icon.appendChild(ring);
       icon.appendChild(core);
 
-      card.appendChild(icon);
+      body.appendChild(icon);
+      card.appendChild(body);
+    }
+
+    function buildRoundedPolygonPathData(points, cornerRadius = 0) {
+      if (!Array.isArray(points) || points.length < 3) return "";
+      const normalizedPoints = points
+        .map((point) => ({
+          x: Number(point?.x),
+          y: Number(point?.y)
+        }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      if (normalizedPoints.length < 3) return "";
+      const radius = Math.max(0, Number(cornerRadius) || 0);
+      const roundedPoints = normalizedPoints.map((point, index) => {
+        const prev = normalizedPoints[(index - 1 + normalizedPoints.length) % normalizedPoints.length];
+        const next = normalizedPoints[(index + 1) % normalizedPoints.length];
+        const prevDx = prev.x - point.x;
+        const prevDy = prev.y - point.y;
+        const nextDx = next.x - point.x;
+        const nextDy = next.y - point.y;
+        const prevLength = Math.hypot(prevDx, prevDy);
+        const nextLength = Math.hypot(nextDx, nextDy);
+        const effectiveRadius = Math.min(radius, prevLength / 2, nextLength / 2);
+        const incoming = effectiveRadius > 0 && prevLength > 0
+          ? {
+              x: point.x + ((prevDx / prevLength) * effectiveRadius),
+              y: point.y + ((prevDy / prevLength) * effectiveRadius)
+            }
+          : { x: point.x, y: point.y };
+        const outgoing = effectiveRadius > 0 && nextLength > 0
+          ? {
+              x: point.x + ((nextDx / nextLength) * effectiveRadius),
+              y: point.y + ((nextDy / nextLength) * effectiveRadius)
+            }
+          : { x: point.x, y: point.y };
+        return { point, incoming, outgoing };
+      });
+      const first = roundedPoints[0];
+      let path = `M ${first.outgoing.x.toFixed(2)} ${first.outgoing.y.toFixed(2)}`;
+      for (let index = 1; index < roundedPoints.length; index += 1) {
+        const roundedPoint = roundedPoints[index];
+        path += ` L ${roundedPoint.incoming.x.toFixed(2)} ${roundedPoint.incoming.y.toFixed(2)}`;
+        path += ` Q ${roundedPoint.point.x.toFixed(2)} ${roundedPoint.point.y.toFixed(2)} ${roundedPoint.outgoing.x.toFixed(2)} ${roundedPoint.outgoing.y.toFixed(2)}`;
+      }
+      path += ` L ${first.incoming.x.toFixed(2)} ${first.incoming.y.toFixed(2)}`;
+      path += ` Q ${first.point.x.toFixed(2)} ${first.point.y.toFixed(2)} ${first.outgoing.x.toFixed(2)} ${first.outgoing.y.toFixed(2)} Z`;
+      return path;
+    }
+
+    function buildRoundedDiamondPathData(width = 100, height = 100, cornerRadius = 0, inset = 0) {
+      const normalizedWidth = Math.max(1, Number(width) || 1);
+      const normalizedHeight = Math.max(1, Number(height) || 1);
+      const normalizedInset = Math.max(
+        0,
+        Math.min(
+          Number(inset) || 0,
+          (normalizedWidth / 2) - 0.5,
+          (normalizedHeight / 2) - 0.5
+        )
+      );
+      const left = normalizedInset;
+      const right = normalizedWidth - normalizedInset;
+      const top = normalizedInset;
+      const bottom = normalizedHeight - normalizedInset;
+      return buildRoundedPolygonPathData([
+        { x: normalizedWidth / 2, y: top },
+        { x: right, y: normalizedHeight / 2 },
+        { x: normalizedWidth / 2, y: bottom },
+        { x: left, y: normalizedHeight / 2 }
+      ], cornerRadius);
+    }
+
+    function buildEntityCardContent(card, node) {
+      const idBase = String(node?.id || "entity").replace(/[^A-Za-z0-9_-]/g, "_");
+      const baseGradientId = `entityBaseGrad_${idBase}`;
+      const sheenGradientId = `entitySheenGrad_${idBase}`;
+      const highlightGradientId = `entityHighlightGrad_${idBase}`;
+      const innerGradientId = `entityInnerGrad_${idBase}`;
+      const outerPathData = buildRoundedDiamondPathData(100, 100, 9, 0.8);
+      const innerPathData = buildRoundedDiamondPathData(100, 100, 6.5, 12);
+      const body = document.createElement("div");
+      body.className = "node-entity-body";
+      const surface = createSvgElement("svg", {
+        class: "node-entity-surface",
+        viewBox: "0 0 100 100",
+        preserveAspectRatio: "none",
+        "aria-hidden": "true"
+      });
+      const defs = createSvgElement("defs");
+      const baseGradient = createSvgElement("linearGradient", {
+        id: baseGradientId,
+        x1: "14%",
+        y1: "4%",
+        x2: "86%",
+        y2: "100%"
+      });
+      [
+        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.42" },
+        { offset: "54%", color: "rgb(255, 255, 255)", opacity: "0.31" },
+        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.22" }
+      ].forEach((stop) => {
+        baseGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      const sheenGradient = createSvgElement("linearGradient", {
+        id: sheenGradientId,
+        x1: "18%",
+        y1: "0%",
+        x2: "70%",
+        y2: "100%"
+      });
+      [
+        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.28" },
+        { offset: "42%", color: "rgb(255, 255, 255)", opacity: "0.14" },
+        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.03" }
+      ].forEach((stop) => {
+        sheenGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      const highlightGradient = createSvgElement("radialGradient", {
+        id: highlightGradientId,
+        cx: "26%",
+        cy: "8%",
+        r: "84%"
+      });
+      [
+        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.34" },
+        { offset: "58%", color: "rgb(255, 255, 255)", opacity: "0.10" },
+        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0" }
+      ].forEach((stop) => {
+        highlightGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      const innerGradient = createSvgElement("linearGradient", {
+        id: innerGradientId,
+        x1: "28%",
+        y1: "14%",
+        x2: "78%",
+        y2: "88%"
+      });
+      [
+        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.16" },
+        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.03" }
+      ].forEach((stop) => {
+        innerGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      defs.appendChild(baseGradient);
+      defs.appendChild(sheenGradient);
+      defs.appendChild(highlightGradient);
+      defs.appendChild(innerGradient);
+      surface.appendChild(defs);
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-base",
+        d: outerPathData,
+        fill: `url(#${baseGradientId})`
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-tint",
+        d: outerPathData
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-sheen",
+        d: outerPathData,
+        fill: `url(#${sheenGradientId})`
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-highlight",
+        d: outerPathData,
+        fill: `url(#${highlightGradientId})`
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-inner",
+        d: innerPathData,
+        fill: `url(#${innerGradientId})`
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-outline",
+        d: outerPathData
+      }));
+      surface.appendChild(createSvgElement("path", {
+        class: "node-entity-diamond-focus-ring",
+        d: outerPathData
+      }));
+      const content = document.createElement("div");
+      content.className = "node-entity-content";
+      const label = document.createElement("div");
+      label.className = "node-entity-label";
+      label.textContent = node.label || getEntityLabelFallback(node) || "Entity";
+      content.appendChild(label);
+      body.appendChild(surface);
+      card.appendChild(body);
+      card.appendChild(content);
+    }
+
+    function buildSpiralArmPathData(options = {}) {
+      const centerX = Number.isFinite(options.centerX) ? options.centerX : 50;
+      const centerY = Number.isFinite(options.centerY) ? options.centerY : 50;
+      const startRadius = Number.isFinite(options.startRadius) ? options.startRadius : 1.5;
+      const endRadius = Number.isFinite(options.endRadius) ? options.endRadius : 42;
+      const turns = Number.isFinite(options.turns) ? options.turns : 1.4;
+      const angleOffsetDeg = Number.isFinite(options.angleOffsetDeg) ? options.angleOffsetDeg : 0;
+      const steps = Number.isFinite(options.steps) ? Math.max(12, Math.round(options.steps)) : 72;
+      const angleOffsetRad = angleOffsetDeg * (Math.PI / 180);
+      let path = `M ${centerX.toFixed(2)} ${centerY.toFixed(2)}`;
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        const angle = angleOffsetRad + (turns * Math.PI * 2 * t);
+        const radius = startRadius + ((endRadius - startRadius) * Math.pow(t, 1.08));
+        const x = centerX + (Math.cos(angle) * radius);
+        const y = centerY + (Math.sin(angle) * radius);
+        path += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
+      }
+      return path;
+    }
+
+    function buildCollaborationCardContent(card, node) {
+      const idBase = String(node?.id || "collaboration").replace(/[^A-Za-z0-9_-]/g, "_");
+      const clipId = `collabClip_${idBase}`;
+      const armGradientId = `collabArmGrad_${idBase}`;
+      const highlightGradientId = `collabHighlightGrad_${idBase}`;
+      const coreGradientId = `collabCoreGrad_${idBase}`;
+      const glowFilterId = `collabGlow_${idBase}`;
+      const spiral = createSvgElement("svg", {
+        class: "node-collaboration-spiral",
+        viewBox: "0 0 100 100",
+        "aria-hidden": "true"
+      });
+      const defs = createSvgElement("defs");
+      const clipPath = createSvgElement("clipPath", { id: clipId });
+      clipPath.appendChild(createSvgElement("circle", {
+        cx: "50",
+        cy: "50",
+        r: "49"
+      }));
+      defs.appendChild(clipPath);
+
+      const armGradient = createSvgElement("linearGradient", {
+        id: armGradientId,
+        x1: "18",
+        y1: "14",
+        x2: "84",
+        y2: "86",
+        gradientUnits: "userSpaceOnUse"
+      });
+      [
+        { offset: "0%", color: "#e0f2fe", opacity: "0.92" },
+        { offset: "48%", color: "#7dd3fc", opacity: "0.76" },
+        { offset: "100%", color: "#bfdbfe", opacity: "0.28" }
+      ].forEach((stop) => {
+        armGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      defs.appendChild(armGradient);
+
+      const highlightGradient = createSvgElement("linearGradient", {
+        id: highlightGradientId,
+        x1: "24",
+        y1: "20",
+        x2: "72",
+        y2: "74",
+        gradientUnits: "userSpaceOnUse"
+      });
+      [
+        { offset: "0%", color: "#ffffff", opacity: "0.96" },
+        { offset: "45%", color: "#eff6ff", opacity: "0.78" },
+        { offset: "100%", color: "#ffffff", opacity: "0.12" }
+      ].forEach((stop) => {
+        highlightGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      defs.appendChild(highlightGradient);
+
+      const coreGradient = createSvgElement("radialGradient", {
+        id: coreGradientId,
+        cx: "50%",
+        cy: "50%",
+        r: "60%"
+      });
+      [
+        { offset: "0%", color: "#ffffff", opacity: "0.92" },
+        { offset: "45%", color: "#bfdbfe", opacity: "0.62" },
+        { offset: "100%", color: "#bfdbfe", opacity: "0" }
+      ].forEach((stop) => {
+        coreGradient.appendChild(createSvgElement("stop", {
+          offset: stop.offset,
+          "stop-color": stop.color,
+          "stop-opacity": stop.opacity
+        }));
+      });
+      defs.appendChild(coreGradient);
+
+      const glowFilter = createSvgElement("filter", {
+        id: glowFilterId,
+        x: "-18%",
+        y: "-18%",
+        width: "136%",
+        height: "136%"
+      });
+      glowFilter.appendChild(createSvgElement("feGaussianBlur", {
+        stdDeviation: "1.45"
+      }));
+      defs.appendChild(glowFilter);
+
+      spiral.appendChild(defs);
+
+      const spiralGroup = createSvgElement("g", {
+        "clip-path": `url(#${clipId})`
+      });
+      spiralGroup.appendChild(createSvgElement("circle", {
+        class: "node-collaboration-core",
+        cx: "50",
+        cy: "50",
+        r: "8.4",
+        fill: `url(#${coreGradientId})`,
+        opacity: "0.82"
+      }));
+
+      [0, 120, 240].forEach((angleOffsetDeg) => {
+        const d = buildSpiralArmPathData({
+          centerX: 50,
+          centerY: 50,
+          startRadius: 1.8,
+          endRadius: 43,
+          turns: 1.45,
+          angleOffsetDeg: angleOffsetDeg - 16,
+          steps: 78
+        });
+        spiralGroup.appendChild(createSvgElement("path", {
+          class: "node-collaboration-arm-glow",
+          d,
+          fill: "none",
+          stroke: `url(#${armGradientId})`,
+          "stroke-width": "8.4",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          opacity: "0.28",
+          filter: `url(#${glowFilterId})`
+        }));
+        spiralGroup.appendChild(createSvgElement("path", {
+          class: "node-collaboration-arm",
+          d,
+          fill: "none",
+          stroke: `url(#${armGradientId})`,
+          "stroke-width": "5.6",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          opacity: "0.76"
+        }));
+        spiralGroup.appendChild(createSvgElement("path", {
+          class: "node-collaboration-arm-highlight",
+          d,
+          fill: "none",
+          stroke: `url(#${highlightGradientId})`,
+          "stroke-width": "2.15",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          opacity: "0.86"
+        }));
+      });
+
+      spiral.appendChild(spiralGroup);
+      card.appendChild(spiral);
     }
 
     function buildArtifactCardContent(card, node) {
@@ -4681,10 +8134,11 @@ function applyWorkspaceData(workspaceId, options = {}) {
       owner.textContent = node.owner;
       footer.appendChild(owner);
 
-      if (node.status) {
+      const statusValue = getNodeStatusValue(node);
+      if (statusValue) {
         const status = document.createElement("span");
-        status.className = `node-card-status ${getStatusClass(node.status)}`.trim();
-        status.textContent = node.status;
+        status.className = `node-card-status ${getStatusClass(statusValue)}`.trim();
+        status.textContent = statusValue;
         footer.appendChild(status);
       } else if (node.type !== "handover") {
         const badge = document.createElement("span");
@@ -4713,12 +8167,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
     }
 
     function setEdgeHoverState(visibleEdgeEl, chevronEl, sourceId, targetId, isHover) {
-      if (visibleEdgeEl) {
-        visibleEdgeEl.classList.toggle("edge-line--hover", isHover);
-      }
-      if (chevronEl) {
-        chevronEl.classList.toggle("edge-chevron--hover", isHover);
-      }
+      const edgeElements = Array.isArray(visibleEdgeEl) ? visibleEdgeEl : [visibleEdgeEl];
+      edgeElements.filter(Boolean).forEach((edgeEl) => {
+        edgeEl.classList.toggle("edge-line--hover", isHover);
+      });
+      const chevronElements = Array.isArray(chevronEl) ? chevronEl : [chevronEl];
+      chevronElements.filter(Boolean).forEach((chevron) => {
+        chevron.classList.toggle("edge-chevron--hover", isHover);
+      });
       const sourceCard = lastRenderedCardsById.get(sourceId);
       const targetCard = lastRenderedCardsById.get(targetId);
       if (sourceCard) sourceCard.classList.toggle("node-card-edge-hover", isHover);
@@ -4824,8 +8280,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
         if (!lastVisibleNodeIds.has(sourceNode.id)) return;
         const sourceFrame = lastVisibleNodeFrames.get(sourceNode.id);
         if (!sourceFrame) return;
-        const ax = sourceFrame.x + (sourceFrame.w / 2);
-        const ay = sourceFrame.y + (sourceFrame.h / 2);
+        const sourceCenter = getNodeVisualCenter(sourceNode, sourceFrame);
+        const ax = sourceCenter.x;
+        const ay = sourceCenter.y;
 
         getOutgoingEdges(sourceNode.id).forEach((edgeRecord) => {
           const targetId = edgeRecord.targetId;
@@ -4833,10 +8290,13 @@ function applyWorkspaceData(workspaceId, options = {}) {
           if (!lastVisibleNodeIds.has(targetId)) return;
           const targetFrame = lastVisibleNodeFrames.get(targetId);
           if (!targetFrame) return;
-          const bx = targetFrame.x + (targetFrame.w / 2);
-          const by = targetFrame.y + (targetFrame.h / 2);
-          const borderA = getBorderPointToward(sourceFrame, bx, by);
-          const borderB = getBorderPointToward(targetFrame, ax, ay);
+          const targetNode = getNodeById(targetId);
+          if (!targetNode) return;
+          const targetCenter = getNodeVisualCenter(targetNode, targetFrame);
+          const bx = targetCenter.x;
+          const by = targetCenter.y;
+          const borderA = getBorderAnchorToward(sourceNode, sourceFrame, bx, by);
+          const borderB = getBorderAnchorToward(targetNode, targetFrame, ax, ay);
           const { cx, cy } = getQuadraticControlPoint(borderA.x, borderA.y, borderB.x, borderB.y);
           const curveD = `M ${borderA.x} ${borderA.y} Q ${cx} ${cy} ${borderB.x} ${borderB.y}`;
           const visibleEdge = createSvgElement("path", {
@@ -4845,11 +8305,19 @@ function applyWorkspaceData(workspaceId, options = {}) {
           });
           edgesLayerEl.appendChild(visibleEdge);
 
-          const midpoint = getQuadraticPointAndTangentAt(borderA.x, borderA.y, cx, cy, borderB.x, borderB.y, 0.5);
+          const midpoint = getQuadraticPointAndTangentAt(
+            borderA.x,
+            borderA.y,
+            cx,
+            cy,
+            borderB.x,
+            borderB.y,
+            EDGE_CHEVRON_T
+          );
           const angleDeg = Math.atan2(midpoint.ty, midpoint.tx) * (180 / Math.PI);
           const chevron = createSvgElement("path", {
             class: "edge-chevron",
-            d: "M -4 -3 L 0 0 L -4 3",
+            d: "M -6 -4 L 0 0 L -6 4",
             transform: `translate(${midpoint.px} ${midpoint.py}) rotate(${angleDeg})`
           });
           edgesLayerEl.appendChild(chevron);
@@ -4908,12 +8376,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
           cy,
           edgeCreateDraft.endX,
           edgeCreateDraft.endY,
-          0.5
+          EDGE_CHEVRON_T
         );
         const angleDeg = Math.atan2(midpoint.ty, midpoint.tx) * (180 / Math.PI);
         const draftChevron = createSvgElement("path", {
           class: "edge-chevron edge-chevron--draft",
-          d: "M -4 -3 L 0 0 L -4 3",
+          d: "M -6 -4 L 0 0 L -6 4",
           transform: `translate(${midpoint.px} ${midpoint.py}) rotate(${angleDeg})`
         });
         edgesLayerEl.appendChild(draftChevron);
@@ -5044,8 +8512,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
           const node = getNodeById(nodeId);
           const pos = layoutById.get(nodeId);
           if (!node || !pos) return;
-          const size = getCardSize(node, expandedLocationId);
-          maxBottom = Math.max(maxBottom, pos.top + size.height);
+          const frame = computeNodeFrame(node, expandedLocationId, pos);
+          maxBottom = Math.max(maxBottom, frame.y + frame.h);
         });
         planeHeight = Math.max(CANVAS_HEIGHT, maxBottom + LAYOUT_MARGIN);
       }
@@ -5069,13 +8537,21 @@ function applyWorkspaceData(workspaceId, options = {}) {
       nodes.forEach((node) => {
         if (!visibleNodeIds.has(node.id)) return;
         const overridePos = expandedLocationId ? layoutById.get(node.id) || null : null;
-        visibleNodeFrames.set(node.id, computeNodeFrame(node, expandedLocationId, overridePos));
+        const frame = computeNodeFrame(node, expandedLocationId, overridePos);
+        visibleNodeFrames.set(node.id, frame);
         const card = createNodeCard(node, !!selectedNode && selectedNode.id === node.id, overridePos);
         plane.appendChild(card);
         renderedCardsById.set(node.id, card);
       });
+      if (worldEl) worldEl.appendChild(plane);
+      const visibleNodeBodyFrames = buildVisibleNodeBodyFrameCache(
+        visibleNodeFrames,
+        renderedCardsById,
+        expandedLocationId
+      );
       lastVisibleNodeIds = new Set(visibleNodeIds);
       lastVisibleNodeFrames = visibleNodeFrames;
+      lastVisibleNodeBodyFrames = visibleNodeBodyFrames;
       lastRenderedCardsById = renderedCardsById;
       if (edgeCreateDraft.active) {
         applyEdgeCreateHighlights(edgeCreateDraft.sourceId, edgeCreateDraft.targetId);
@@ -5083,7 +8559,6 @@ function applyWorkspaceData(workspaceId, options = {}) {
         clearEdgeCreateHighlights();
       }
 
-      if (worldEl) worldEl.appendChild(plane);
       renderLenses();
       updateEdgeCreateHandleVisual();
       updateEdgeActionMenuVisual();
@@ -5128,6 +8603,17 @@ function applyWorkspaceData(workspaceId, options = {}) {
     function selectNode(nodeId, options = {}) {
       const node = getNodeById(nodeId);
       if (!node) return;
+      if (!isSelectableNode(node)) {
+        state.selectedNodeId = getFirstSelectableNodeId(nodes);
+        resetDetailsEditState();
+        if (options.source !== "sanitize") {
+          renderAll();
+        }
+        return;
+      }
+      if (state.selectedNodeId !== nodeId) {
+        resetDetailsEditState();
+      }
       state.selectedNodeId = nodeId;
 
       if (node.type === "location") {
@@ -5155,222 +8641,558 @@ function applyWorkspaceData(workspaceId, options = {}) {
       }
     }
 
-    function getAssigneeOptions() {
-      const owners = [...new Set(nodes.map((node) => node.owner))];
-      if (!owners.includes(CURRENT_USER)) owners.push(CURRENT_USER);
-      return owners.sort((a, b) => a.localeCompare(b));
-    }
-
-    function appendMetaRow(metaGrid, key, valueNodeOrText) {
-      const keyEl = document.createElement("div");
-      keyEl.className = "meta-key";
-      keyEl.textContent = key;
-      metaGrid.appendChild(keyEl);
-
-      const valueEl = document.createElement("div");
-      if (typeof valueNodeOrText === "string") {
-        valueEl.textContent = valueNodeOrText;
-      } else {
-        valueEl.appendChild(valueNodeOrText);
-      }
-      metaGrid.appendChild(valueEl);
-    }
-    function renderDetailsPane() {
-      detailsPaneEl.innerHTML = "";
-      const selectedNode = getSelectedNode();
-      if (!selectedNode) {
-        const placeholder = document.createElement("p");
-        placeholder.className = "muted";
-        placeholder.textContent = "Select a node from the list or canvas to inspect details.";
-        detailsPaneEl.appendChild(placeholder);
+    function beginDetailsTitleInteraction(node) {
+      if (!node) return;
+      if (node.type === "portal" || node.type === "entity") {
+        requestNodeEdit(node.id);
         return;
       }
+      if (!canInlineEditNodeTitle(node)) return;
+      detailsTitleEditNodeId = node.id;
+      detailsTitleDraft = node.title || node.label || "";
+      renderDetailsPane();
+      requestAnimationFrame(() => {
+        const titleInput = detailsPaneEl.querySelector(".details-title-edit-input");
+        if (titleInput) {
+          titleInput.focus();
+          titleInput.select();
+        }
+      });
+    }
 
-      if (selectedNode.type === "portal") {
-        const titleDisplay = document.createElement("h2");
-        titleDisplay.className = "details-title";
-        titleDisplay.textContent = selectedNode.title || selectedNode.label || "Portal";
-        detailsPaneEl.appendChild(titleDisplay);
-      } else {
+    function cancelDetailsTitleEdit() {
+      detailsTitleEditNodeId = null;
+      detailsTitleDraft = "";
+      renderDetailsPane();
+    }
+
+    function commitDetailsTitleEdit(nodeId) {
+      if (!nodeId || detailsTitleEditNodeId !== nodeId) return;
+      const nextTitle = detailsTitleDraft;
+      resetDetailsEditState();
+      setNodeTitleById(nodeId, nextTitle);
+      renderAll();
+    }
+
+    function beginDetailsSummaryEdit(node) {
+      if (!node || !isNodeOwnedByCurrentUser(node)) return;
+      detailsSummaryEditNodeId = node.id;
+      detailsSummaryDraft = typeof node.summary === "string" ? node.summary : "";
+      renderDetailsPane();
+      requestAnimationFrame(() => {
+        const summaryInput = detailsPaneEl.querySelector(".details-summary-textarea");
+        if (summaryInput) {
+          summaryInput.focus();
+          summaryInput.selectionStart = summaryInput.value.length;
+          summaryInput.selectionEnd = summaryInput.value.length;
+        }
+      });
+    }
+
+    function cancelDetailsSummaryEdit() {
+      detailsSummaryEditNodeId = null;
+      detailsSummaryDraft = "";
+      renderDetailsPane();
+    }
+
+    function commitDetailsSummaryEdit(nodeId) {
+      if (!nodeId || detailsSummaryEditNodeId !== nodeId) return;
+      const nextSummary = detailsSummaryDraft;
+      detailsSummaryEditNodeId = null;
+      detailsSummaryDraft = "";
+      setNodeSummaryById(nodeId, nextSummary);
+      renderAll();
+    }
+
+    function createReadonlyGraphStatusPill(statusValue) {
+      const status = document.createElement("span");
+      status.className = `node-card-status ${getStatusClass(statusValue)}`.trim();
+      status.textContent = statusValue;
+      return status;
+    }
+
+    function createStatusControlForNode(node, context = "details") {
+      if (!node) return null;
+      const statusValue = getNodeStatusValue(node);
+      if (!statusValue) return null;
+      const editableStatuses = getStatusOptionsForNode(node);
+      if (!editableStatuses.length) {
+        if (context === "graph") {
+          return createReadonlyGraphStatusPill(statusValue);
+        }
+        return createStatusPill(statusValue, ["details-status-pill"]);
+      }
+      const statusSelect = document.createElement("select");
+      statusSelect.className = context === "graph"
+        ? `node-card-status node-card-status-select ${getStatusClass(statusValue)}`.trim()
+        : `details-status-select status-pill ${getStatusClass(statusValue)}`.trim();
+      if (context === "details") {
+        statusSelect.setAttribute("aria-label", "Status");
+      }
+      if (!editableStatuses.includes(statusValue)) {
+        const currentOptionEl = document.createElement("option");
+        currentOptionEl.value = statusValue;
+        currentOptionEl.textContent = statusValue;
+        currentOptionEl.disabled = true;
+        statusSelect.appendChild(currentOptionEl);
+      }
+      editableStatuses.forEach((statusOption) => {
+        const optionEl = document.createElement("option");
+        optionEl.value = statusOption;
+        optionEl.textContent = statusOption;
+        statusSelect.appendChild(optionEl);
+      });
+      statusSelect.value = statusValue;
+      const statusClassNames = [...new Set([...PROCESS_STATUSES, ...HANDOVER_STATUSES].map((statusOption) => getStatusClass(statusOption)))];
+      const syncStatusClass = () => {
+        statusSelect.classList.remove(...statusClassNames);
+        statusSelect.classList.add(getStatusClass(statusSelect.value));
+      };
+      syncStatusClass();
+      statusSelect.addEventListener("mousedown", (event) => event.stopPropagation());
+      statusSelect.addEventListener("click", (event) => event.stopPropagation());
+      statusSelect.addEventListener("change", (event) => {
+        const nextStatus = event.target.value;
+        syncStatusClass();
+        if (node.type === "process") {
+          setProcessStatusById(node.id, nextStatus);
+        } else if (node.type === "handover") {
+          setHandoverStatusById(node.id, nextStatus);
+        }
+        renderAll();
+      });
+      return statusSelect;
+    }
+
+    function appendDetailsHeader(container, selectedNode) {
+      const header = document.createElement("section");
+      header.className = "details-header";
+
+      const titleRow = document.createElement("div");
+      titleRow.className = "details-title-row";
+
+      const titleColumn = document.createElement("div");
+      titleColumn.className = "details-title-column";
+
+      if (detailsTitleEditNodeId === selectedNode.id && canInlineEditNodeTitle(selectedNode)) {
         const titleInput = document.createElement("input");
         titleInput.type = "text";
-        titleInput.className = "details-title-input";
-        titleInput.value = selectedNode.title || selectedNode.label || "";
+        titleInput.className = "details-title-edit-input";
+        titleInput.value = detailsTitleDraft;
         titleInput.placeholder = "Untitled";
         titleInput.maxLength = 120;
+        titleInput.addEventListener("input", () => {
+          detailsTitleDraft = titleInput.value;
+        });
         titleInput.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            titleInput.blur();
+            commitDetailsTitleEdit(selectedNode.id);
             return;
           }
           if (event.key === "Escape") {
             event.preventDefault();
-            titleInput.value = selectedNode.title || "";
-            titleInput.blur();
+            cancelDetailsTitleEdit();
           }
         });
         titleInput.addEventListener("blur", () => {
-          const nextTitle = titleInput.value;
-          setNodeTitleById(selectedNode.id, nextTitle);
-          renderAll();
+          commitDetailsTitleEdit(selectedNode.id);
         });
-        detailsPaneEl.appendChild(titleInput);
+        titleColumn.appendChild(titleInput);
+      } else {
+        const isInteractiveTitle = canInlineEditNodeTitle(selectedNode) || selectedNode.type === "portal" || selectedNode.type === "entity";
+        const titleEl = document.createElement(isInteractiveTitle ? "button" : "h2");
+        if (isInteractiveTitle) {
+          titleEl.type = "button";
+          titleEl.addEventListener("click", () => beginDetailsTitleInteraction(selectedNode));
+        }
+        titleEl.className = `details-title-display${isInteractiveTitle ? " is-interactive" : ""}`;
+        titleEl.textContent = getNodeDisplayTitle(selectedNode, { fallback: selectedNode.id || "Untitled" });
+        titleColumn.appendChild(titleEl);
       }
 
-      const metaGrid = document.createElement("div");
-      metaGrid.className = "meta-grid";
-      appendMetaRow(metaGrid, "Type", selectedNode.type);
-      appendMetaRow(metaGrid, "Owner", selectedNode.owner);
+      titleRow.appendChild(titleColumn);
 
+      const statusControl = createStatusControlForNode(selectedNode, "details");
+      if (statusControl) {
+        const statusWrap = document.createElement("div");
+        statusWrap.className = "details-status-wrap";
+        statusWrap.appendChild(statusControl);
+        titleRow.appendChild(statusWrap);
+      }
+      header.appendChild(titleRow);
+
+      const ownerLine = document.createElement("p");
+      ownerLine.className = "details-owner-line";
+      ownerLine.textContent = getOwnerDisplayName(selectedNode) || "Unknown";
+      header.appendChild(ownerLine);
+
+      const descriptionWrap = document.createElement("div");
+      descriptionWrap.className = "details-description-wrap";
+
+      if (detailsSummaryEditNodeId === selectedNode.id && isNodeOwnedByCurrentUser(selectedNode)) {
+        const descriptionForm = document.createElement("form");
+        descriptionForm.className = "details-description-form";
+
+        const summaryInput = document.createElement("textarea");
+        summaryInput.className = "details-summary-textarea";
+        summaryInput.rows = 5;
+        summaryInput.placeholder = "Add a description";
+        summaryInput.value = detailsSummaryDraft;
+        summaryInput.addEventListener("input", () => {
+          detailsSummaryDraft = summaryInput.value;
+        });
+        summaryInput.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelDetailsSummaryEdit();
+            return;
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            commitDetailsSummaryEdit(selectedNode.id);
+          }
+        });
+
+        const actionRow = document.createElement("div");
+        actionRow.className = "details-inline-actions";
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "submit";
+        saveBtn.className = "details-inline-btn";
+        saveBtn.textContent = "Save";
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "details-inline-btn is-secondary";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => {
+          cancelDetailsSummaryEdit();
+        });
+
+        actionRow.appendChild(saveBtn);
+        actionRow.appendChild(cancelBtn);
+        descriptionForm.appendChild(summaryInput);
+        descriptionForm.appendChild(actionRow);
+        descriptionForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          commitDetailsSummaryEdit(selectedNode.id);
+        });
+        descriptionWrap.appendChild(descriptionForm);
+      } else {
+        const summaryText = String(selectedNode.summary || "").trim();
+        const descriptionEl = document.createElement(isNodeOwnedByCurrentUser(selectedNode) ? "button" : "p");
+        if (descriptionEl.tagName === "BUTTON") {
+          descriptionEl.type = "button";
+          descriptionEl.addEventListener("click", () => beginDetailsSummaryEdit(selectedNode));
+        }
+        descriptionEl.className = `details-description-text${isNodeOwnedByCurrentUser(selectedNode) ? " is-editable" : ""}${summaryText ? "" : " is-empty"}`;
+        descriptionEl.textContent = summaryText || (isNodeOwnedByCurrentUser(selectedNode) ? "Add a description" : "No description provided.");
+        descriptionWrap.appendChild(descriptionEl);
+      }
+
+      header.appendChild(descriptionWrap);
+      container.appendChild(header);
+    }
+
+    function appendDetailsContextSection(container, selectedNode) {
+      const contextRows = [];
       if (selectedNode.type === "location") {
-        appendMetaRow(metaGrid, "Kind", selectedNode.kind || "generic");
-        const parentMap = buildParentMap();
-        const parentId = parentMap.get(selectedNode.id) || null;
+        contextRows.push({
+          label: "Kind",
+          text: selectedNode.kind || "generic"
+        });
+        const parentId = buildParentMap().get(selectedNode.id) || null;
         if (parentId) {
           const parentNode = getNodeById(parentId);
           if (parentNode) {
             const parentBtn = document.createElement("button");
             parentBtn.type = "button";
             parentBtn.className = "inline-link";
-            parentBtn.textContent = parentNode.label;
+            parentBtn.textContent = getNodeDisplayTitle(parentNode, { fallback: parentNode.id || "Location" });
             parentBtn.addEventListener("click", () => selectNode(parentNode.id));
-            appendMetaRow(metaGrid, "Parent location", parentBtn);
+            contextRows.push({
+              label: "Parent location",
+              node: parentBtn
+            });
           } else {
-            appendMetaRow(metaGrid, "Parent location", "Top-level location");
+            contextRows.push({
+              label: "Parent location",
+              text: "Top-level location"
+            });
           }
         } else {
-          appendMetaRow(metaGrid, "Parent location", "Top-level location");
-        }
-      } else {
-        if (selectedNode.type === "process") {
-          const statusSelect = document.createElement("select");
-          statusSelect.className = "details-status-select";
-          PROCESS_STATUSES.forEach((statusOption) => {
-            const optionEl = document.createElement("option");
-            optionEl.value = statusOption;
-            optionEl.textContent = statusOption;
-            statusSelect.appendChild(optionEl);
+          contextRows.push({
+            label: "Parent location",
+            text: "Top-level location"
           });
-          statusSelect.value = normalizeProcessStatus(selectedNode.status);
-          statusSelect.addEventListener("change", () => {
-            setProcessStatusById(selectedNode.id, statusSelect.value);
-            renderAll();
-          });
-          appendMetaRow(metaGrid, "Status", statusSelect);
-        } else {
-          appendMetaRow(metaGrid, "Status", "N/A");
         }
       }
-
       if (selectedNode.type === "process") {
         if (selectedNode.locationId) {
-          const loc = getNodeById(selectedNode.locationId);
-          if (loc) {
-            const locBtn = document.createElement("button");
-            locBtn.type = "button";
-            locBtn.className = "inline-link";
-            locBtn.textContent = loc.label;
-            locBtn.addEventListener("click", () => selectNode(loc.id));
-            appendMetaRow(metaGrid, "Location", locBtn);
+          const locationNode = getNodeById(selectedNode.locationId);
+          if (locationNode) {
+            const locationBtn = document.createElement("button");
+            locationBtn.type = "button";
+            locationBtn.className = "inline-link";
+            locationBtn.textContent = getNodeDisplayTitle(locationNode, { fallback: locationNode.id || "Location" });
+            locationBtn.addEventListener("click", () => selectNode(locationNode.id));
+            contextRows.push({
+              label: "Location",
+              node: locationBtn
+            });
           } else {
-            appendMetaRow(metaGrid, "Location", "N/A");
+            contextRows.push({
+              label: "Location",
+              text: "No location"
+            });
           }
         } else {
-          appendMetaRow(metaGrid, "Location", "N/A");
+          contextRows.push({
+            label: "Location",
+            text: "No location"
+          });
         }
       }
 
-      detailsPaneEl.appendChild(metaGrid);
+      if (!contextRows.length) return;
 
-      const summary = document.createElement("p");
-      summary.className = "summary-box";
-      summary.textContent = selectedNode.summary;
-      detailsPaneEl.appendChild(summary);
+      const contextList = document.createElement("div");
+      contextList.className = "details-context-list";
+      contextRows.forEach((rowData) => {
+        const row = document.createElement("div");
+        row.className = "details-context-row";
 
-      if (selectedNode.type === "location") {
-        const childTitle = document.createElement("h4");
-        childTitle.className = "section-title";
-        childTitle.textContent = "Child locations";
-        detailsPaneEl.appendChild(childTitle);
+        const label = document.createElement("div");
+        label.className = "details-context-label";
+        label.textContent = rowData.label;
 
-        const childWrap = document.createElement("div");
-        childWrap.className = "chip-list";
-        const children = getChildLocations(selectedNode.id);
-        if (!children.length) {
-          const none = document.createElement("p");
-          none.className = "muted";
-          none.textContent = "No child locations.";
-          detailsPaneEl.appendChild(none);
+        const value = document.createElement("div");
+        value.className = "details-context-value";
+        if (rowData.node) {
+          value.appendChild(rowData.node);
         } else {
-          children.forEach((childNode) => {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "chip-btn";
-            chip.textContent = `${childNode.label} (${childNode.kind || "generic"})`;
-            chip.addEventListener("click", () => selectNode(childNode.id));
-            childWrap.appendChild(chip);
-          });
-          detailsPaneEl.appendChild(childWrap);
+          value.textContent = rowData.text;
         }
 
-        const pinned = getPinnedNonLocationLinks(selectedNode);
-        const pinnedTitle = document.createElement("h4");
-        pinnedTitle.className = "section-title";
-        pinnedTitle.textContent = "Directly connected nodes";
-        detailsPaneEl.appendChild(pinnedTitle);
+        row.appendChild(label);
+        row.appendChild(value);
+        contextList.appendChild(row);
+      });
+      container.appendChild(contextList);
+    }
 
-        const pinnedWrap = document.createElement("div");
-        pinnedWrap.className = "chip-list";
-        if (!pinned.length) {
-          const none = document.createElement("p");
-          none.className = "muted";
-          none.textContent = "No direct non-location links.";
-          detailsPaneEl.appendChild(none);
-        } else {
-          pinned.forEach((node) => {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "chip-btn";
-            chip.textContent = `${node.label} (${node.type})`;
-            chip.addEventListener("click", () => selectNode(node.id));
-            pinnedWrap.appendChild(chip);
-          });
-          detailsPaneEl.appendChild(pinnedWrap);
-        }
+    function appendLocationChildrenSection(container, selectedNode) {
+      const childTitle = document.createElement("h4");
+      childTitle.className = "section-title";
+      childTitle.textContent = "Child locations";
+      container.appendChild(childTitle);
 
+      const children = getChildLocations(selectedNode.id);
+      if (!children.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No child locations.";
+        container.appendChild(none);
+        return;
+      }
+
+      const childWrap = document.createElement("div");
+      childWrap.className = "chip-list";
+      children.forEach((childNode) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip-btn";
+        chip.textContent = `${childNode.label} (${childNode.kind || "generic"})`;
+        chip.addEventListener("click", () => selectNode(childNode.id));
+        childWrap.appendChild(chip);
+      });
+      container.appendChild(childWrap);
+    }
+
+    function appendHandoverCollaboratorsSection(container, selectedNode) {
+      const sectionHeader = document.createElement("div");
+      sectionHeader.className = "section-header";
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Collaborators";
+      sectionHeader.appendChild(title);
+      container.appendChild(sectionHeader);
+
+      const collaborators = getResolvedHandoverCollaborators(selectedNode);
+      if (!collaborators.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No collaborators yet.";
+        container.appendChild(none);
       } else {
-        const linksTitle = document.createElement("h4");
-        linksTitle.className = "section-title";
-        linksTitle.textContent = "Linked nodes";
-        detailsPaneEl.appendChild(linksTitle);
-
-        const linksWrap = document.createElement("div");
-        linksWrap.className = "chip-list";
-        const linkedNodes = selectedNode.linkedNodeIds.map((id) => getNodeById(id)).filter(Boolean);
-        if (!linkedNodes.length) {
-          const noneText = document.createElement("p");
-          noneText.className = "muted";
-          noneText.textContent = "No semantic links.";
-          detailsPaneEl.appendChild(noneText);
-        } else {
-          linkedNodes.forEach((node) => {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "chip-btn";
-            chip.textContent = `${node.label} (${node.type})`;
-            chip.addEventListener("click", () => selectNode(node.id));
-            linksWrap.appendChild(chip);
-          });
-          detailsPaneEl.appendChild(linksWrap);
-        }
+        const collaboratorList = document.createElement("div");
+        collaboratorList.className = "collaborator-list";
+        collaborators.forEach((collaborator) => {
+          const row = document.createElement("div");
+          row.className = "collaborator-row";
+          const label = document.createElement("div");
+          label.className = "collaborator-label";
+          label.textContent = collaborator.label;
+          row.appendChild(label);
+          if (isNodeOwnedByCurrentUser(selectedNode)) {
+            const actions = document.createElement("div");
+            actions.className = "collaborator-actions";
+            const shareBtn = document.createElement("button");
+            shareBtn.type = "button";
+            shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
+            shareBtn.textContent = "↗";
+            shareBtn.title = "share workspace";
+            shareBtn.setAttribute("aria-label", "share workspace");
+            shareBtn.addEventListener("click", () => {
+              toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId);
+              renderDetailsPane();
+            });
+            const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
+            removeBtn.className = "collaborator-remove-btn";
+            removeBtn.textContent = "×";
+            removeBtn.title = "Remove collaborator";
+            removeBtn.setAttribute("aria-label", "Remove collaborator");
+            removeBtn.addEventListener("click", () => {
+              removeHandoverCollaborator(selectedNode.id, collaborator.kind, collaborator.refId);
+              renderDetailsPane();
+            });
+            actions.appendChild(shareBtn);
+            actions.appendChild(removeBtn);
+            row.appendChild(actions);
+          }
+          collaboratorList.appendChild(row);
+        });
+        container.appendChild(collaboratorList);
       }
 
+      if (!isNodeOwnedByCurrentUser(selectedNode)) return;
+
+      const collaboratorForm = document.createElement("form");
+      collaboratorForm.className = "collaborator-form";
+      const collaboratorKindSelect = document.createElement("select");
+      collaboratorKindSelect.className = "collaborator-kind-select";
+      [
+        { value: "user", label: "User" },
+        { value: "org", label: "Organisation" }
+      ].forEach((optionData) => {
+        const optionEl = document.createElement("option");
+        optionEl.value = optionData.value;
+        optionEl.textContent = optionData.label;
+        collaboratorKindSelect.appendChild(optionEl);
+      });
+      const collaboratorRefSelect = document.createElement("select");
+      collaboratorRefSelect.className = "collaborator-ref-select";
+      const addBtn = document.createElement("button");
+      addBtn.type = "submit";
+      addBtn.textContent = "Add collaborator";
+
+      const syncCollaboratorOptions = () => {
+        const kind = collaboratorKindSelect.value === "org" ? "org" : "user";
+        collaboratorRefSelect.innerHTML = "";
+        const existingCollaboratorKeys = new Set(
+          getResolvedHandoverCollaborators(selectedNode).map((collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId))
+        );
+        let options = [];
+        if (kind === "org") {
+          options = getSortedOrgsForMenu().map((orgRecord) => ({
+            value: orgRecord.id,
+            label: orgRecord.name || orgRecord.id
+          }));
+        } else {
+          options = getSortedUsersForMenu()
+            .filter((userRecord) => userRecord.id !== selectedNode.ownerId)
+            .map((userRecord) => ({
+              value: userRecord.id,
+              label: getUserDisplayNameWithOrg(userRecord.id) || userRecord.name || userRecord.id
+            }));
+        }
+        options
+          .filter((option) => !existingCollaboratorKeys.has(getHandoverCollaboratorSignature(kind, option.value)))
+          .forEach((option) => {
+            const optionEl = document.createElement("option");
+            optionEl.value = option.value;
+            optionEl.textContent = option.label;
+            collaboratorRefSelect.appendChild(optionEl);
+          });
+        const hasOptions = collaboratorRefSelect.options.length > 0;
+        collaboratorRefSelect.disabled = !hasOptions;
+        addBtn.disabled = !hasOptions;
+        if (!hasOptions) {
+          const emptyOption = document.createElement("option");
+          emptyOption.value = "";
+          emptyOption.textContent = "No available collaborators";
+          collaboratorRefSelect.appendChild(emptyOption);
+        }
+      };
+
+      collaboratorKindSelect.addEventListener("change", syncCollaboratorOptions);
+      collaboratorForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!collaboratorRefSelect.value) return;
+        if (addHandoverCollaborator(selectedNode.id, collaboratorKindSelect.value, collaboratorRefSelect.value)) {
+          renderDetailsPane();
+        }
+      });
+      collaboratorForm.appendChild(collaboratorKindSelect);
+      collaboratorForm.appendChild(collaboratorRefSelect);
+      collaboratorForm.appendChild(addBtn);
+      syncCollaboratorOptions();
+      container.appendChild(collaboratorForm);
+    }
+
+    function appendHandoverNodesSection(container, selectedNode) {
+      const sectionHeader = document.createElement("div");
+      sectionHeader.className = "section-header";
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Handover Nodes";
+      sectionHeader.appendChild(title);
+      if (isNodeOwnedByCurrentUser(selectedNode)) {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "section-add-btn";
+        addBtn.textContent = "+";
+        addBtn.title = "Add handover node (coming soon)";
+        addBtn.setAttribute("aria-label", "Add handover node");
+        addBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        sectionHeader.appendChild(addBtn);
+      }
+      container.appendChild(sectionHeader);
+
+      const handoverNodes = getHandoverNodeCandidates(selectedNode);
+      if (!handoverNodes.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No handover nodes yet.";
+        container.appendChild(none);
+        return;
+      }
+
+      const list = document.createElement("div");
+      list.className = "chip-list";
+      handoverNodes.forEach((node) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip-btn";
+        chip.textContent = `${getNodeDisplayTitle(node, { fallback: node.id || "Node" })} (${node.type})`;
+        chip.addEventListener("click", () => selectNode(node.id));
+        list.appendChild(chip);
+      });
+      container.appendChild(list);
+    }
+
+    function appendTasksSection(container, selectedNode) {
       const tasksTitle = document.createElement("h4");
       tasksTitle.className = "section-title";
       tasksTitle.textContent = "Tasks";
-      detailsPaneEl.appendChild(tasksTitle);
+      container.appendChild(tasksTitle);
 
+      const canManageTasks = canCurrentUserManageHandoverTasks(selectedNode);
       const tasksList = document.createElement("div");
       tasksList.className = "tasks-list";
       if (!selectedNode.tasks.length) {
@@ -5386,11 +9208,16 @@ function applyWorkspaceData(workspaceId, options = {}) {
           const check = document.createElement("input");
           check.type = "checkbox";
           check.checked = !!task.done;
+          if (selectedNode.type === "handover" && !canManageTasks) {
+            check.disabled = true;
+          }
           check.addEventListener("change", () => {
             task.done = check.checked;
-            if (!task.done && task.assignedTo === CURRENT_USER) {
+            if (!task.done && isTaskAssignedToCurrentUser(task.assignedTo)) {
               state.seenTaskIds.delete(task.id);
             }
+            syncNodeRuntimeAndStore();
+            persistStoreToLocalStorage();
             renderDetailsPane();
             renderNotifications();
           });
@@ -5411,7 +9238,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
           tasksList.appendChild(row);
         });
       }
-      detailsPaneEl.appendChild(tasksList);
+      container.appendChild(tasksList);
+
+      if (selectedNode.type === "handover" && !canManageTasks) {
+        const note = document.createElement("p");
+        note.className = "muted";
+        note.textContent = "Only the owner or collaborators can add tasks.";
+        container.appendChild(note);
+        return;
+      }
 
       const taskForm = document.createElement("form");
       taskForm.className = "task-form";
@@ -5421,10 +9256,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
       taskInput.maxLength = 180;
 
       const assigneeSelect = document.createElement("select");
-      getAssigneeOptions().forEach((ownerName) => {
+      getTaskAssigneeOptions(selectedNode).forEach((assigneeLabel) => {
         const option = document.createElement("option");
-        option.value = ownerName;
-        option.textContent = ownerName;
+        option.value = assigneeLabel;
+        option.textContent = assigneeLabel;
         assigneeSelect.appendChild(option);
       });
 
@@ -5446,19 +9281,23 @@ function applyWorkspaceData(workspaceId, options = {}) {
           assignedTo: assigneeSelect.value
         };
         selectedNode.tasks.push(newTask);
-        if (newTask.assignedTo === CURRENT_USER) {
+        if (isTaskAssignedToCurrentUser(newTask.assignedTo)) {
           state.seenTaskIds.delete(newTask.id);
         }
+        syncNodeRuntimeAndStore();
+        persistStoreToLocalStorage();
         taskInput.value = "";
         renderDetailsPane();
         renderNotifications();
       });
-      detailsPaneEl.appendChild(taskForm);
+      container.appendChild(taskForm);
+    }
 
+    function appendCommentsSection(container, selectedNode) {
       const commentsTitle = document.createElement("h4");
       commentsTitle.className = "section-title";
       commentsTitle.textContent = "Comments";
-      detailsPaneEl.appendChild(commentsTitle);
+      container.appendChild(commentsTitle);
 
       const commentList = document.createElement("div");
       commentList.className = "comment-list";
@@ -5494,7 +9333,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
           commentList.appendChild(item);
         });
       }
-      detailsPaneEl.appendChild(commentList);
+      container.appendChild(commentList);
 
       const commentForm = document.createElement("form");
       commentForm.className = "comment-form";
@@ -5512,7 +9351,860 @@ function applyWorkspaceData(workspaceId, options = {}) {
         addCommentToSelectedNode(input.value);
         input.value = "";
       });
-      detailsPaneEl.appendChild(commentForm);
+      container.appendChild(commentForm);
+    }
+
+    function buildDetailsSection(sectionClassName = "") {
+      const section = document.createElement("section");
+      section.className = `details-section${sectionClassName ? ` ${sectionClassName}` : ""}`;
+      return section;
+    }
+
+    function buildDetailsHeaderSection(selectedNode) {
+      const section = buildDetailsSection("details-section-header");
+      const header = document.createElement("div");
+      header.className = "details-header";
+      const titleRow = document.createElement("div");
+      titleRow.className = "details-title-row";
+      const titleColumn = document.createElement("div");
+      titleColumn.className = "details-title-column";
+
+      if (detailsTitleEditNodeId === selectedNode.id && canInlineEditNodeTitle(selectedNode)) {
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.className = "details-title-edit-input";
+        titleInput.value = detailsTitleDraft;
+        titleInput.placeholder = getNodeTitleFallback(selectedNode);
+        titleInput.maxLength = 120;
+        titleInput.addEventListener("input", () => {
+          detailsTitleDraft = titleInput.value;
+        });
+        titleInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDetailsTitleEdit(selectedNode.id);
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelDetailsTitleEdit();
+          }
+        });
+        titleInput.addEventListener("blur", () => {
+          commitDetailsTitleEdit(selectedNode.id);
+        });
+        titleColumn.appendChild(titleInput);
+      } else {
+        const isInteractiveTitle = canInlineEditNodeTitle(selectedNode) || selectedNode.type === "portal" || selectedNode.type === "entity";
+        const titleEl = document.createElement(isInteractiveTitle ? "button" : "h2");
+        if (isInteractiveTitle) {
+          titleEl.type = "button";
+          titleEl.addEventListener("click", () => beginDetailsTitleInteraction(selectedNode));
+        }
+        titleEl.className = `details-title-display${isInteractiveTitle ? " is-interactive" : ""}`;
+        titleEl.textContent = getNodeDisplayTitle(selectedNode, { fallback: getNodeTitleFallback(selectedNode) });
+        titleColumn.appendChild(titleEl);
+      }
+
+      titleRow.appendChild(titleColumn);
+      const statusControl = createStatusControlForNode(selectedNode, "details");
+      if (statusControl) {
+        const statusWrap = document.createElement("div");
+        statusWrap.className = "details-status-wrap";
+        statusWrap.appendChild(statusControl);
+        titleRow.appendChild(statusWrap);
+      }
+      header.appendChild(titleRow);
+
+      const ownerLine = document.createElement("p");
+      ownerLine.className = "details-owner-line";
+      ownerLine.textContent = getOwnerDisplayName(selectedNode) || "Unknown";
+      header.appendChild(ownerLine);
+      section.appendChild(header);
+      return section;
+    }
+
+    function buildDetailsDescriptionSection(selectedNode) {
+      const section = buildDetailsSection("details-section-description");
+      const descriptionWrap = document.createElement("div");
+      descriptionWrap.className = "details-description-wrap";
+
+      if (detailsSummaryEditNodeId === selectedNode.id && isNodeOwnedByCurrentUser(selectedNode)) {
+        const descriptionForm = document.createElement("form");
+        descriptionForm.className = "details-description-form";
+        const summaryInput = document.createElement("textarea");
+        summaryInput.className = "details-summary-textarea";
+        summaryInput.rows = 5;
+        summaryInput.placeholder = "Add a description";
+        summaryInput.value = detailsSummaryDraft;
+        summaryInput.addEventListener("input", () => {
+          detailsSummaryDraft = summaryInput.value;
+        });
+        summaryInput.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelDetailsSummaryEdit();
+            return;
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            commitDetailsSummaryEdit(selectedNode.id);
+          }
+        });
+
+        const actionRow = document.createElement("div");
+        actionRow.className = "details-inline-actions";
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "submit";
+        saveBtn.className = "details-inline-btn";
+        saveBtn.textContent = "Save";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "details-inline-btn is-secondary";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => {
+          cancelDetailsSummaryEdit();
+        });
+        actionRow.appendChild(saveBtn);
+        actionRow.appendChild(cancelBtn);
+        descriptionForm.appendChild(summaryInput);
+        descriptionForm.appendChild(actionRow);
+        descriptionForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          commitDetailsSummaryEdit(selectedNode.id);
+        });
+        descriptionWrap.appendChild(descriptionForm);
+      } else {
+        const summaryText = String(selectedNode.summary || "").trim();
+        const descriptionEl = document.createElement(isNodeOwnedByCurrentUser(selectedNode) ? "button" : "p");
+        if (descriptionEl.tagName === "BUTTON") {
+          descriptionEl.type = "button";
+          descriptionEl.addEventListener("click", () => beginDetailsSummaryEdit(selectedNode));
+        }
+        descriptionEl.className = `details-description-text${isNodeOwnedByCurrentUser(selectedNode) ? " is-editable" : ""}${summaryText ? "" : " is-empty"}`;
+        descriptionEl.textContent = summaryText || (isNodeOwnedByCurrentUser(selectedNode) ? "Add a description" : "No description provided.");
+        descriptionWrap.appendChild(descriptionEl);
+      }
+
+      section.appendChild(descriptionWrap);
+      return section;
+    }
+
+    function buildDetailsContextSection(selectedNode) {
+      const contextRows = [];
+      if (selectedNode.type === "location") {
+        contextRows.push({ label: "Kind", text: selectedNode.kind || "generic" });
+        const parentId = buildParentMap().get(selectedNode.id) || null;
+        if (parentId) {
+          const parentNode = getNodeById(parentId);
+          if (parentNode) {
+            const parentBtn = document.createElement("button");
+            parentBtn.type = "button";
+            parentBtn.className = "inline-link";
+            parentBtn.textContent = getNodeDisplayTitle(parentNode, { fallback: getNodeTitleFallback(parentNode) });
+            parentBtn.addEventListener("click", () => selectNode(parentNode.id));
+            contextRows.push({ label: "Parent location", node: parentBtn });
+          } else {
+            contextRows.push({ label: "Parent location", text: "Top-level location" });
+          }
+        } else {
+          contextRows.push({ label: "Parent location", text: "Top-level location" });
+        }
+      }
+      if (selectedNode.type === "process") {
+        if (selectedNode.locationId) {
+          const locationNode = getNodeById(selectedNode.locationId);
+          if (locationNode) {
+            const locationBtn = document.createElement("button");
+            locationBtn.type = "button";
+            locationBtn.className = "inline-link";
+            locationBtn.textContent = getNodeDisplayTitle(locationNode, { fallback: getNodeTitleFallback(locationNode) });
+            locationBtn.addEventListener("click", () => selectNode(locationNode.id));
+            contextRows.push({ label: "Location", node: locationBtn });
+          } else {
+            contextRows.push({ label: "Location", text: "No location" });
+          }
+        } else {
+          contextRows.push({ label: "Location", text: "No location" });
+        }
+      }
+
+      if (!contextRows.length) return null;
+
+      const section = buildDetailsSection("details-section-context");
+      const contextList = document.createElement("div");
+      contextList.className = "details-context-list";
+      contextRows.forEach((rowData) => {
+        const row = document.createElement("div");
+        row.className = "details-context-row";
+        const label = document.createElement("div");
+        label.className = "details-context-label";
+        label.textContent = rowData.label;
+        const value = document.createElement("div");
+        value.className = "details-context-value";
+        if (rowData.node) {
+          value.appendChild(rowData.node);
+        } else {
+          value.textContent = rowData.text;
+        }
+        row.appendChild(label);
+        row.appendChild(value);
+        contextList.appendChild(row);
+      });
+      section.appendChild(contextList);
+      return section;
+    }
+
+    function buildLocationChildrenSection(selectedNode) {
+      const section = buildDetailsSection("details-section-location-children");
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Child locations";
+      section.appendChild(title);
+      const children = getChildLocations(selectedNode.id);
+      if (!children.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No child locations.";
+        section.appendChild(none);
+        return section;
+      }
+      const childWrap = document.createElement("div");
+      childWrap.className = "chip-list";
+      children.forEach((childNode) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip-btn";
+        chip.textContent = `${getNodeDisplayTitle(childNode, { fallback: getNodeTitleFallback(childNode) })} (${childNode.kind || "generic"})`;
+        chip.addEventListener("click", () => selectNode(childNode.id));
+        childWrap.appendChild(chip);
+      });
+      section.appendChild(childWrap);
+      return section;
+    }
+
+    function buildHandoverCollaboratorsSection(selectedNode) {
+      const section = buildDetailsSection("details-section-collaborators");
+      const sectionHeader = document.createElement("div");
+      sectionHeader.className = "section-header";
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Collaborators";
+      sectionHeader.appendChild(title);
+      if (isNodeOwnedByCurrentUser(selectedNode)) {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "section-add-btn";
+        addBtn.textContent = "+";
+        addBtn.title = "Add collaborators";
+        addBtn.setAttribute("aria-label", "Add collaborators");
+        addBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openCollaboratorPickerModal(selectedNode.id);
+        });
+        sectionHeader.appendChild(addBtn);
+      }
+      section.appendChild(sectionHeader);
+
+      const collaborators = getResolvedHandoverCollaborators(selectedNode);
+      if (!collaborators.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No collaborators yet.";
+        section.appendChild(none);
+        return section;
+      }
+
+      const collaboratorList = document.createElement("div");
+      collaboratorList.className = "collaborator-list";
+      collaborators
+        .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }))
+        .forEach((collaborator) => {
+          const row = document.createElement("div");
+          row.className = "collaborator-row";
+          const label = document.createElement("div");
+          label.className = "collaborator-label";
+          label.textContent = collaborator.label;
+          row.appendChild(label);
+          if (isNodeOwnedByCurrentUser(selectedNode)) {
+            const actions = document.createElement("div");
+            actions.className = "collaborator-actions";
+            const shareBtn = document.createElement("button");
+            shareBtn.type = "button";
+            shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
+            shareBtn.textContent = "↗";
+            shareBtn.title = "share workspace";
+            shareBtn.setAttribute("aria-label", "share workspace");
+            shareBtn.addEventListener("click", () => {
+              if (!toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId)) return;
+              renderDetailsPane();
+            });
+            const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
+            removeBtn.className = "collaborator-remove-btn";
+            removeBtn.textContent = "×";
+            removeBtn.title = "Remove collaborator";
+            removeBtn.setAttribute("aria-label", "Remove collaborator");
+            removeBtn.addEventListener("click", () => {
+              if (!removeHandoverCollaborator(selectedNode.id, collaborator.kind, collaborator.refId)) return;
+              renderDetailsPane();
+            });
+            actions.appendChild(shareBtn);
+            actions.appendChild(removeBtn);
+            row.appendChild(actions);
+          }
+          collaboratorList.appendChild(row);
+        });
+      section.appendChild(collaboratorList);
+      return section;
+    }
+
+    function buildHandoverObjectsSection(selectedNode) {
+      const section = buildDetailsSection("details-section-handover-objects");
+      const sectionHeader = document.createElement("div");
+      sectionHeader.className = "section-header";
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Handover Objects";
+      sectionHeader.appendChild(title);
+      if (isNodeOwnedByCurrentUser(selectedNode)) {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "section-add-btn";
+        addBtn.textContent = "+";
+        addBtn.title = "Add handover objects";
+        addBtn.setAttribute("aria-label", "Add handover objects");
+        addBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openHandoverObjectPickerModal(selectedNode.id);
+        });
+        sectionHeader.appendChild(addBtn);
+      }
+      section.appendChild(sectionHeader);
+
+      const handoverObjects = getHandoverObjectCandidates(selectedNode);
+      if (!handoverObjects.length) {
+        const none = document.createElement("p");
+        none.className = "muted";
+        none.textContent = "No handover objects yet.";
+        section.appendChild(none);
+        return section;
+      }
+
+      const list = document.createElement("div");
+      list.className = "chip-list";
+      handoverObjects.forEach((node) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip-btn";
+        chip.textContent = `${getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) })} (${node.type})`;
+        chip.addEventListener("click", () => selectNode(node.id));
+        list.appendChild(chip);
+      });
+      section.appendChild(list);
+      return section;
+    }
+
+    function canManageTaskInDetails(node) {
+      if (!node) return false;
+      if (node.type === "handover") {
+        return canCurrentUserManageHandoverTasks(node);
+      }
+      return true;
+    }
+
+    function resetDetailsTaskEditState() {
+      detailsTaskEditState = {
+        nodeId: null,
+        taskId: null,
+        text: "",
+        assignedTo: "",
+        linkedObjectIds: [],
+        slashRange: null
+      };
+    }
+
+    function ensureDetailsTaskComposerState(node) {
+      if (!node) return;
+      if (detailsTaskComposerState.nodeId !== node.id) {
+        detailsTaskComposerState = createTaskDraftState(node);
+        return;
+      }
+      const assigneeOptions = getTaskAssigneeOptionsForContext(node);
+      detailsTaskComposerState.assignedTo = assigneeOptions.includes(detailsTaskComposerState.assignedTo)
+        ? detailsTaskComposerState.assignedTo
+        : (assigneeOptions[0] || "");
+      const handoverContextNode = getTaskHandoverContextNode(node);
+      if (handoverContextNode) {
+        detailsTaskComposerState.linkedObjectIds = normalizeTaskLinkedObjectIds(handoverContextNode, detailsTaskComposerState.linkedObjectIds);
+      } else {
+        detailsTaskComposerState.linkedObjectIds = [];
+        detailsTaskComposerState.slashRange = null;
+      }
+    }
+
+    function persistDetailsTaskChanges() {
+      syncNodeRuntimeAndStore();
+      persistStoreToLocalStorage();
+      renderDetailsPane();
+      renderNotifications();
+    }
+
+    function beginDetailsTaskEdit(node, task) {
+      detailsTaskEditState = createTaskDraftState(node, task);
+      renderDetailsPane();
+      requestAnimationFrame(() => {
+        const editorInput = detailsPaneEl.querySelector(`.task-editor-input[data-task-id="${task.id}"]`);
+        if (editorInput) {
+          editorInput.focus();
+          editorInput.select();
+        }
+      });
+    }
+
+    function cancelDetailsTaskEdit() {
+      resetDetailsTaskEditState();
+      renderDetailsPane();
+    }
+
+    function commitDetailsTaskEdit(node, task) {
+      if (!node || !task || detailsTaskEditState.nodeId !== node.id || detailsTaskEditState.taskId !== task.id) return;
+      const changed = saveTaskDraft(node, detailsTaskEditState, task);
+      resetDetailsTaskEditState();
+      if (!changed) {
+        renderDetailsPane();
+        return;
+      }
+      persistDetailsTaskChanges();
+    }
+
+    function buildTaskEditor(node, draftState, options = {}) {
+      const form = document.createElement("form");
+      form.className = `task-editor-form${options.inline ? " is-inline" : ""}`;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "task-editor-input";
+      input.maxLength = 180;
+      input.placeholder = options.placeholder || "Task description";
+      input.value = draftState.text || "";
+      if (options.taskId) {
+        input.dataset.taskId = options.taskId;
+      }
+
+      const assigneeSelect = document.createElement("select");
+      assigneeSelect.className = "task-editor-select";
+      const assigneeOptions = getTaskAssigneeOptionsForContext(node, options.task || null);
+      if (!assigneeOptions.includes(draftState.assignedTo)) {
+        draftState.assignedTo = assigneeOptions[0] || "";
+      }
+      assigneeOptions.forEach((assigneeLabel) => {
+        const option = document.createElement("option");
+        option.value = assigneeLabel;
+        option.textContent = assigneeLabel;
+        assigneeSelect.appendChild(option);
+      });
+      assigneeSelect.value = draftState.assignedTo;
+      assigneeSelect.addEventListener("change", () => {
+        draftState.assignedTo = assigneeSelect.value;
+      });
+
+      const linkedObjectChips = document.createElement("div");
+      linkedObjectChips.className = "task-linked-chip-list";
+      const slashMenu = document.createElement("div");
+      slashMenu.className = "task-slash-menu";
+      const handoverContextNode = getTaskHandoverContextNode(node, options.task || null);
+
+      const syncLinkedObjectChips = () => {
+        linkedObjectChips.innerHTML = "";
+        if (!handoverContextNode) return;
+        const linkedNodes = normalizeTaskLinkedObjectIds(handoverContextNode, draftState.linkedObjectIds)
+          .map((nodeId) => getNodeById(nodeId))
+          .filter(Boolean)
+          .sort(compareNodesByDisplayLabel);
+        draftState.linkedObjectIds = linkedNodes.map((linkedNode) => linkedNode.id);
+        linkedNodes.forEach((linkedNode) => {
+          const chip = document.createElement("span");
+          chip.className = "task-linked-chip";
+          const label = document.createElement("span");
+          label.className = "task-linked-chip-label";
+          label.textContent = getNodeDisplayTitle(linkedNode, { fallback: getNodeTitleFallback(linkedNode) });
+          chip.appendChild(label);
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "task-linked-chip-remove";
+          removeBtn.textContent = "×";
+          removeBtn.setAttribute("aria-label", `Remove ${label.textContent}`);
+          removeBtn.addEventListener("click", () => {
+            draftState.linkedObjectIds = draftState.linkedObjectIds.filter((nodeId) => nodeId !== linkedNode.id);
+            syncLinkedObjectChips();
+            syncSlashMenu();
+            input.focus();
+          });
+          chip.appendChild(removeBtn);
+          linkedObjectChips.appendChild(chip);
+        });
+      };
+
+      const syncSlashMenu = () => {
+        draftState.text = input.value;
+        draftState.slashRange = getTaskSlashRange(input.value, input.selectionStart);
+        slashMenu.innerHTML = "";
+        if (!handoverContextNode || !draftState.slashRange) {
+          slashMenu.classList.remove("is-open");
+          return;
+        }
+        const slashOptions = getTaskSlashOptions(node, draftState, options.task || null);
+        if (!slashOptions.length) {
+          slashMenu.classList.remove("is-open");
+          return;
+        }
+        slashMenu.classList.add("is-open");
+        slashOptions.forEach((objectNode) => {
+          const optionBtn = document.createElement("button");
+          optionBtn.type = "button";
+          optionBtn.className = "task-slash-option";
+          optionBtn.textContent = `${getNodeDisplayTitle(objectNode, { fallback: getNodeTitleFallback(objectNode) })} (${objectNode.type})`;
+          optionBtn.addEventListener("click", () => {
+            applyTaskSlashSelection(draftState, input, objectNode.id);
+            syncLinkedObjectChips();
+            syncSlashMenu();
+          });
+          slashMenu.appendChild(optionBtn);
+        });
+      };
+
+      ["input", "click", "keyup", "focus"].forEach((eventName) => {
+        input.addEventListener(eventName, () => {
+          draftState.text = input.value;
+          syncSlashMenu();
+        });
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          if (typeof options.onCancel === "function") {
+            options.onCancel();
+          }
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (typeof options.onSubmit === "function") {
+            options.onSubmit();
+          }
+        }
+      });
+
+      const controls = document.createElement("div");
+      controls.className = "task-editor-controls";
+      controls.appendChild(assigneeSelect);
+      const actions = document.createElement("div");
+      actions.className = "task-editor-actions";
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "submit";
+      submitBtn.className = "details-inline-btn";
+      submitBtn.textContent = options.submitLabel || "Save";
+      actions.appendChild(submitBtn);
+      if (typeof options.onCancel === "function") {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "details-inline-btn is-secondary";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => {
+          options.onCancel();
+        });
+        actions.appendChild(cancelBtn);
+      }
+
+      form.appendChild(input);
+      form.appendChild(slashMenu);
+      if (handoverContextNode) {
+        form.appendChild(linkedObjectChips);
+      }
+      form.appendChild(controls);
+      form.appendChild(actions);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        draftState.text = input.value;
+        if (typeof options.onSubmit === "function") {
+          options.onSubmit();
+        }
+      });
+
+      syncLinkedObjectChips();
+      syncSlashMenu();
+      return form;
+    }
+
+    function appendBuiltTaskObjectLinks(container, selectedNode, task) {
+      const linkedNodes = getTaskObjectNodes(task, selectedNode);
+      if (!linkedNodes.length) return;
+      const chipList = document.createElement("div");
+      chipList.className = "task-object-chip-list";
+      linkedNodes.forEach((linkedNode) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "task-object-chip";
+        chip.textContent = getNodeDisplayTitle(linkedNode, { fallback: getNodeTitleFallback(linkedNode) });
+        chip.addEventListener("click", () => selectNode(linkedNode.id));
+        chipList.appendChild(chip);
+      });
+      container.appendChild(chipList);
+    }
+
+    function buildTasksSection(selectedNode) {
+      const section = buildDetailsSection("details-section-tasks");
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Tasks";
+      section.appendChild(title);
+
+      const canManageTasks = canManageTaskInDetails(selectedNode);
+      if (
+        detailsTaskEditState.nodeId === selectedNode.id &&
+        detailsTaskEditState.taskId &&
+        !selectedNode.tasks.some((task) => task.id === detailsTaskEditState.taskId)
+      ) {
+        resetDetailsTaskEditState();
+      }
+
+      const tasksList = document.createElement("div");
+      tasksList.className = "tasks-list";
+      if (!selectedNode.tasks.length) {
+        const emptyTasks = document.createElement("p");
+        emptyTasks.className = "muted";
+        emptyTasks.textContent = "No tasks yet.";
+        tasksList.appendChild(emptyTasks);
+      } else {
+        selectedNode.tasks.forEach((task) => {
+          const isEditingTask = detailsTaskEditState.nodeId === selectedNode.id && detailsTaskEditState.taskId === task.id;
+          if (isEditingTask) {
+            const editRow = document.createElement("div");
+            editRow.className = "task-row is-editing";
+            editRow.appendChild(buildTaskEditor(selectedNode, detailsTaskEditState, {
+              inline: true,
+              task,
+              taskId: task.id,
+              submitLabel: "Save",
+              onSubmit: () => commitDetailsTaskEdit(selectedNode, task),
+              onCancel: () => cancelDetailsTaskEdit()
+            }));
+            tasksList.appendChild(editRow);
+            return;
+          }
+
+          const row = document.createElement("div");
+          row.className = `task-row${task.done ? " done" : ""}`;
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = !!task.done;
+          check.disabled = !canManageTasks;
+          check.addEventListener("change", () => {
+            if (!setTaskDoneState(selectedNode.id, task.id, check.checked)) return;
+            persistDetailsTaskChanges();
+          });
+
+          const content = document.createElement("div");
+          content.className = "task-content";
+          const taskText = document.createElement("p");
+          taskText.className = "task-text";
+          taskText.textContent = task.text;
+          const assignee = document.createElement("div");
+          assignee.className = "task-assignee";
+          assignee.textContent = `Assigned: ${task.assignedTo}`;
+          content.appendChild(taskText);
+          content.appendChild(assignee);
+          appendBuiltTaskObjectLinks(content, selectedNode, task);
+
+          row.appendChild(check);
+          row.appendChild(content);
+
+          if (canManageTasks) {
+            const actions = document.createElement("div");
+            actions.className = "task-row-actions";
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "workspace-row-icon-btn rename";
+            editBtn.textContent = "✎";
+            editBtn.title = "Edit task";
+            editBtn.setAttribute("aria-label", "Edit task");
+            editBtn.addEventListener("click", () => {
+              beginDetailsTaskEdit(selectedNode, task);
+            });
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "workspace-row-icon-btn delete";
+            deleteBtn.textContent = "✕";
+            deleteBtn.title = "Delete task";
+            deleteBtn.setAttribute("aria-label", "Delete task");
+            deleteBtn.addEventListener("click", () => {
+              if (!deleteTaskById(selectedNode.id, task.id)) return;
+              if (detailsTaskEditState.taskId === task.id) {
+                resetDetailsTaskEditState();
+              }
+              persistDetailsTaskChanges();
+            });
+            actions.appendChild(editBtn);
+            actions.appendChild(deleteBtn);
+            row.appendChild(actions);
+          }
+
+          tasksList.appendChild(row);
+        });
+      }
+      section.appendChild(tasksList);
+
+      if (selectedNode.type === "handover" && !canManageTasks) {
+        const note = document.createElement("p");
+        note.className = "muted";
+        note.textContent = "Only the owner or collaborators can add tasks.";
+        section.appendChild(note);
+        return section;
+      }
+
+      ensureDetailsTaskComposerState(selectedNode);
+      section.appendChild(buildTaskEditor(selectedNode, detailsTaskComposerState, {
+        submitLabel: "Add task",
+        placeholder: "Task description",
+        onSubmit: () => {
+          const changed = saveTaskDraft(selectedNode, detailsTaskComposerState, null);
+          if (!changed) return;
+          detailsTaskComposerState = createTaskDraftState(selectedNode);
+          persistDetailsTaskChanges();
+        }
+      }));
+      return section;
+    }
+
+    function deleteCommentFromNode(nodeId, commentIndex) {
+      const node = getAnyNodeById(nodeId);
+      if (!node || !Array.isArray(node.comments) || !node.comments[commentIndex]) return false;
+      const comment = node.comments[commentIndex];
+      if (!canCurrentUserDeleteComment(node, comment)) return false;
+      node.comments.splice(commentIndex, 1);
+      return true;
+    }
+
+    function buildCommentsSection(selectedNode) {
+      const section = buildDetailsSection("details-section-comments");
+      const title = document.createElement("h4");
+      title.className = "section-title";
+      title.textContent = "Comments";
+      section.appendChild(title);
+
+      const commentList = document.createElement("div");
+      commentList.className = "comment-list";
+      const orderedComments = [...selectedNode.comments]
+        .map((comment, index) => ({ comment, index }))
+        .sort((left, right) => new Date(left.comment.timestamp).getTime() - new Date(right.comment.timestamp).getTime());
+
+      if (!orderedComments.length) {
+        const noComments = document.createElement("p");
+        noComments.className = "muted";
+        noComments.textContent = "No comments yet.";
+        commentList.appendChild(noComments);
+      } else {
+        orderedComments.forEach(({ comment, index }) => {
+          const item = document.createElement("div");
+          item.className = `comment-item${comment.isNew ? " is-new" : ""}`;
+          const head = document.createElement("div");
+          head.className = "comment-head";
+          const meta = document.createElement("div");
+          meta.className = "comment-meta";
+          const author = document.createElement("span");
+          author.textContent = comment.author;
+          const time = document.createElement("span");
+          time.textContent = formatCommentTimestamp(comment.timestamp);
+          meta.appendChild(author);
+          meta.appendChild(time);
+          head.appendChild(meta);
+          if (canCurrentUserDeleteComment(selectedNode, comment)) {
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "workspace-row-icon-btn delete comment-delete-btn";
+            deleteBtn.textContent = "✕";
+            deleteBtn.title = "Delete comment";
+            deleteBtn.setAttribute("aria-label", "Delete comment");
+            deleteBtn.addEventListener("click", () => {
+              if (!deleteCommentFromNode(selectedNode.id, index)) return;
+              syncNodeRuntimeAndStore();
+              persistStoreToLocalStorage();
+              renderDetailsPane();
+              renderNotifications();
+            });
+            head.appendChild(deleteBtn);
+          }
+
+          const text = document.createElement("p");
+          text.className = "comment-text";
+          text.textContent = comment.text;
+          item.appendChild(head);
+          item.appendChild(text);
+          commentList.appendChild(item);
+        });
+      }
+      section.appendChild(commentList);
+
+      const commentForm = document.createElement("form");
+      commentForm.className = "comment-form";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Add a comment (mentions like @Hannah supported)";
+      input.maxLength = 400;
+      const submit = document.createElement("button");
+      submit.type = "submit";
+      submit.textContent = "Add comment";
+      commentForm.appendChild(input);
+      commentForm.appendChild(submit);
+      commentForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        addCommentToSelectedNode(input.value);
+        input.value = "";
+      });
+      section.appendChild(commentForm);
+      return section;
+    }
+
+    function buildDetailsFooterSection(selectedNode) {
+      const section = buildDetailsSection("details-section-footer");
+      const label = document.createElement("div");
+      label.className = "details-footer-label";
+      label.textContent = "Node ID";
+      const value = document.createElement("div");
+      value.className = "details-footer-value";
+      value.textContent = selectedNode.id || "";
+      section.appendChild(label);
+      section.appendChild(value);
+      return section;
+    }
+    function renderDetailsPane() {
+      detailsPaneEl.innerHTML = "";
+      const selectedNode = getSelectedNode();
+      if (!selectedNode) {
+        const placeholder = document.createElement("p");
+        placeholder.className = "muted details-empty-state";
+        placeholder.textContent = "Select a node from the list or canvas to inspect details.";
+        detailsPaneEl.appendChild(placeholder);
+        return;
+      }
+
+      const sections = [
+        buildDetailsHeaderSection(selectedNode),
+        buildDetailsDescriptionSection(selectedNode),
+        buildDetailsContextSection(selectedNode),
+        selectedNode.type === "location" ? buildLocationChildrenSection(selectedNode) : null,
+        selectedNode.type === "handover" ? buildHandoverObjectsSection(selectedNode) : null,
+        selectedNode.type === "handover" ? buildHandoverCollaboratorsSection(selectedNode) : null,
+        buildTasksSection(selectedNode),
+        buildCommentsSection(selectedNode),
+        buildDetailsFooterSection(selectedNode)
+      ].filter(Boolean);
+
+      sections.forEach((section) => {
+        detailsPaneEl.appendChild(section);
+      });
     }
 
     function addCommentToSelectedNode(text) {
@@ -5522,12 +10214,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
       if (!selectedNode) return;
 
       selectedNode.comments.push({
-        author: CURRENT_USER,
+        author: getCurrentUserName() || CURRENT_USER,
         text: message,
         timestamp: new Date().toISOString(),
         isNew: true
       });
 
+      syncNodeRuntimeAndStore();
+      persistStoreToLocalStorage();
       renderDetailsPane();
       renderNotifications();
     }
@@ -5553,6 +10247,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         appliedWorkspaceId = currentWorkspaceId;
         hasAppliedWorkspace = true;
         resetLocationClickTracker();
+        resetPortalClickTracker();
       }
       renderNodeLists();
       renderBreadcrumb();
@@ -5565,6 +10260,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
     function renderAll() {
       renderWorkspace(currentWorkspaceId);
       renderWorkspaceMenu();
+      renderPortalLinkModal();
+      renderEntityLinkModal();
+      renderCollaboratorPickerModal();
+      renderHandoverObjectPickerModal();
     }
 
     function renderLoadingState() {

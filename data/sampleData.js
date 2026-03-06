@@ -2,7 +2,8 @@ export const sampleData = {
   orgs: [
     { id: "org-evans-lab", name: "Evans Lab" },
     { id: "org-operations", name: "Operations" },
-    { id: "org-program", name: "Program Office" }
+    { id: "org-program", name: "Program Office" },
+    { id: "org-genomics-core", name: "Genomics Core (External)" }
   ],
   users: [
     { id: "user-evans", name: "PI: Dr Evans", orgId: "org-evans-lab" },
@@ -403,8 +404,10 @@ const supplementaryNodes = [
 const collaborationNodes = [
   {
     id: "org_evans_lab",
-    type: "organization",
-    title: "Evan's Lab",
+    type: "entity",
+    title: "",
+    entityKind: "org",
+    entityRefId: "org-evans-lab",
     ownerId: "user-evans",
     locationId: null,
     summary: "Internal organization context for Alex and Hannah collaborations.",
@@ -413,8 +416,10 @@ const collaborationNodes = [
   },
   {
     id: "person_alex",
-    type: "person",
-    title: "Alex",
+    type: "entity",
+    title: "",
+    entityKind: "user",
+    entityRefId: "user-alex-patel",
     ownerId: "user-alex-patel",
     locationId: null,
     summary: "Person node for Alex collaboration context.",
@@ -423,8 +428,10 @@ const collaborationNodes = [
   },
   {
     id: "person_hannah",
-    type: "person",
-    title: "Hannah",
+    type: "entity",
+    title: "",
+    entityKind: "user",
+    entityRefId: "user-hannah-lewis",
     ownerId: "user-hannah-lewis",
     locationId: null,
     summary: "Person node for Hannah collaboration context.",
@@ -433,8 +440,10 @@ const collaborationNodes = [
   },
   {
     id: "person_evan",
-    type: "person",
-    title: "Evan (PI)",
+    type: "entity",
+    title: "",
+    entityKind: "user",
+    entityRefId: "user-evans",
     ownerId: "user-evans",
     locationId: null,
     summary: "Person node for PI review and oversight context.",
@@ -443,8 +452,8 @@ const collaborationNodes = [
   },
   {
     id: "hub_collab_alex",
-    type: "hub",
-    title: "Collaboration Hub (Alex)",
+    type: "collaboration",
+    title: "",
     ownerId: "user-alex-patel",
     locationId: null,
     summary: "Collaboration map hub for Alex.",
@@ -453,8 +462,8 @@ const collaborationNodes = [
   },
   {
     id: "hub_collab_hannah",
-    type: "hub",
-    title: "Collaboration Hub (Hannah)",
+    type: "collaboration",
+    title: "",
     ownerId: "user-hannah-lewis",
     locationId: null,
     summary: "Collaboration map hub for Hannah.",
@@ -463,8 +472,10 @@ const collaborationNodes = [
   },
   {
     id: "org_genomics_core",
-    type: "organization",
-    title: "Genomics Core (External)",
+    type: "entity",
+    title: "",
+    entityKind: "org",
+    entityRefId: "org-genomics-core",
     ownerId: "user-alex-patel",
     locationId: null,
     summary: "External organization collaboration endpoint.",
