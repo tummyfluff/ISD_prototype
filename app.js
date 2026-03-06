@@ -27,6 +27,19 @@ if (!window.d3 || !window.d3.forceSimulation) {
 
 const CURRENT_USER = "Dr Hannah Lewis";
 const CURRENT_USER_HANDLE = "@Hannah";
+const HANDOVER_OBJECT_ROLES = ["context", "input", "output", "reference"];
+const HANDOVER_OBJECT_ROLE_LABELS = {
+  context: "Context",
+  input: "Input",
+  output: "Output",
+  reference: "Reference"
+};
+const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
+  context: "handover_context",
+  input: "handover_input",
+  output: "handover_output",
+  reference: "handover_reference"
+};
 
 // type NodeType =
 //   "location" | "process" | "standard" | "portal" | "handover"
@@ -50,6 +63,7 @@ const CURRENT_USER_HANDLE = "@Hannah";
 //   sharedWithIds?: string[],
 //   handoverCollaborators?: Array<{ kind: "user" | "org", refId: string, shareWorkspace: boolean }>,
 //   handoverNodeIds?: string[],
+//   handoverObjects?: Array<{ id: string, role: "context" | "input" | "output" | "reference" }>,
 //   kind?: "lab" | "room" | "bench" | "fume" | "freezer" | "sink" | "glovebox" | "shelf" | "generic",
 //   locationId: string | null,
 //   status?: string,
@@ -79,6 +93,7 @@ const CURRENT_USER_HANDLE = "@Hannah";
     const PORTAL_LABEL_FONT_SIZE_PX = 11;
     const PORTAL_LABEL_FONT_WEIGHT = 600;
     const PORTAL_LABEL_LINE_HEIGHT_PX = 14;
+    const ANCHOR_NODE_DIAMETER_PX = 138;
     const ENTITY_LABEL_FONT_SIZE_PX = 12;
     const ENTITY_LABEL_FONT_WEIGHT = 700;
     const ENTITY_LABEL_LINE_HEIGHT_PX = 14;
@@ -155,6 +170,9 @@ const CURRENT_USER_HANDLE = "@Hannah";
       portal_genomics_core: { kind: "org", refId: "org-genomics-core" }
     });
     const REQUIRED_ORG_RECORDS = Object.freeze([]);
+    const HANDOVER_PROJECTION_META_KEY = "handoverProjection";
+    const HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY = "handoverProjectionNodeIds";
+    const HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY = "handoverProjectionEdgeIds";
 
     function extractEntityArray(data, key) {
       if (!data || typeof data !== "object") return [];
@@ -274,7 +292,8 @@ const CURRENT_USER_HANDLE = "@Hannah";
   let handoverObjectPickerModalState = {
     open: false,
     nodeId: null,
-    selectedNodeIds: []
+    selectedNodeIds: [],
+    selectedRole: "reference"
   };
   let adminOrgModalState = {
     open: false,
@@ -349,6 +368,7 @@ const {
   getUsers: () => users,
   getOrgs: () => orgs,
   getWorkspaceOptions: () => workspaceOptions,
+  getSharedWorkspaceOptionsForUser: (userId) => getSharedWorkspaceOptionsForUser(userId),
   getUserById: () => userById,
   getOrgById: () => orgById,
   getWorkspaceById: () => workspaceById,
@@ -399,6 +419,7 @@ const {
       void orgById;
 
       let migratedNodeData = false;
+      const defaultNodeSummary = "Click to enter node description";
       allNodesRuntime = Array.from(store.nodesById.values())
         .map((node) => {
           const normalizedType = normalizeNodeType(node.type);
@@ -423,7 +444,7 @@ const {
                 : (node.ownerId || "Unknown"))),
             summary: typeof node.summary === "string" && node.summary.trim()
               ? node.summary
-              : `${typeof node.title === "string" ? node.title : node.id} node`,
+              : defaultNodeSummary,
             tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => normalizeTaskRecord(task)) : [],
             comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
             locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
@@ -438,6 +459,9 @@ const {
           if (normalizedType === "handover") {
             runtimeNode.handoverCollaborators = Array.isArray(node.handoverCollaborators)
               ? node.handoverCollaborators.map((collaborator) => ({ ...collaborator }))
+              : [];
+            runtimeNode.handoverObjects = Array.isArray(node.handoverObjects)
+              ? node.handoverObjects.map((handoverObject) => ({ ...handoverObject }))
               : [];
             runtimeNode.handoverNodeIds = Array.isArray(node.handoverNodeIds)
               ? node.handoverNodeIds.filter((linkedNodeId) => typeof linkedNodeId === "string")
@@ -462,9 +486,22 @@ const {
       allEdgesRuntime = Array.from(store.edgesById.values())
         .map((edge) => ({ ...edge }));
       workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+      if (migrateHandoverProjectionModel()) {
+        migratedNodeData = true;
+      }
+      allNodesRuntime.forEach((node) => {
+        if (node.type === "handover" && applyDefaultContextObjectToHandover(node)) {
+          migratedNodeData = true;
+        }
+      });
+      if (refreshAllHandoverDerivedState()) {
+        migratedNodeData = true;
+      }
       if (seededOrgRecords || seededUserRecords || migratedNodeData) {
         syncUsersRuntimeAndStore();
         syncNodeRuntimeAndStore();
+        syncEdgeRuntimeAndStore();
+        syncWorkspaceRuntimeAndStore();
         persistStoreToLocalStorage();
       }
       reconcileLegacyPortalGraphPositions();
@@ -476,7 +513,7 @@ const {
       } else {
         currentUserId = null;
       }
-      const initialWorkspaceOptions = workspaceOptions.filter((workspace) => workspace.ownerId === currentUserId);
+      const initialWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
       currentWorkspaceId = initialWorkspaceOptions[0]?.id || null;
       currentWorkspaceKind = normalizeWorkspaceKind(initialWorkspaceOptions[0]?.kind);
       appliedWorkspaceId = null;
@@ -492,6 +529,8 @@ let nodeById = new Map();
 let edgeById = new Map();
 let outgoingEdgeIdsBySourceId = new Map();
 let incomingEdgeIdsByTargetId = new Map();
+let currentProjectionNodeMetaById = new Map();
+let currentProjectionEdgeMetaById = new Map();
 let edgeRuntimeCounter = 0;
 let portalLabelMeasureContext = null;
 let portalLabelWidthCache = new Map();
@@ -535,6 +574,46 @@ function rebuildEdgeIndexes() {
 
   edges.length = 0;
   edges.push(...validEdges);
+}
+
+function resetCurrentProjectionViewState() {
+  currentProjectionNodeMetaById = new Map();
+  currentProjectionEdgeMetaById = new Map();
+}
+
+function getCurrentProjectionNodeMeta(nodeId) {
+  return nodeId ? currentProjectionNodeMetaById.get(nodeId) || null : null;
+}
+
+function getCurrentProjectionEdgeMeta(edgeId) {
+  return edgeId ? currentProjectionEdgeMetaById.get(edgeId) || null : null;
+}
+
+function mergeProjectionNodeMeta(nodeId, patch) {
+  if (!nodeId || !patch || typeof patch !== "object") return;
+  const currentMeta = currentProjectionNodeMetaById.get(nodeId) || {
+    roles: [],
+    handoverIds: [],
+    objectNodeIds: [],
+    collaboratorKinds: [],
+    collaboratorRefIds: []
+  };
+  const nextMeta = { ...currentMeta };
+  Object.entries(patch).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      nextMeta[key] = [...new Set([...(Array.isArray(currentMeta[key]) ? currentMeta[key] : []), ...value])];
+      return;
+    }
+    if (value !== undefined) {
+      nextMeta[key] = value;
+    }
+  });
+  currentProjectionNodeMetaById.set(nodeId, nextMeta);
+}
+
+function setProjectionEdgeMeta(edgeId, meta) {
+  if (!edgeId || !meta || typeof meta !== "object") return;
+  currentProjectionEdgeMetaById.set(edgeId, { ...meta });
 }
 
 function buildEdgeId(sourceId, targetId) {
@@ -735,22 +814,192 @@ function normalizeHandoverFieldsForNode(node) {
     node.locationId = null;
     changed = true;
   }
-  const currentHandoverNodeIds = Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [];
-  const nextHandoverNodeIds = [...new Set(
-    currentHandoverNodeIds
-      .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
-  )];
-  if (JSON.stringify(currentHandoverNodeIds) !== JSON.stringify(nextHandoverNodeIds)) {
-    node.handoverNodeIds = nextHandoverNodeIds;
+  const rawHandoverObjects = Array.isArray(node.handoverObjects)
+    ? node.handoverObjects
+    : (
+      Array.isArray(node.handoverNodeIds)
+        ? node.handoverNodeIds.map((handoverObjectId) => ({ id: handoverObjectId, role: "reference" }))
+        : []
+    );
+  const seenObjectIds = new Set();
+  const nextHandoverObjects = rawHandoverObjects
+    .map((handoverObject) => {
+      if (typeof handoverObject === "string") {
+        return {
+          id: handoverObject,
+          role: "reference"
+        };
+      }
+      if (!handoverObject || typeof handoverObject !== "object") return null;
+      return {
+        id: typeof handoverObject.id === "string" ? handoverObject.id : "",
+        role: normalizeHandoverObjectRole(handoverObject.role)
+      };
+    })
+    .filter((handoverObject) => {
+      if (!handoverObject?.id || handoverObject.id === node.id || seenObjectIds.has(handoverObject.id)) {
+        return false;
+      }
+      seenObjectIds.add(handoverObject.id);
+      return true;
+    });
+  let seenContextObject = false;
+  const normalizedHandoverObjects = nextHandoverObjects.map((handoverObject) => {
+    if (handoverObject.role !== "context") return handoverObject;
+    if (!seenContextObject) {
+      seenContextObject = true;
+      return handoverObject;
+    }
     changed = true;
-  } else if (!Array.isArray(node.handoverNodeIds)) {
-    node.handoverNodeIds = nextHandoverNodeIds;
+    return {
+      ...handoverObject,
+      role: "reference"
+    };
+  });
+  if (JSON.stringify(Array.isArray(node.handoverObjects) ? node.handoverObjects : []) !== JSON.stringify(normalizedHandoverObjects)) {
+    node.handoverObjects = normalizedHandoverObjects;
+    changed = true;
+  } else if (!Array.isArray(node.handoverObjects)) {
+    node.handoverObjects = normalizedHandoverObjects;
     changed = true;
   }
   if (normalizeHandoverCollaboratorsForNode(node)) {
     changed = true;
   }
+  if (isCollabWorkspaceOnlyHandover(node)) {
+    const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+    const nextCollaborators = currentCollaborators.map((collaborator) => {
+      if (!collaborator?.shareWorkspace) return collaborator;
+      changed = true;
+      return {
+        ...collaborator,
+        shareWorkspace: false
+      };
+    });
+    node.handoverCollaborators = nextCollaborators;
+  }
   return changed;
+}
+
+function normalizeHandoverObjectRole(role) {
+  return HANDOVER_OBJECT_ROLES.includes(role) ? role : "reference";
+}
+
+function getCurrentWorkspaceRecord() {
+  if (!currentWorkspaceId) return null;
+  return workspaceById.get(currentWorkspaceId) || null;
+}
+
+function isWorkspaceAnchorNode(node, workspaceRecord = getCurrentWorkspaceRecord()) {
+  if (!node || !workspaceRecord) return false;
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
+  return workspaceRecord.homeNodeId === node.id;
+}
+
+function isRenderedCircularNode(node, workspaceRecord = getCurrentWorkspaceRecord()) {
+  return isCircularNodeType(node) || isWorkspaceAnchorNode(node, workspaceRecord);
+}
+
+function getAnchorNodeDisplayLabel(node) {
+  if (!node) return "";
+  return getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) });
+}
+
+function isValidHandoverObjectNodeForRole(node, role = "reference") {
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  if (normalizedRole === "context") {
+    return !!node && isSelectableNode(node) && node.type !== "collaboration";
+  }
+  return !!node && isSelectableNode(node) && node.type !== "portal" && node.type !== "entity" && node.type !== "collaboration";
+}
+
+function getDefaultContextObjectIdForHandover(node) {
+  if (!node || node.type !== "handover") return null;
+  const sourceWorkspaceId = getSourceWorkspaceIdForHandover(node);
+  if (!sourceWorkspaceId) return null;
+  const sourceWorkspace = workspaceById.get(sourceWorkspaceId) || null;
+  if (!sourceWorkspace || normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") return null;
+  const anchorId = typeof sourceWorkspace.homeNodeId === "string" && sourceWorkspace.homeNodeId ? sourceWorkspace.homeNodeId : null;
+  if (!anchorId || anchorId === node.id) return null;
+  const anchorNode = getAnyNodeById(anchorId);
+  return isValidHandoverObjectNodeForRole(anchorNode, "context") ? anchorId : null;
+}
+
+function applyDefaultContextObjectToHandover(node) {
+  if (!node || node.type !== "handover") return false;
+  const currentObjects = getHandoverObjects(node);
+  if (currentObjects.some((handoverObject) => handoverObject.role === "context")) {
+    return false;
+  }
+  const defaultContextId = getDefaultContextObjectIdForHandover(node);
+  if (!defaultContextId) return false;
+  if (currentObjects.some((handoverObject) => handoverObject.id === defaultContextId)) {
+    node.handoverObjects = currentObjects.map((handoverObject) => ({
+      ...handoverObject,
+      role: handoverObject.id === defaultContextId ? "context" : handoverObject.role
+    }));
+    return true;
+  }
+  node.handoverObjects = [
+    {
+      id: defaultContextId,
+      role: "context"
+    },
+    ...currentObjects
+  ];
+  return true;
+}
+
+function getCurrentHandoverContextObject(node) {
+  if (!node || node.type !== "handover") return null;
+  return getHandoverObjects(node).find((handoverObject) => handoverObject.role === "context") || null;
+}
+
+function getCurrentHandoverContextNode(node) {
+  const contextObject = getCurrentHandoverContextObject(node);
+  return contextObject ? getAnyNodeById(contextObject.id) || null : null;
+}
+
+function getNodeDetailsHeaderContextNode(node) {
+  if (!node) return null;
+  if (node.type === "handover") {
+    const explicitContextNode = getCurrentHandoverContextNode(node);
+    if (explicitContextNode) return explicitContextNode;
+  }
+  const sourceWorkspace = getCanonicalSourceWorkspaceForNode(node);
+  if (!sourceWorkspace) return null;
+  const anchorId = typeof sourceWorkspace.homeNodeId === "string" && sourceWorkspace.homeNodeId
+    ? sourceWorkspace.homeNodeId
+    : null;
+  if (!anchorId || anchorId === node.id) return null;
+  return getAnyNodeById(anchorId) || null;
+}
+
+function getNodeDetailsHeaderContextLabel(node) {
+  const contextNode = getNodeDetailsHeaderContextNode(node);
+  if (!contextNode) return "";
+  return getNodeDisplayTitle(contextNode, { fallback: getNodeTitleFallback(contextNode) });
+}
+
+function getNodeOwnerShortLabel(node) {
+  if (!node) return "";
+  const ownerRecord = node.ownerId ? userById.get(node.ownerId) || null : null;
+  if (ownerRecord?.orgId) {
+    return getOrgDisplayName(ownerRecord.orgId) || ownerRecord.name || node.owner || node.ownerId || "";
+  }
+  return ownerRecord?.name || node.owner || node.ownerId || "";
+}
+
+function getHandoverObjectEdgeKind(role) {
+  return HANDOVER_OBJECT_EDGE_KIND_BY_ROLE[normalizeHandoverObjectRole(role)] || HANDOVER_OBJECT_EDGE_KIND_BY_ROLE.reference;
+}
+
+function getDefaultHandoverObjectEdgeDirection(role) {
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  if (normalizedRole === "input" || normalizedRole === "context") {
+    return "object_to_handover";
+  }
+  return "handover_to_object";
 }
 
 function getResolvedHandoverCollaborators(node) {
@@ -880,74 +1129,219 @@ function getAnyNodeById(nodeId) {
   return allNodesRuntime.find((node) => node.id === nodeId) || null;
 }
 
-function getExplicitHandoverObjectIds(node) {
+function getHandoverObjects(node) {
   if (!node || node.type !== "handover") return [];
-  return [...new Set(
-    (Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [])
-      .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
-      .filter((nodeId) => {
-        const candidateNode = getNodeById(nodeId);
-        return !!candidateNode && isSelectableNode(candidateNode);
-      })
-  )];
+  return (Array.isArray(node.handoverObjects) ? node.handoverObjects : [])
+    .map((handoverObject) => ({
+      id: typeof handoverObject?.id === "string" ? handoverObject.id : "",
+      role: normalizeHandoverObjectRole(handoverObject?.role)
+    }))
+    .filter((handoverObject) => {
+      if (!handoverObject.id || handoverObject.id === node.id) return false;
+      const candidateNode = getAnyNodeById(handoverObject.id);
+      return isValidHandoverObjectNodeForRole(candidateNode, handoverObject.role);
+    });
 }
 
-function getImplicitHandoverObjectIds(node) {
-  if (!node || node.type !== "handover") return [];
-  return getDirectlyLinkedNodeIds(node.id)
-    .filter((nodeId) => typeof nodeId === "string" && nodeId && nodeId !== node.id)
-    .filter((nodeId) => {
-      const candidateNode = getNodeById(nodeId);
-      return !!candidateNode && isSelectableNode(candidateNode) && candidateNode.type !== "portal" && candidateNode.type !== "entity";
-    });
+function getHandoverObjectsByRole(node) {
+  const groupedObjects = {
+    context: [],
+    input: [],
+    output: [],
+    reference: []
+  };
+  getHandoverObjects(node).forEach((handoverObject) => {
+    groupedObjects[handoverObject.role].push(handoverObject);
+  });
+  return groupedObjects;
 }
 
 function getHandoverObjectCandidates(node) {
   if (!node || node.type !== "handover") return [];
-  const resolvedNodeIds = [
-    ...getImplicitHandoverObjectIds(node),
-    ...getExplicitHandoverObjectIds(node)
-  ];
+  const resolvedObjects = getHandoverObjects(node);
   const seenIds = new Set();
-  return resolvedNodeIds
-    .filter((nodeId) => nodeId && nodeId !== node.id && !seenIds.has(nodeId) && seenIds.add(nodeId))
-    .map((nodeId) => getNodeById(nodeId))
+  return resolvedObjects
+    .filter((handoverObject) => handoverObject.id && !seenIds.has(handoverObject.id) && seenIds.add(handoverObject.id))
+    .map((handoverObject) => {
+      const candidateNode = getAnyNodeById(handoverObject.id);
+      return candidateNode ? { node: candidateNode, role: handoverObject.role } : null;
+    })
     .filter(Boolean)
-    .sort(compareNodesByDisplayLabel);
+    .sort((left, right) => compareNodesByDisplayLabel(left.node, right.node));
 }
 
-function getHandoverObjectPickerOptions(node) {
+function getHandoverObjectPickerOptions(node, role = "reference") {
   if (!node || node.type !== "handover") return [];
-  const visibleObjectIds = new Set(getHandoverObjectCandidates(node).map((candidateNode) => candidateNode.id));
+  const visibleObjectIds = new Set(getHandoverObjects(node).map((handoverObject) => handoverObject.id));
   return nodes
-    .filter((candidateNode) => isSelectableNode(candidateNode) && candidateNode.id !== node.id && !visibleObjectIds.has(candidateNode.id))
+    .filter((candidateNode) =>
+      candidateNode.id !== node.id &&
+      !visibleObjectIds.has(candidateNode.id) &&
+      isValidHandoverObjectNodeForRole(candidateNode, role)
+    )
     .sort(compareNodesByDisplayLabel);
 }
 
-function addHandoverObjectIds(nodeId, nextNodeIds) {
+function addHandoverObject(nodeId, objectId, role = "reference") {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
-  const selectableNodeIds = new Set(
-    nodes
-      .filter((candidateNode) => isSelectableNode(candidateNode) && candidateNode.id !== node.id)
-      .map((candidateNode) => candidateNode.id)
-  );
-  const normalizedNodeIds = [...new Set(
-    (Array.isArray(nextNodeIds) ? nextNodeIds : [])
-      .filter((candidateNodeId) => typeof candidateNodeId === "string" && candidateNodeId && selectableNodeIds.has(candidateNodeId))
-  )];
-  if (!normalizedNodeIds.length) return false;
-  const currentNodeIds = Array.isArray(node.handoverNodeIds) ? node.handoverNodeIds : [];
-  const mergedNodeIds = [...currentNodeIds];
-  normalizedNodeIds.forEach((candidateNodeId) => {
-    if (!mergedNodeIds.includes(candidateNodeId)) {
-      mergedNodeIds.push(candidateNodeId);
+  const candidateNode = getAnyNodeById(objectId);
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  if (!isValidHandoverObjectNodeForRole(candidateNode, normalizedRole) || objectId === node.id) return false;
+  const currentObjects = getHandoverObjects(node);
+  const hasExistingObject = currentObjects.some((handoverObject) => handoverObject.id === objectId);
+  if (hasExistingObject) {
+    return normalizedRole === "context"
+      ? setHandoverObjectRole(nodeId, objectId, normalizedRole)
+      : false;
+  }
+  const nextObjects = normalizedRole === "context"
+    ? currentObjects.map((handoverObject) => ({
+        ...handoverObject,
+        role: handoverObject.role === "context" ? "reference" : handoverObject.role
+      }))
+    : [...currentObjects];
+  node.handoverObjects = [
+    ...nextObjects,
+    {
+      id: objectId,
+      role: normalizedRole
     }
-  });
-  if (JSON.stringify(currentNodeIds) === JSON.stringify(mergedNodeIds)) return false;
-  node.handoverNodeIds = mergedNodeIds;
+  ];
+  refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
   persistStoreToLocalStorage();
+  return true;
+}
+
+function removeHandoverObject(nodeId, objectId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover") return false;
+  const currentObjects = getHandoverObjects(node);
+  const nextObjects = currentObjects.filter((handoverObject) => handoverObject.id !== objectId);
+  if (nextObjects.length === currentObjects.length) return false;
+  node.handoverObjects = nextObjects;
+  refreshAllHandoverDerivedState();
+  syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function setHandoverObjectRole(nodeId, objectId, role) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  let changed = false;
+  node.handoverObjects = getHandoverObjects(node).map((handoverObject) => {
+    if (normalizedRole === "context" && handoverObject.role === "context" && handoverObject.id !== objectId) {
+      changed = true;
+      return {
+        ...handoverObject,
+        role: "reference"
+      };
+    }
+    if (handoverObject.id !== objectId) return handoverObject;
+    if (handoverObject.role === normalizedRole) return handoverObject;
+    changed = true;
+    return {
+      ...handoverObject,
+      role: normalizedRole
+    };
+  });
+  if (!changed) return false;
+  refreshAllHandoverDerivedState();
+  syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function addHandoverObjectIds(nodeId, nextNodeIds, role = "reference") {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  const currentObjects = getHandoverObjects(node);
+  const existingIds = new Set(currentObjects.map((handoverObject) => handoverObject.id));
+  const nextObjects = normalizedRole === "context"
+    ? currentObjects.map((handoverObject) => ({
+        ...handoverObject,
+        role: handoverObject.role === "context" ? "reference" : handoverObject.role
+      }))
+    : [...currentObjects];
+  let changed = false;
+  let hasAssignedContext = false;
+  (Array.isArray(nextNodeIds) ? nextNodeIds : []).forEach((candidateNodeId) => {
+    if (typeof candidateNodeId !== "string" || !candidateNodeId || candidateNodeId === node.id || existingIds.has(candidateNodeId)) {
+      return;
+    }
+    const candidateNode = getAnyNodeById(candidateNodeId);
+    const nextRole = normalizedRole === "context"
+      ? (hasAssignedContext ? "reference" : "context")
+      : normalizedRole;
+    if (!isValidHandoverObjectNodeForRole(candidateNode, nextRole)) return;
+    existingIds.add(candidateNodeId);
+    nextObjects.push({
+      id: candidateNodeId,
+      role: nextRole
+    });
+    if (nextRole === "context") {
+      hasAssignedContext = true;
+    }
+    changed = true;
+  });
+  if (!changed) return false;
+  if (normalizedRole === "context") {
+    node.handoverObjects = nextObjects.map((handoverObject) => ({
+      ...handoverObject,
+      role: handoverObject.role === "context" && handoverObject.id !== nextObjects.find((candidate) => candidate.role === "context")?.id
+        ? "reference"
+        : handoverObject.role
+    }));
+  } else {
+    node.handoverObjects = nextObjects;
+  }
+  refreshAllHandoverDerivedState();
+  syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function addHandoverObjectIdEntry(node, candidateNodeId, role = "reference") {
+  if (!node || node.type !== "handover" || typeof candidateNodeId !== "string" || !candidateNodeId || candidateNodeId === node.id) {
+    return false;
+  }
+  const candidateNode = getAnyNodeById(candidateNodeId);
+  const normalizedRole = normalizeHandoverObjectRole(role);
+  if (!isValidHandoverObjectNodeForRole(candidateNode, normalizedRole)) {
+    return false;
+  }
+  const currentObjects = getHandoverObjects(node);
+  if (currentObjects.some((handoverObject) => handoverObject.id === candidateNodeId)) return false;
+  const nextObjects = normalizedRole === "context"
+    ? currentObjects.map((handoverObject) => ({
+        ...handoverObject,
+        role: handoverObject.role === "context" ? "reference" : handoverObject.role
+      }))
+    : [...currentObjects];
+  node.handoverObjects = [
+    ...nextObjects,
+    {
+      id: candidateNodeId,
+      role: normalizedRole
+    }
+  ];
+  return true;
+}
+
+function removeHandoverObjectIdEntry(node, candidateNodeId) {
+  if (!node || node.type !== "handover" || typeof candidateNodeId !== "string" || !candidateNodeId) return false;
+  const currentObjects = getHandoverObjects(node);
+  const nextObjects = currentObjects.filter((handoverObject) => handoverObject.id !== candidateNodeId);
+  if (nextObjects.length === currentObjects.length) return false;
+  node.handoverObjects = nextObjects;
   return true;
 }
 
@@ -1068,7 +1462,7 @@ function getTaskAssigneeOptionsForContext(node, task = null) {
 
 function normalizeTaskLinkedObjectIds(handoverNode, linkedObjectIds) {
   if (!handoverNode || handoverNode.type !== "handover") return [];
-  const validObjectIds = new Set(getHandoverObjectCandidates(handoverNode).map((candidateNode) => candidateNode.id));
+  const validObjectIds = new Set(getHandoverObjectCandidates(handoverNode).map((candidate) => candidate.node.id));
   return [...new Set(
     (Array.isArray(linkedObjectIds) ? linkedObjectIds : [])
       .filter((nodeId) => typeof nodeId === "string" && validObjectIds.has(nodeId))
@@ -1318,6 +1712,7 @@ function getTaskSlashOptions(node, draftState, task = null) {
   const selectedObjectIds = new Set(Array.isArray(draftState.linkedObjectIds) ? draftState.linkedObjectIds : []);
   const query = String(draftState.slashRange.query || "").trim().toLowerCase();
   return getHandoverObjectCandidates(handoverContextNode)
+    .map((candidate) => candidate.node)
     .filter((candidateNode) => !selectedObjectIds.has(candidateNode.id))
     .filter((candidateNode) => {
       if (!query) return true;
@@ -1504,22 +1899,24 @@ function getNodeOccupiedExtents(node, expandedLocationId = null) {
     top: -halfHeight,
     bottom: halfHeight
   };
-  if (!node || node.type !== "portal") {
+  const isPortalNode = !!node && node.type === "portal";
+  const isAnchorNode = isWorkspaceAnchorNode(node);
+  if (!node || (!isPortalNode && !isAnchorNode)) {
     return {
       ...extents,
       width: extents.right - extents.left,
       height: extents.bottom - extents.top
     };
   }
-  const linkedWorkspaceName = getPortalLinkedWorkspaceName(node);
-  if (!linkedWorkspaceName) {
+  const labelText = isPortalNode ? getPortalLinkedWorkspaceName(node) : getAnchorNodeDisplayLabel(node);
+  if (!labelText) {
     return {
       ...extents,
       width: extents.right - extents.left,
       height: extents.bottom - extents.top
     };
   }
-  const halfLabelWidth = measurePortalLabelWidth(linkedWorkspaceName) / 2;
+  const halfLabelWidth = measurePortalLabelWidth(labelText) / 2;
   extents.left = Math.min(extents.left, -halfLabelWidth);
   extents.right = Math.max(extents.right, halfLabelWidth);
   extents.top -= PORTAL_LABEL_GAP_PX + PORTAL_LABEL_LINE_HEIGHT_PX;
@@ -1740,7 +2137,9 @@ function setHandoverStatusById(nodeId, nextStatus, options = {}) {
   const normalizedStatus = normalizeHandoverStatus(nextStatus);
   if (!allowedStatuses.includes(normalizedStatus)) return false;
   node.status = normalizedStatus;
+  refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
   if (options.persist !== false) {
     persistStoreToLocalStorage();
   }
@@ -1761,7 +2160,10 @@ function addHandoverCollaborator(nodeId, kind, refId) {
   }
   nextCollaborators.push(normalizedCollaborator);
   node.handoverCollaborators = nextCollaborators;
+  syncCollabWorkspaceGraphForCollaborator(node, normalizedCollaborator);
+  refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
   persistStoreToLocalStorage();
   return true;
 }
@@ -1775,15 +2177,44 @@ function removeHandoverCollaborator(nodeId, kind, refId) {
     (collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId) !== collaboratorSignature
   );
   if (nextCollaborators.length === currentCollaborators.length) return false;
+  const workspaceRecord = currentWorkspaceId ? workspaceById.get(currentWorkspaceId || "") || null : null;
+  if (
+    workspaceRecord &&
+    normalizeWorkspaceKind(workspaceRecord.kind) === "collab" &&
+    !isCollabWorkspaceOnlyHandover(node) &&
+    (kind === "user" || kind === "org")
+  ) {
+    retainProjectedCollaboratorEntitiesInWorkspace(workspaceRecord, node, {
+      type: "entity",
+      entityKind: kind,
+      entityRefId: refId
+    });
+  }
   node.handoverCollaborators = nextCollaborators;
+  removeCollabWorkspaceGraphForCollaborator(node, { kind, refId });
+  refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
   persistStoreToLocalStorage();
+  return true;
+}
+
+function removeHandoverCollaboratorEntry(node, kind, refId) {
+  if (!node || node.type !== "handover") return false;
+  const collaboratorSignature = getHandoverCollaboratorSignature(kind, refId);
+  const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  const nextCollaborators = currentCollaborators.filter(
+    (collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId) !== collaboratorSignature
+  );
+  if (nextCollaborators.length === currentCollaborators.length) return false;
+  node.handoverCollaborators = nextCollaborators;
   return true;
 }
 
 function toggleHandoverCollaboratorShare(nodeId, kind, refId) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  if (isCollabWorkspaceOnlyHandover(node)) return false;
   const collaboratorSignature = getHandoverCollaboratorSignature(kind, refId);
   const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
   let changed = false;
@@ -1798,9 +2229,1383 @@ function toggleHandoverCollaboratorShare(nodeId, kind, refId) {
     };
   });
   if (!changed) return false;
+  refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
+  hasAppliedWorkspace = false;
   persistStoreToLocalStorage();
   return true;
+}
+
+function getHandoverProjectionMeta(value) {
+  if (!value || typeof value !== "object") return null;
+  const meta = value.meta;
+  if (!meta || typeof meta !== "object") return null;
+  const projectionMeta = meta[HANDOVER_PROJECTION_META_KEY];
+  if (!projectionMeta || typeof projectionMeta !== "object") return null;
+  return projectionMeta;
+}
+
+function isAutoManagedProjectionNode(node) {
+  return !!getHandoverProjectionMeta(node)?.autoManaged;
+}
+
+function isAutoManagedProjectionEdge(edge) {
+  return !!getHandoverProjectionMeta(edge)?.autoManaged;
+}
+
+function ensureWorkspaceMetaRecord(workspaceRecord) {
+  if (!workspaceRecord || typeof workspaceRecord !== "object") return {};
+  if (!workspaceRecord.meta || typeof workspaceRecord.meta !== "object") {
+    workspaceRecord.meta = {};
+  }
+  return workspaceRecord.meta;
+}
+
+function getProjectionTrackedNodeIds(workspaceRecord) {
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  return Array.isArray(workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY])
+    ? workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY].filter((nodeId) => typeof nodeId === "string" && nodeId)
+    : [];
+}
+
+function getProjectionTrackedEdgeIds(workspaceRecord) {
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  return Array.isArray(workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY])
+    ? workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY].filter((edgeId) => typeof edgeId === "string" && edgeId)
+    : [];
+}
+
+function setProjectionTrackedNodeIds(workspaceRecord, nextNodeIds) {
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY] = [...new Set(
+    (Array.isArray(nextNodeIds) ? nextNodeIds : []).filter((nodeId) => typeof nodeId === "string" && nodeId)
+  )];
+}
+
+function setProjectionTrackedEdgeIds(workspaceRecord, nextEdgeIds) {
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY] = [...new Set(
+    (Array.isArray(nextEdgeIds) ? nextEdgeIds : []).filter((edgeId) => typeof edgeId === "string" && edgeId)
+  )];
+}
+
+function clearProjectionMeta(value) {
+  if (!value || typeof value !== "object" || !value.meta || typeof value.meta !== "object") return false;
+  if (!Object.prototype.hasOwnProperty.call(value.meta, HANDOVER_PROJECTION_META_KEY)) return false;
+  delete value.meta[HANDOVER_PROJECTION_META_KEY];
+  if (!Object.keys(value.meta).length) {
+    delete value.meta;
+  }
+  return true;
+}
+
+function getWorkspaceHandoverViewMap(workspaceRecord, create = false) {
+  if (!workspaceRecord) return null;
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  if (!workspaceMeta.handoverView || typeof workspaceMeta.handoverView !== "object") {
+    if (!create) return null;
+    workspaceMeta.handoverView = {};
+  }
+  return workspaceMeta.handoverView;
+}
+
+function getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, create = false) {
+  if (!workspaceRecord || !handoverId) return null;
+  const handoverView = getWorkspaceHandoverViewMap(workspaceRecord, create);
+  if (!handoverView) return null;
+  if (!handoverView[handoverId] || typeof handoverView[handoverId] !== "object") {
+    if (!create) return null;
+    handoverView[handoverId] = {};
+  }
+  return handoverView[handoverId];
+}
+
+function getProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId) {
+  const handoverViewRecord = getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, false);
+  const direction = handoverViewRecord?.objectEdgeDirections?.[objectNodeId];
+  if (direction === "object_to_handover" || direction === "handover_to_object") {
+    return direction;
+  }
+  return null;
+}
+
+function setProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId, direction) {
+  if (!workspaceRecord || !handoverId || !objectNodeId) return false;
+  const nextDirection = direction === "object_to_handover" ? "object_to_handover" : "handover_to_object";
+  const handoverViewRecord = getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, true);
+  if (!handoverViewRecord.objectEdgeDirections || typeof handoverViewRecord.objectEdgeDirections !== "object") {
+    handoverViewRecord.objectEdgeDirections = {};
+  }
+  if (handoverViewRecord.objectEdgeDirections[objectNodeId] === nextDirection) return false;
+  handoverViewRecord.objectEdgeDirections[objectNodeId] = nextDirection;
+  return true;
+}
+
+function clearProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId) {
+  const handoverViewRecord = getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, false);
+  if (!handoverViewRecord?.objectEdgeDirections || !Object.prototype.hasOwnProperty.call(handoverViewRecord.objectEdgeDirections, objectNodeId)) {
+    return false;
+  }
+  delete handoverViewRecord.objectEdgeDirections[objectNodeId];
+  if (!Object.keys(handoverViewRecord.objectEdgeDirections).length) {
+    delete handoverViewRecord.objectEdgeDirections;
+  }
+  if (!Object.keys(handoverViewRecord).length) {
+    const handoverView = getWorkspaceHandoverViewMap(workspaceRecord, false);
+    if (handoverView) {
+      delete handoverView[handoverId];
+      if (!Object.keys(handoverView).length) {
+        const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+        delete workspaceMeta.handoverView;
+      }
+    }
+  }
+  return true;
+}
+
+function isWorkspaceProtectedNode(workspaceRecord, node) {
+  if (!workspaceRecord || !node) return false;
+  if (node.type === "collaboration") return true;
+  if (workspaceRecord.homeNodeId === node.id) return true;
+  if (isAutoManagedProjectionNode(node)) return true;
+  const projectionMeta = getCurrentProjectionNodeMeta(node.id);
+  if (!projectionMeta) {
+    return false;
+  }
+  if (projectionMeta.roles.includes("handover-object")) {
+    return false;
+  }
+  if (node.type === "handover" && isCollabWorkspaceOnlyHandover(node) && workspaceRecord.ownerId === node.ownerId) {
+    return false;
+  }
+  return true;
+}
+
+function backfillDefaultContextsForWorkspace(workspaceRecord) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "handover") return;
+    if (getSourceWorkspaceIdForHandover(node) !== workspaceRecord.id) return;
+    if (applyDefaultContextObjectToHandover(node)) {
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId = null) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
+  const nextAnchorId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId
+    ? workspaceRecord.homeNodeId
+    : null;
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "handover") return;
+    if (getSourceWorkspaceIdForHandover(node) !== workspaceRecord.id) return;
+    const currentContext = getCurrentHandoverContextObject(node);
+    if (currentContext && currentContext.id !== previousAnchorId) {
+      return;
+    }
+    const currentObjects = getHandoverObjects(node);
+    const nextAnchorNode = nextAnchorId ? getAnyNodeById(nextAnchorId) : null;
+    const nextContextId = nextAnchorId && nextAnchorId !== node.id && isValidHandoverObjectNodeForRole(nextAnchorNode, "context")
+      ? nextAnchorId
+      : null;
+    if (!nextContextId) {
+      if (!currentContext) return;
+      node.handoverObjects = currentObjects.filter((handoverObject) => handoverObject.role !== "context");
+      if (previousAnchorId && removeWorkspaceEdgeLink(workspaceRecord, previousAnchorId, node.id)) {
+        changed = true;
+      }
+      changed = true;
+      return;
+    }
+    if (currentContext?.id === nextContextId) {
+      return;
+    }
+    let foundNextContext = false;
+    const nextObjects = currentObjects.map((handoverObject) => {
+      if (handoverObject.id === nextContextId) {
+        foundNextContext = true;
+        if (handoverObject.role === "context") return handoverObject;
+        changed = true;
+        return {
+          ...handoverObject,
+          role: "context"
+        };
+      }
+      if (handoverObject.role !== "context") return handoverObject;
+      changed = true;
+      return {
+        ...handoverObject,
+        role: "reference"
+      };
+    });
+    node.handoverObjects = foundNextContext
+      ? nextObjects
+      : [
+          {
+            id: nextContextId,
+            role: "context"
+          },
+          ...nextObjects
+        ];
+    if (previousAnchorId && previousAnchorId !== nextContextId && removeWorkspaceEdgeLink(workspaceRecord, previousAnchorId, node.id)) {
+      changed = true;
+    }
+    if (!foundNextContext) {
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function setCurrentWorkspaceAnchorNode(nodeId) {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  const node = getNodeById(nodeId);
+  if (!workspaceRecord || !node || normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
+  if (!isSelectableNode(node) || node.type === "collaboration") return false;
+  if (workspaceRecord.homeNodeId === node.id) return false;
+  const previousAnchorId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId
+    ? workspaceRecord.homeNodeId
+    : null;
+  workspaceRecord.homeNodeId = node.id;
+  const changedNodes = syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId) || backfillDefaultContextsForWorkspace(workspaceRecord);
+  if (changedNodes) {
+    refreshAllHandoverDerivedState();
+    syncNodeRuntimeAndStore();
+  }
+  syncWorkspaceRuntimeAndStore();
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function clearCurrentWorkspaceAnchorNode() {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab" || !workspaceRecord.homeNodeId) return false;
+  const previousAnchorId = workspaceRecord.homeNodeId;
+  workspaceRecord.homeNodeId = null;
+  const changedNodes = syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId);
+  if (changedNodes) {
+    refreshAllHandoverDerivedState();
+    syncNodeRuntimeAndStore();
+  }
+  syncWorkspaceRuntimeAndStore();
+  hasAppliedWorkspace = false;
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function setProjectionTrackedIds(workspaceRecord, nodeIds, edgeIds) {
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY] = [...new Set(
+    (Array.isArray(nodeIds) ? nodeIds : []).filter((nodeId) => typeof nodeId === "string" && nodeId)
+  )];
+  workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY] = [...new Set(
+    (Array.isArray(edgeIds) ? edgeIds : []).filter((edgeId) => typeof edgeId === "string" && edgeId)
+  )];
+}
+
+function buildProjectionNodeId(workspaceId, role, refId) {
+  return `projection-node-${sanitizeWorkspaceSlug(workspaceId)}-${sanitizeWorkspaceSlug(role)}-${sanitizeWorkspaceSlug(refId)}`;
+}
+
+function buildProjectionEdgeId(workspaceId, handoverId, sourceId, targetId) {
+  return `projection-edge-${sanitizeWorkspaceSlug(workspaceId)}-${sanitizeWorkspaceSlug(handoverId)}-${sanitizeWorkspaceSlug(sourceId)}-${sanitizeWorkspaceSlug(targetId)}`;
+}
+
+function getCollaborationWorkspaceRecordForUser(userId) {
+  if (!userId) return null;
+  return workspaces.find((workspace) => normalizeWorkspaceKind(workspace.kind) === "collab" && workspace.ownerId === userId) || null;
+}
+
+function buildCollaborationWorkspaceIdForUser(userId) {
+  const ownerSlug = sanitizeWorkspaceSlug(userId) || "user";
+  let candidate = `ws-${ownerSlug}-collaboration`;
+  if (!workspaceById.has(candidate) || getCollaborationWorkspaceRecordForUser(userId)?.id === candidate) {
+    return candidate;
+  }
+  let counter = 2;
+  while (workspaceById.has(`${candidate}-${counter}`)) {
+    counter += 1;
+  }
+  return `${candidate}-${counter}`;
+}
+
+function ensureCollaborationWorkspaceForUser(userId) {
+  if (!userId || isAdminUserId(userId) || !userById.has(userId)) return null;
+  const existingWorkspace = getCollaborationWorkspaceRecordForUser(userId);
+  if (existingWorkspace) return existingWorkspace;
+  const workspaceRecord = {
+    id: buildCollaborationWorkspaceIdForUser(userId),
+    name: "Collaboration map",
+    kind: "collab",
+    ownerId: userId,
+    nodeIds: [],
+    edgeIds: [],
+    homeNodeId: null,
+    meta: {}
+  };
+  workspaces.push(workspaceRecord);
+  workspaceById.set(workspaceRecord.id, workspaceRecord);
+  return workspaceRecord;
+}
+
+function getSourceWorkspaceIdForHandover(node) {
+  if (!node || node.type !== "handover") return null;
+  if (typeof node.sourceWorkspaceId === "string" && node.sourceWorkspaceId && workspaceById.has(node.sourceWorkspaceId)) {
+    return node.sourceWorkspaceId;
+  }
+  const memberships = getWorkspaceRecordsForNode(node.id);
+  const nonCollabWorkspace = memberships.find((workspace) => normalizeWorkspaceKind(workspace.kind) !== "collab") || null;
+  if (nonCollabWorkspace) return nonCollabWorkspace.id;
+  return memberships[0]?.id || null;
+}
+
+function getWorkspaceRecordsForNode(nodeId) {
+  if (!nodeId) return [];
+  return workspaces.filter((workspace) => Array.isArray(workspace.nodeIds) && workspace.nodeIds.includes(nodeId));
+}
+
+function getCanonicalSourceWorkspaceForNode(node) {
+  if (!node || !node.id) return null;
+  if (node.type === "handover") {
+    const sourceWorkspaceId = getSourceWorkspaceIdForHandover(node);
+    return sourceWorkspaceId ? workspaceById.get(sourceWorkspaceId) || null : null;
+  }
+  const memberships = getWorkspaceRecordsForNode(node.id);
+  if (!memberships.length) return null;
+  const ownedNonCollabWorkspace = memberships.find((workspace) =>
+    normalizeWorkspaceKind(workspace.kind) !== "collab" &&
+    workspace.ownerId &&
+    node.ownerId &&
+    workspace.ownerId === node.ownerId
+  ) || null;
+  if (ownedNonCollabWorkspace) return ownedNonCollabWorkspace;
+  const nonCollabWorkspace = memberships.find((workspace) => normalizeWorkspaceKind(workspace.kind) !== "collab") || null;
+  return nonCollabWorkspace || memberships[0] || null;
+}
+
+function getUniqueNonCollabWorkspaceForNode(nodeId) {
+  if (!nodeId) return null;
+  const candidateWorkspaces = getWorkspaceRecordsForNode(nodeId)
+    .filter((workspace) => normalizeWorkspaceKind(workspace.kind) !== "collab");
+  return candidateWorkspaces.length === 1 ? candidateWorkspaces[0] : null;
+}
+
+function isCollabWorkspaceOnlyHandover(node) {
+  if (!node || node.type !== "handover") return false;
+  const memberships = getWorkspaceRecordsForNode(node.id);
+  if (!memberships.length) return false;
+  const hasCollabMembership = memberships.some((workspace) => normalizeWorkspaceKind(workspace.kind) === "collab");
+  const hasNonCollabMembership = memberships.some((workspace) => normalizeWorkspaceKind(workspace.kind) !== "collab");
+  return hasCollabMembership && !hasNonCollabMembership;
+}
+
+function buildWorkspaceScopedEdgeId(sourceId, targetId, workspaceId, takenIds = null) {
+  const existingIds = takenIds instanceof Set ? takenIds : new Set(allEdgesRuntime.map((edge) => edge.id));
+  const workspaceSlug = sanitizeWorkspaceSlug(workspaceId) || "workspace";
+  const sourceSlug = sanitizeWorkspaceSlug(sourceId) || "source";
+  const targetSlug = sanitizeWorkspaceSlug(targetId) || "target";
+  const base = `edge-${workspaceSlug}-${sourceSlug}-${targetSlug}`;
+  let candidate = base;
+  let counter = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${base}-${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+function inferSourceWorkspaceIdForHandover(node) {
+  if (!node || node.type !== "handover") return null;
+  const memberships = getWorkspaceRecordsForNode(node.id);
+  const nonCollabWorkspace = memberships.find((workspace) => normalizeWorkspaceKind(workspace.kind) !== "collab") || null;
+  if (nonCollabWorkspace) return nonCollabWorkspace.id;
+  return memberships[0]?.id || null;
+}
+
+function migrateHandoverProjectionModel() {
+  let changed = false;
+
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "handover") return;
+    const nextSourceWorkspaceId = inferSourceWorkspaceIdForHandover(node);
+    if (node.sourceWorkspaceId !== nextSourceWorkspaceId) {
+      node.sourceWorkspaceId = nextSourceWorkspaceId;
+      changed = true;
+    }
+  });
+
+  const nonProjectionNodeIds = new Set(
+    allNodesRuntime
+      .filter((node) => !isAutoManagedProjectionNode(node))
+      .map((node) => node.id)
+  );
+  if (nonProjectionNodeIds.size !== allNodesRuntime.length) {
+    allNodesRuntime = allNodesRuntime.filter((node) => nonProjectionNodeIds.has(node.id));
+    changed = true;
+  }
+
+  const originalEdges = allEdgesRuntime
+    .filter((edge) => edge && edge.id && !isAutoManagedProjectionEdge(edge))
+    .map((edge) => ({ ...edge }));
+  if (originalEdges.length !== allEdgesRuntime.length) {
+    changed = true;
+  }
+
+  const originalEdgeById = new Map(originalEdges.map((edge) => [edge.id, edge]));
+  const nextEdges = [];
+  const takenEdgeIds = new Set();
+  workspaces.forEach((workspaceRecord) => {
+    if (!Array.isArray(workspaceRecord.nodeIds)) {
+      workspaceRecord.nodeIds = [];
+    }
+    const nextNodeIds = workspaceRecord.nodeIds.filter((nodeId) => nonProjectionNodeIds.has(nodeId));
+    if (nextNodeIds.length !== workspaceRecord.nodeIds.length) {
+      workspaceRecord.nodeIds = nextNodeIds;
+      changed = true;
+    }
+    const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+    if (Object.prototype.hasOwnProperty.call(workspaceMeta, HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY)) {
+      delete workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY];
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(workspaceMeta, HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY)) {
+      delete workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY];
+      changed = true;
+    }
+    if (Array.isArray(workspaceRecord.edgeIds)) {
+      const nextEdgeIds = [];
+      workspaceRecord.edgeIds.forEach((edgeId) => {
+        const originalEdge = originalEdgeById.get(edgeId);
+        if (!originalEdge) return;
+        const nextEdgeId = buildWorkspaceScopedEdgeId(
+          originalEdge.sourceId,
+          originalEdge.targetId,
+          workspaceRecord.id,
+          takenEdgeIds
+        );
+        takenEdgeIds.add(nextEdgeId);
+        nextEdges.push({
+          ...originalEdge,
+          id: nextEdgeId,
+          workspaceId: workspaceRecord.id
+        });
+        nextEdgeIds.push(nextEdgeId);
+      });
+      if (
+        nextEdgeIds.length !== workspaceRecord.edgeIds.length ||
+        nextEdgeIds.some((edgeId, index) => workspaceRecord.edgeIds[index] !== edgeId)
+      ) {
+        workspaceRecord.edgeIds = nextEdgeIds;
+        changed = true;
+      }
+    } else {
+      workspaceRecord.edgeIds = [];
+    }
+  });
+  allEdgesRuntime = nextEdges;
+  return changed;
+}
+
+function markWorkspaceDirtyIfActive(workspaceRecord) {
+  if (!workspaceRecord || workspaceRecord.id !== currentWorkspaceId) return;
+  appliedWorkspaceId = null;
+  hasAppliedWorkspace = false;
+}
+
+function isValidHandoverObjectNode(node) {
+  return !!node && isSelectableNode(node) && node.type !== "portal" && node.type !== "entity" && node.type !== "collaboration";
+}
+
+function canCreateEdgeInCurrentWorkspace(sourceNode, targetNode) {
+  if (!sourceNode || !targetNode || sourceNode.id === targetNode.id) return false;
+  if (currentWorkspaceKind !== "collab") return true;
+  if (sourceNode.type === "collaboration") {
+    return targetNode.type === "entity";
+  }
+  if (sourceNode.type === "entity") {
+    return targetNode.type === "entity" || targetNode.type === "handover";
+  }
+  if (sourceNode.type === "handover") {
+    return true;
+  }
+  if (targetNode.type === "handover" && isValidHandoverObjectNode(sourceNode)) {
+    return true;
+  }
+  return false;
+}
+
+function getCurrentCollaborationAnchorNode() {
+  if (currentWorkspaceKind !== "collab" || !currentWorkspaceId) return null;
+  const anchorId = buildCollaborationAnchorId(currentWorkspaceId);
+  return getNodeById(anchorId) || getGlobalNodeById(anchorId) || null;
+}
+
+function getEntityNodeByRefInWorkspace(workspaceRecord, entityKind, refId) {
+  if (!workspaceRecord || !entityKind || !refId) return null;
+  const scopedNodeIds = Array.isArray(workspaceRecord.nodeIds) ? workspaceRecord.nodeIds : [];
+  return scopedNodeIds
+    .map((nodeId) => getGlobalNodeById(nodeId))
+    .find((node) => node && node.type === "entity" && node.entityKind === entityKind && node.entityRefId === refId) || null;
+}
+
+function createWorkspaceEntityNode(workspaceRecord, handoverNode, entityKind, refId) {
+  if (!workspaceRecord || !handoverNode || !entityKind || !refId) return null;
+  const existingNode = getEntityNodeByRefInWorkspace(workspaceRecord, entityKind, refId);
+  if (existingNode) return existingNode;
+  const ownerRecord = handoverNode.ownerId ? userById.get(handoverNode.ownerId) : null;
+  const anchorPos = getDefaultCollaborationGraphPos(workspaceRecord);
+  const nodeId = generateNodeId("entity");
+  const nextNode = {
+    id: nodeId,
+    type: "entity",
+    title: "",
+    label: "",
+    ownerId: handoverNode.ownerId || workspaceRecord.ownerId || null,
+    owner: ownerRecord?.name || handoverNode.owner || workspaceRecord.ownerId || "Unknown",
+    summary: entityKind === "org" ? "Collaboration organisation" : "Collaboration collaborator",
+    tasks: [],
+    comments: [],
+    locationId: null,
+    entityKind,
+    entityRefId: refId,
+    graphPos: {
+      x: anchorPos.x + (entityKind === "org" ? 210 : 430),
+      y: anchorPos.y
+    }
+  };
+  allNodesRuntime.push(nextNode);
+  ensureWorkspaceNodeMembership(workspaceRecord, nextNode.id);
+  syncNodeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  markWorkspaceDirtyIfActive(workspaceRecord);
+  return nextNode;
+}
+
+function getGlobalEdgeById(edgeId) {
+  return edgeId ? allEdgesRuntime.find((edge) => edge.id === edgeId) || null : null;
+}
+
+function getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId) {
+  if (!workspaceRecord || !edgeId) return null;
+  if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) return null;
+  const edge = getGlobalEdgeById(edgeId);
+  if (!edge) return null;
+  if (typeof edge.workspaceId === "string" && edge.workspaceId && edge.workspaceId !== workspaceRecord.id) {
+    return null;
+  }
+  return edge;
+}
+
+function ensureWorkspaceEdgeLink(workspaceRecord, sourceId, targetId) {
+  if (!workspaceRecord || !sourceId || !targetId) return false;
+  if (workspaceHasEdgeBetweenNodes(workspaceRecord, sourceId, targetId)) return false;
+  if (!Array.isArray(workspaceRecord.edgeIds)) {
+    workspaceRecord.edgeIds = [];
+  }
+  const sourceNode = getGlobalNodeById(sourceId);
+  const targetNode = getGlobalNodeById(targetId);
+  if (!sourceNode || !targetNode) return false;
+  const nextEdge = {
+    id: generateGlobalEdgeId(sourceId, targetId, workspaceRecord.id),
+    sourceId,
+    targetId,
+    kind: inferEdgeKindForPair(sourceNode, targetNode),
+    workspaceId: workspaceRecord.id
+  };
+  allEdgesRuntime.push(nextEdge);
+  workspaceRecord.edgeIds.push(nextEdge.id);
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  markWorkspaceDirtyIfActive(workspaceRecord);
+  return true;
+}
+
+function removeWorkspaceEdgeLink(workspaceRecord, sourceId, targetId) {
+  if (!workspaceRecord || !sourceId || !targetId || !Array.isArray(workspaceRecord.edgeIds)) return false;
+  const removedEdgeIds = workspaceRecord.edgeIds.filter((edgeId) => {
+    const edge = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+    return !!edge && edge.sourceId === sourceId && edge.targetId === targetId;
+  });
+  if (!removedEdgeIds.length) return false;
+  const removedEdgeIdSet = new Set(removedEdgeIds);
+  workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((edgeId) => !removedEdgeIdSet.has(edgeId));
+  removedEdgeIds.forEach((edgeId) => {
+    if (countWorkspaceReferencesForEdge(edgeId) === 0) {
+      allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
+    }
+  });
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  markWorkspaceDirtyIfActive(workspaceRecord);
+  return true;
+}
+
+function syncProjectWorkspaceGraphForHandover(workspaceRecord, handoverNode) {
+  if (!workspaceRecord || !handoverNode || handoverNode.type !== "handover") {
+    return { changedNodeData: false, changedWorkspaceData: false };
+  }
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab") {
+    return { changedNodeData: false, changedWorkspaceData: false };
+  }
+  let changedNodeData = false;
+  let changedWorkspaceData = false;
+
+  const hadHandoverMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(handoverNode.id);
+  ensureWorkspaceNodeMembership(workspaceRecord, handoverNode.id);
+  if (!hadHandoverMembership) {
+    changedWorkspaceData = true;
+  }
+
+  const contextObject = getCurrentHandoverContextObject(handoverNode);
+  const contextNode = contextObject ? getAnyNodeById(contextObject.id) : null;
+  const anchorId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId ? workspaceRecord.homeNodeId : null;
+  const effectiveAnchorId = anchorId && anchorId !== handoverNode.id ? anchorId : null;
+
+  if (typeof handoverNode.sourceWorkspaceId === "string" && handoverNode.sourceWorkspaceId !== workspaceRecord.id) {
+    handoverNode.sourceWorkspaceId = workspaceRecord.id;
+    changedNodeData = true;
+  }
+
+  getHandoverObjects(handoverNode).forEach((handoverObject) => {
+    const objectNode = getAnyNodeById(handoverObject.id);
+    if (!objectNode) return;
+    const hadMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(objectNode.id);
+    ensureWorkspaceNodeMembership(workspaceRecord, objectNode.id);
+    if (!hadMembership) {
+      changedWorkspaceData = true;
+    }
+  });
+
+  if (contextNode) {
+    if (effectiveAnchorId && effectiveAnchorId !== contextNode.id) {
+      if (ensureWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, contextNode.id)) {
+        changedWorkspaceData = true;
+      }
+      if (removeWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, handoverNode.id)) {
+        changedWorkspaceData = true;
+      }
+    }
+    if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) {
+      changedWorkspaceData = true;
+    }
+  } else if (effectiveAnchorId && ensureWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, handoverNode.id)) {
+    changedWorkspaceData = true;
+  }
+
+  getHandoverObjects(handoverNode)
+    .filter((handoverObject) => handoverObject.role !== "context")
+    .forEach((handoverObject) => {
+      const objectNode = getAnyNodeById(handoverObject.id);
+      if (!objectNode) return;
+      const direction = getDefaultHandoverObjectEdgeDirection(handoverObject.role);
+      const sourceId = direction === "object_to_handover" ? objectNode.id : handoverNode.id;
+      const targetId = direction === "object_to_handover" ? handoverNode.id : objectNode.id;
+      if (ensureWorkspaceEdgeLink(workspaceRecord, sourceId, targetId)) {
+        changedWorkspaceData = true;
+      }
+    });
+
+  return { changedNodeData, changedWorkspaceData };
+}
+
+function removeCollabWorkspaceGraphForCollaborator(handoverNode, collaborator) {
+  if (!handoverNode || handoverNode.type !== "handover" || !collaborator || !isCollabWorkspaceOnlyHandover(handoverNode)) {
+    return false;
+  }
+  const workspaceRecord = workspaces.find((workspace) =>
+    normalizeWorkspaceKind(workspace.kind) === "collab" &&
+    Array.isArray(workspace.nodeIds) &&
+    workspace.nodeIds.includes(handoverNode.id)
+  ) || null;
+  if (!workspaceRecord) return false;
+  if (collaborator.kind === "org") {
+    const orgNode = getEntityNodeByRefInWorkspace(workspaceRecord, "org", collaborator.refId);
+    return !!orgNode && removeWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id);
+  }
+  const userNode = getEntityNodeByRefInWorkspace(workspaceRecord, "user", collaborator.refId);
+  return !!userNode && removeWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id);
+}
+
+function syncCollabWorkspaceGraphForCollaborator(handoverNode, collaborator) {
+  if (!handoverNode || handoverNode.type !== "handover" || !collaborator) return false;
+  const workspaceRecord = workspaces.find((workspace) =>
+    normalizeWorkspaceKind(workspace.kind) === "collab" &&
+    Array.isArray(workspace.nodeIds) &&
+    workspace.nodeIds.includes(handoverNode.id)
+  ) || null;
+  if (!workspaceRecord) return false;
+  const anchorNode = getCurrentCollaborationAnchorNode() || getGlobalNodeById(buildCollaborationAnchorId(workspaceRecord.id));
+  if (!anchorNode) return false;
+  const contextNode = getCurrentHandoverContextNode(handoverNode);
+  let changed = false;
+  if (collaborator.kind === "org") {
+    const orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", collaborator.refId);
+    if (orgNode) {
+      if (ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) changed = true;
+      if (contextNode && contextNode.id !== orgNode.id) {
+        const hadContextMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(contextNode.id);
+        ensureWorkspaceNodeMembership(workspaceRecord, contextNode.id);
+        if (!hadContextMembership) changed = true;
+        if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, contextNode.id)) changed = true;
+        if (removeWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id)) changed = true;
+        if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) changed = true;
+      } else if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id)) changed = true;
+    }
+    return changed;
+  }
+  const userRecord = userById.get(collaborator.refId);
+  if (!userRecord) return false;
+  let orgNode = null;
+  if (userRecord.orgId) {
+    orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", userRecord.orgId);
+    if (orgNode && ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) changed = true;
+  }
+  const userNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "user", collaborator.refId);
+  if (!userNode) return changed;
+  if (orgNode) {
+    if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, userNode.id)) changed = true;
+  } else if (ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, userNode.id)) {
+    changed = true;
+  }
+  if (contextNode && contextNode.id !== userNode.id) {
+    const hadContextMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(contextNode.id);
+    ensureWorkspaceNodeMembership(workspaceRecord, contextNode.id);
+    if (!hadContextMembership) changed = true;
+    if (ensureWorkspaceEdgeLink(workspaceRecord, userNode.id, contextNode.id)) changed = true;
+    if (removeWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id)) changed = true;
+    if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) changed = true;
+  } else if (ensureWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id)) changed = true;
+  return changed;
+}
+
+function syncCollabWorkspaceGraphForAllCollaborators(handoverNode) {
+  if (!isCollabWorkspaceOnlyHandover(handoverNode)) return false;
+  let changed = false;
+  const collaborators = Array.isArray(handoverNode.handoverCollaborators) ? handoverNode.handoverCollaborators : [];
+  collaborators.forEach((rawCollaborator) => {
+    const collaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
+    if (!collaborator) return;
+    if (syncCollabWorkspaceGraphForCollaborator(handoverNode, collaborator)) {
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function syncHandoverCollaboratorFromLinkedEntity(sourceNodeId, targetNodeId) {
+  if (currentWorkspaceKind !== "collab") return false;
+  const sourceNode = getNodeById(sourceNodeId);
+  const targetNode = getNodeById(targetNodeId);
+  let handoverNode = null;
+  let entityNode = null;
+  if (sourceNode?.type === "handover" && targetNode?.type === "entity") {
+    handoverNode = sourceNode;
+    entityNode = targetNode;
+  } else if (sourceNode?.type === "entity" && targetNode?.type === "handover") {
+    handoverNode = targetNode;
+    entityNode = sourceNode;
+  } else {
+    return false;
+  }
+  if (!isCollabWorkspaceOnlyHandover(handoverNode)) return false;
+  const entityKind = normalizeEntityKind(entityNode.entityKind);
+  const refId = typeof entityNode.entityRefId === "string" ? entityNode.entityRefId : "";
+  if (!entityKind || !refId) return false;
+  const added = addHandoverCollaborator(handoverNode.id, entityKind, refId);
+  if (added) {
+    syncCollabWorkspaceGraphForAllCollaborators(handoverNode);
+  }
+  return added;
+}
+
+function syncHandoverObjectFromLinkedNode(sourceNodeId, targetNodeId) {
+  const sourceNode = getNodeById(sourceNodeId);
+  const targetNode = getNodeById(targetNodeId);
+  let handoverNode = null;
+  let objectNode = null;
+  if (sourceNode?.type === "handover") {
+    handoverNode = sourceNode;
+    objectNode = targetNode;
+  } else if (targetNode?.type === "handover") {
+    handoverNode = targetNode;
+    objectNode = sourceNode;
+  } else {
+    return false;
+  }
+  if (!handoverNode || !objectNode) return false;
+  let changed = false;
+  let nextRole = "reference";
+  const linkedProjectWorkspace = currentWorkspaceKind === "collab"
+    ? getUniqueNonCollabWorkspaceForNode(objectNode.id)
+    : null;
+  if (
+    currentWorkspaceKind === "collab" &&
+    linkedProjectWorkspace &&
+    isValidHandoverObjectNodeForRole(objectNode, "context")
+  ) {
+    nextRole = "context";
+  }
+  const existingObject = getHandoverObjects(handoverNode).find((handoverObject) => handoverObject.id === objectNode.id) || null;
+  if (existingObject) {
+    if (existingObject.role !== nextRole && nextRole === "context") {
+      handoverNode.handoverObjects = getHandoverObjects(handoverNode).map((handoverObject) => {
+        if (handoverObject.id === objectNode.id) {
+          return {
+            ...handoverObject,
+            role: "context"
+          };
+        }
+        if (handoverObject.role === "context") {
+          return {
+            ...handoverObject,
+            role: "reference"
+          };
+        }
+        return handoverObject;
+      });
+      changed = true;
+    }
+  } else if (addHandoverObjectIdEntry(handoverNode, objectNode.id, nextRole)) {
+    changed = true;
+  }
+  if (nextRole === "context" && linkedProjectWorkspace) {
+    if (handoverNode.sourceWorkspaceId !== linkedProjectWorkspace.id) {
+      handoverNode.sourceWorkspaceId = linkedProjectWorkspace.id;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function getGlobalNodeById(nodeId) {
+  return allNodesRuntime.find((node) => node.id === nodeId) || null;
+}
+
+function getGlobalDirectlyLinkedNodeIds(nodeId) {
+  if (!nodeId) return [];
+  const seenIds = new Set();
+  const linkedIds = [];
+  allEdgesRuntime.forEach((edge) => {
+    if (!edge) return;
+    if (edge.sourceId === nodeId && edge.targetId && !seenIds.has(edge.targetId)) {
+      seenIds.add(edge.targetId);
+      linkedIds.push(edge.targetId);
+      return;
+    }
+    if (edge.targetId === nodeId && edge.sourceId && !seenIds.has(edge.sourceId)) {
+      seenIds.add(edge.sourceId);
+      linkedIds.push(edge.sourceId);
+    }
+  });
+  return linkedIds;
+}
+
+function getGlobalHandoverObjectNodes(node) {
+  if (!node || node.type !== "handover") return [];
+  return getHandoverObjects(node)
+    .map((handoverObject) => getGlobalNodeById(handoverObject.id))
+    .filter((candidateNode) => !!candidateNode && isSelectableNode(candidateNode) && candidateNode.type !== "portal" && candidateNode.type !== "entity")
+    .sort(compareNodesByDisplayLabel);
+}
+
+function getExpandedHandoverCollaboratorAccess(node) {
+  if (!node || node.type !== "handover") return new Map();
+  const accessByUserId = new Map();
+  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  rawCollaborators.forEach((rawCollaborator) => {
+    const collaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
+    if (!collaborator) return;
+    if (collaborator.kind === "user") {
+      if (!userById.has(collaborator.refId) || collaborator.refId === node.ownerId || isAdminUserId(collaborator.refId)) return;
+      const currentAccess = accessByUserId.get(collaborator.refId) || { shareWorkspace: false };
+      accessByUserId.set(collaborator.refId, {
+        shareWorkspace: currentAccess.shareWorkspace || !!collaborator.shareWorkspace
+      });
+      return;
+    }
+    if (collaborator.kind === "org") {
+      users
+        .filter((userRecord) => userRecord.orgId === collaborator.refId && userRecord.id !== node.ownerId && !isAdminUserId(userRecord.id))
+        .forEach((userRecord) => {
+          const currentAccess = accessByUserId.get(userRecord.id) || { shareWorkspace: false };
+          accessByUserId.set(userRecord.id, {
+            shareWorkspace: currentAccess.shareWorkspace || !!collaborator.shareWorkspace
+          });
+        });
+    }
+  });
+  return accessByUserId;
+}
+
+function createProjectionEntityNode(workspaceRecord, sourceNode, entityKind, entityRefId, artifactRole = entityKind) {
+  const entityNodeId = buildProjectionNodeId(workspaceRecord.id, artifactRole, entityRefId);
+  const ownerRecord = sourceNode?.ownerId ? userById.get(sourceNode.ownerId) : null;
+  const anchorNode = getAnyNodeById(buildCollaborationAnchorId(workspaceRecord.id));
+  const anchorPos = anchorNode?.graphPos && Number.isFinite(anchorNode.graphPos.x) && Number.isFinite(anchorNode.graphPos.y)
+    ? anchorNode.graphPos
+    : getDefaultCollaborationGraphPos(workspaceRecord);
+  const isOrg = entityKind === "org";
+  return {
+    id: entityNodeId,
+    type: "entity",
+    title: "",
+    label: "",
+    ownerId: sourceNode?.ownerId || workspaceRecord.ownerId || null,
+    owner: ownerRecord?.name || sourceNode?.owner || workspaceRecord.ownerId || "Unknown",
+    summary: isOrg ? "Projected collaborator organisation" : "Projected collaborator user",
+    tasks: [],
+    comments: [],
+    locationId: null,
+    entityKind,
+    entityRefId,
+    graphPos: {
+      x: anchorPos.x + (isOrg ? 210 : 430),
+      y: anchorPos.y
+    },
+    meta: {
+      [HANDOVER_PROJECTION_META_KEY]: {
+        autoManaged: true,
+        workspaceOwnerId: workspaceRecord.ownerId || null,
+        artifactRole
+      }
+    }
+  };
+}
+
+function createProjectionPortalNode(workspaceRecord, sourceNode, sourceWorkspaceId) {
+  if (!sourceWorkspaceId) return null;
+  const portalNodeId = buildProjectionNodeId(workspaceRecord.id, "portal", sourceWorkspaceId);
+  const ownerRecord = sourceNode?.ownerId ? userById.get(sourceNode.ownerId) : null;
+  const anchorNode = getAnyNodeById(buildCollaborationAnchorId(workspaceRecord.id));
+  const anchorPos = anchorNode?.graphPos && Number.isFinite(anchorNode.graphPos.x) && Number.isFinite(anchorNode.graphPos.y)
+    ? anchorNode.graphPos
+    : getDefaultCollaborationGraphPos(workspaceRecord);
+  return {
+    id: portalNodeId,
+    type: "portal",
+    title: "",
+    label: "",
+    ownerId: sourceNode?.ownerId || workspaceRecord.ownerId || null,
+    owner: ownerRecord?.name || sourceNode?.owner || workspaceRecord.ownerId || "Unknown",
+    summary: "Projected shared workspace portal",
+    tasks: [],
+    comments: [],
+    locationId: null,
+    linkedWorkspaceId: sourceWorkspaceId,
+    graphPos: {
+      x: anchorPos.x + 860,
+      y: anchorPos.y + 30
+    },
+    meta: {
+      [HANDOVER_PROJECTION_META_KEY]: {
+        autoManaged: true,
+        workspaceOwnerId: workspaceRecord.ownerId || null,
+        artifactRole: "shared-portal"
+      }
+    }
+  };
+}
+
+function ensureWorkspaceNodeMembership(workspaceRecord, nodeId) {
+  if (!workspaceRecord || !nodeId) return;
+  if (!Array.isArray(workspaceRecord.nodeIds)) {
+    workspaceRecord.nodeIds = [];
+  }
+  if (!workspaceRecord.nodeIds.includes(nodeId)) {
+    workspaceRecord.nodeIds.push(nodeId);
+  }
+}
+
+function ensureWorkspaceEdgeMembership(workspaceRecord, edgeId) {
+  if (!workspaceRecord || !edgeId) return;
+  if (!Array.isArray(workspaceRecord.edgeIds)) {
+    workspaceRecord.edgeIds = [];
+  }
+  if (!workspaceRecord.edgeIds.includes(edgeId)) {
+    workspaceRecord.edgeIds.push(edgeId);
+  }
+}
+
+function ensureProjectionEdge(workspaceRecord, handoverNode, sourceId, targetId) {
+  if (!workspaceRecord || !handoverNode || !sourceId || !targetId || sourceId === targetId) return null;
+  const sourceNode = getAnyNodeById(sourceId) || getNodeById(sourceId);
+  const targetNode = getAnyNodeById(targetId) || getNodeById(targetId);
+  if (!sourceNode || !targetNode) return null;
+  return {
+    id: buildProjectionEdgeId(workspaceRecord.id, handoverNode.id, sourceId, targetId),
+    sourceId,
+    targetId,
+    kind: inferEdgeKindForPair(sourceNode, targetNode),
+    meta: {
+      [HANDOVER_PROJECTION_META_KEY]: {
+        autoManaged: true,
+        runtimeOnly: true,
+        workspaceOwnerId: workspaceRecord.ownerId || null,
+        sourceHandoverId: handoverNode.id,
+        artifactRole: "projection-edge"
+      }
+    }
+  };
+}
+
+function getCollaboratorRemovalEntryForUser(handoverNode, userId) {
+  if (!handoverNode || handoverNode.type !== "handover" || !userId) return null;
+  const directUserEntry = (Array.isArray(handoverNode.handoverCollaborators) ? handoverNode.handoverCollaborators : [])
+    .map((entry) => normalizeHandoverCollaboratorEntry(entry))
+    .find((entry) => entry?.kind === "user" && entry.refId === userId) || null;
+  if (directUserEntry) return directUserEntry;
+  const orgId = userById.get(userId || "")?.orgId || null;
+  if (!orgId) return null;
+  return (Array.isArray(handoverNode.handoverCollaborators) ? handoverNode.handoverCollaborators : [])
+    .map((entry) => normalizeHandoverCollaboratorEntry(entry))
+    .find((entry) => entry?.kind === "org" && entry.refId === orgId) || null;
+}
+
+function workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, nodeAId, nodeBId, options = {}) {
+  if (!workspaceRecord || !nodeAId || !nodeBId || nodeAId === nodeBId) return false;
+  const excludedEdgeId = options.excludeEdgeId || null;
+  const scopedEdgeIds = new Set(Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : []);
+  return allEdgesRuntime.some((edge) =>
+    edge &&
+    scopedEdgeIds.has(edge.id) &&
+    (!edge.workspaceId || edge.workspaceId === workspaceRecord.id) &&
+    edge.id !== excludedEdgeId &&
+    (
+      (edge.sourceId === nodeAId && edge.targetId === nodeBId) ||
+      (edge.sourceId === nodeBId && edge.targetId === nodeAId)
+    )
+  );
+}
+
+function getCollaborationProjectionSpecs(workspaceRecord) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") return [];
+  const viewerUserId = workspaceRecord.ownerId || null;
+  if (!viewerUserId || isAdminUserId(viewerUserId)) return [];
+  const projectionSpecs = [];
+  allNodesRuntime
+    .filter((node) => node && node.type === "handover")
+    .forEach((handoverNode) => {
+      const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
+      const sourceWorkspace = sourceWorkspaceId ? workspaceById.get(sourceWorkspaceId) || null : null;
+      if (!sourceWorkspace) return;
+      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
+      if (!collaboratorAccess.size) return;
+      if (normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") {
+        if (viewerUserId === handoverNode.ownerId) return;
+        if (normalizeHandoverStatus(handoverNode.status) === "Draft") return;
+        const accessRecord = collaboratorAccess.get(viewerUserId);
+        if (!accessRecord) return;
+        const removalEntry = getCollaboratorRemovalEntryForUser(handoverNode, viewerUserId);
+        projectionSpecs.push({
+          handoverNode,
+          leadUserId: handoverNode.ownerId,
+          includePortal: false,
+          removeCollaborator: removalEntry
+        });
+        return;
+      }
+      if (viewerUserId === handoverNode.ownerId) {
+        collaboratorAccess.forEach((_, collaboratorUserId) => {
+          const removalEntry = getCollaboratorRemovalEntryForUser(handoverNode, collaboratorUserId);
+          projectionSpecs.push({
+            handoverNode,
+            leadUserId: collaboratorUserId,
+            includePortal: true,
+            removeCollaborator: removalEntry
+          });
+        });
+        return;
+      }
+      if (normalizeHandoverStatus(handoverNode.status) === "Draft") return;
+      const accessRecord = collaboratorAccess.get(viewerUserId);
+      if (!accessRecord) return;
+      const removalEntry = getCollaboratorRemovalEntryForUser(handoverNode, viewerUserId);
+      projectionSpecs.push({
+        handoverNode,
+        leadUserId: handoverNode.ownerId,
+        includePortal: !!accessRecord.shareWorkspace,
+        removeCollaborator: removalEntry
+      });
+    });
+  return projectionSpecs;
+}
+
+function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
+  const overlayEdges = [];
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") {
+    return { overlayEdges };
+  }
+  const anchorId = buildCollaborationAnchorId(workspaceRecord.id);
+  const anchorNode = getAnyNodeById(anchorId);
+  if (!anchorNode) return { overlayEdges };
+  const addedNodeIds = new Set();
+  const addedEdgeIds = new Set();
+
+  const registerNode = (nodeRecord, metaPatch) => {
+    if (!nodeRecord) return;
+    if (!visibleNodeMap.has(nodeRecord.id)) {
+      visibleNodeMap.set(nodeRecord.id, nodeRecord);
+    }
+    mergeProjectionNodeMeta(nodeRecord.id, metaPatch);
+    addedNodeIds.add(nodeRecord.id);
+  };
+
+  const registerEdge = (edgeRecord, metaPatch) => {
+    if (!edgeRecord || addedEdgeIds.has(edgeRecord.id)) return;
+    overlayEdges.push(edgeRecord);
+    setProjectionEdgeMeta(edgeRecord.id, metaPatch);
+    addedEdgeIds.add(edgeRecord.id);
+  };
+
+  getCollaborationProjectionSpecs(workspaceRecord).forEach((spec) => {
+    const handoverNode = spec.handoverNode;
+    registerNode(handoverNode, {
+      roles: ["projected-handover"],
+      handoverIds: [handoverNode.id]
+    });
+    const leadUserNode = spec.leadUserId
+      ? createProjectionEntityNode(workspaceRecord, handoverNode, "user", spec.leadUserId, `linked-user-${spec.leadUserId}`)
+      : null;
+    const leadOrgId = userById.get(spec.leadUserId || "")?.orgId || null;
+    const leadOrgNode = leadOrgId
+      ? createProjectionEntityNode(workspaceRecord, handoverNode, "org", leadOrgId, `linked-org-${leadOrgId}`)
+      : null;
+    const portalNode = spec.includePortal
+      ? createProjectionPortalNode(workspaceRecord, handoverNode, getSourceWorkspaceIdForHandover(handoverNode))
+      : null;
+    const contextObject = getCurrentHandoverContextObject(handoverNode);
+    const contextNode = contextObject ? getGlobalNodeById(contextObject.id) : null;
+    let chainTargetId = handoverNode.id;
+
+    if (leadOrgNode) {
+      registerNode(leadOrgNode, {
+        roles: ["projected-helper-entity"],
+        handoverIds: [handoverNode.id],
+        collaboratorKinds: ["org"],
+        collaboratorRefIds: [leadOrgId]
+      });
+      registerEdge(
+        ensureProjectionEdge(workspaceRecord, handoverNode, anchorId, leadOrgNode.id),
+        {
+          artifactRole: "collaboration-chain",
+          sourceHandoverId: handoverNode.id
+        }
+      );
+    }
+
+    if (leadUserNode) {
+      registerNode(leadUserNode, {
+        roles: ["projected-helper-entity"],
+        handoverIds: [handoverNode.id],
+        collaboratorKinds: ["user"],
+        collaboratorRefIds: [spec.leadUserId]
+      });
+      if (leadOrgNode) {
+        registerEdge(
+          ensureProjectionEdge(workspaceRecord, handoverNode, leadOrgNode.id, leadUserNode.id),
+          {
+            artifactRole: "collaboration-chain",
+            sourceHandoverId: handoverNode.id
+          }
+        );
+      } else {
+        registerEdge(
+          ensureProjectionEdge(workspaceRecord, handoverNode, anchorId, leadUserNode.id),
+          {
+            artifactRole: "collaboration-chain",
+            sourceHandoverId: handoverNode.id
+          }
+        );
+      }
+      chainTargetId = leadUserNode.id;
+    }
+
+    if (contextNode) {
+      registerNode(contextNode, {
+        roles: ["handover-object", "handover-context"],
+        handoverIds: [handoverNode.id],
+        objectNodeIds: [contextNode.id]
+      });
+      if (!workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, chainTargetId, contextNode.id)) {
+        registerEdge(
+          ensureProjectionEdge(workspaceRecord, handoverNode, chainTargetId, contextNode.id),
+          {
+            artifactRole: "handover-context-chain",
+            sourceHandoverId: handoverNode.id
+          }
+        );
+      }
+      chainTargetId = contextNode.id;
+    }
+
+    if (!workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, chainTargetId, handoverNode.id)) {
+      registerEdge(
+        {
+          ...ensureProjectionEdge(workspaceRecord, handoverNode, chainTargetId, handoverNode.id),
+          kind: contextNode ? getHandoverObjectEdgeKind("context") : inferEdgeKindForPair(
+            getAnyNodeById(chainTargetId) || getNodeById(chainTargetId),
+            handoverNode
+          )
+        },
+        {
+          artifactRole: contextNode ? "handover-context-link" : "handover-collaborator-link",
+          sourceHandoverId: handoverNode.id,
+          collaboratorKind: spec.removeCollaborator?.kind || null,
+          collaboratorRefId: spec.removeCollaborator?.refId || null,
+          role: contextNode ? "context" : null
+        }
+      );
+    }
+
+    if (portalNode) {
+      registerNode(portalNode, {
+        roles: ["projected-portal"],
+        handoverIds: [handoverNode.id]
+      });
+      registerEdge(
+        ensureProjectionEdge(workspaceRecord, handoverNode, handoverNode.id, portalNode.id),
+        {
+          artifactRole: "handover-portal-link",
+          sourceHandoverId: handoverNode.id
+        }
+      );
+    }
+
+    getHandoverObjects(handoverNode).forEach((handoverObject) => {
+      if (handoverObject.role === "context") return;
+      const objectNode = getGlobalNodeById(handoverObject.id);
+      if (!objectNode) return;
+      registerNode(objectNode, {
+        roles: ["handover-object"],
+        handoverIds: [handoverNode.id],
+        objectNodeIds: [objectNode.id]
+      });
+      if (workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, handoverNode.id, objectNode.id)) {
+        return;
+      }
+      const direction = getProjectedObjectEdgeDirection(workspaceRecord, handoverNode.id, objectNode.id) || getDefaultHandoverObjectEdgeDirection(handoverObject.role);
+      const sourceId = direction === "object_to_handover" ? objectNode.id : handoverNode.id;
+      const targetId = direction === "object_to_handover" ? handoverNode.id : objectNode.id;
+      registerEdge(
+        {
+          ...ensureProjectionEdge(workspaceRecord, handoverNode, sourceId, targetId),
+          kind: getHandoverObjectEdgeKind(handoverObject.role)
+        },
+        {
+          artifactRole: "handover-object-link",
+          sourceHandoverId: handoverNode.id,
+          objectNodeId: objectNode.id,
+          direction,
+          role: handoverObject.role
+        }
+      );
+    });
+  });
+
+  return { overlayEdges };
+}
+
+function refreshAllHandoverDerivedState() {
+  let changed = false;
+
+  workspaces.forEach((workspaceRecord) => {
+    const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+    if (Object.prototype.hasOwnProperty.call(workspaceMeta, HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY)) {
+      delete workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY];
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(workspaceMeta, HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY)) {
+      delete workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY];
+      changed = true;
+    }
+    if (workspaceMeta.handoverView && typeof workspaceMeta.handoverView === "object") {
+      Object.keys(workspaceMeta.handoverView).forEach((handoverId) => {
+        const handoverNode = getAnyNodeById(handoverId);
+        if (handoverNode?.type === "handover") return;
+        delete workspaceMeta.handoverView[handoverId];
+        changed = true;
+      });
+      if (!Object.keys(workspaceMeta.handoverView).length) {
+        delete workspaceMeta.handoverView;
+        changed = true;
+      }
+    }
+  });
+
+  const requiredCollaborationUserIds = new Set();
+  allNodesRuntime
+    .filter((node) => node && node.type === "handover")
+    .forEach((handoverNode) => {
+      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
+      const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
+      const sourceWorkspace = sourceWorkspaceId ? workspaceById.get(sourceWorkspaceId) || null : null;
+      const isProjectSource = !!sourceWorkspace && normalizeWorkspaceKind(sourceWorkspace.kind) !== "collab";
+      if (sourceWorkspace) {
+        const syncResult = syncProjectWorkspaceGraphForHandover(sourceWorkspace, handoverNode);
+        if (syncResult.changedNodeData || syncResult.changedWorkspaceData) {
+          changed = true;
+        }
+      }
+      if (isCollabWorkspaceOnlyHandover(handoverNode) && syncCollabWorkspaceGraphForAllCollaborators(handoverNode)) {
+        changed = true;
+      }
+      if (collaboratorAccess.size && isProjectSource && handoverNode.ownerId && userById.has(handoverNode.ownerId) && !isAdminUserId(handoverNode.ownerId)) {
+        requiredCollaborationUserIds.add(handoverNode.ownerId);
+      }
+      if (normalizeHandoverStatus(handoverNode.status) !== "Draft") {
+        collaboratorAccess.forEach((_, userId) => {
+          if (userById.has(userId) && !isAdminUserId(userId)) {
+            requiredCollaborationUserIds.add(userId);
+          }
+        });
+      }
+    });
+
+  requiredCollaborationUserIds.forEach((userId) => {
+    const existingWorkspace = getCollaborationWorkspaceRecordForUser(userId);
+    if (existingWorkspace) return;
+    if (ensureCollaborationWorkspaceForUser(userId)) {
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    syncNodeRuntimeAndStore();
+    syncEdgeRuntimeAndStore();
+    syncWorkspaceRuntimeAndStore();
+  }
+  return changed;
+}
+
+function getSharedWorkspaceOptionsForUser(userId) {
+  if (!userId || isAdminUserId(userId)) return [];
+  const sharedWorkspaceMap = new Map();
+  allNodesRuntime
+    .filter((node) => node && node.type === "handover" && normalizeHandoverStatus(node.status) !== "Draft")
+    .forEach((handoverNode) => {
+      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
+      const accessRecord = collaboratorAccess.get(userId);
+      if (!accessRecord?.shareWorkspace) return;
+      const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
+      if (!sourceWorkspaceId) return;
+      const sourceWorkspace = workspaceById.get(sourceWorkspaceId);
+      if (!sourceWorkspace || sourceWorkspace.ownerId === userId || normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") return;
+      if (sharedWorkspaceMap.has(sourceWorkspace.id)) return;
+      sharedWorkspaceMap.set(sourceWorkspace.id, {
+        id: sourceWorkspace.id,
+        name: sourceWorkspace.name || sourceWorkspace.id,
+        kind: normalizeWorkspaceKind(sourceWorkspace.kind),
+        ownerId: sourceWorkspace.ownerId || null,
+        access: "shared",
+        sharedByLabel: getUserDisplayNameWithOrg(sourceWorkspace.ownerId) || sourceWorkspace.ownerId || ""
+      });
+    });
+  return [...sharedWorkspaceMap.values()];
 }
 
 function cycleProcessStatus(nodeId) {
@@ -1827,7 +3632,7 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
     label: nodeTitle,
     ownerId: owner?.id || currentUserId || null,
     owner: owner?.name || "Unknown",
-    summary: "",
+    summary: "Click to enter node description",
     tasks: [],
     comments: [],
     locationId: null,
@@ -1846,7 +3651,20 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
   if (normalizedType === "handover") {
     nextNode.status = "Draft";
     nextNode.handoverCollaborators = [];
-    nextNode.handoverNodeIds = [];
+    nextNode.handoverObjects = [];
+    nextNode.sourceWorkspaceId = currentWorkspaceId || null;
+    if (normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") {
+      const defaultContextId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId && workspaceRecord.homeNodeId !== nodeId
+        ? workspaceRecord.homeNodeId
+        : null;
+      const defaultContextNode = defaultContextId ? getAnyNodeById(defaultContextId) : null;
+      if (defaultContextId && isValidHandoverObjectNodeForRole(defaultContextNode, "context")) {
+        nextNode.handoverObjects.push({
+          id: defaultContextId,
+          role: "context"
+        });
+      }
+    }
   }
   if (normalizedType === "portal") {
     nextNode.linkedWorkspaceId = null;
@@ -2150,12 +3968,12 @@ function getWorldPointFromClient(clientX, clientY) {
 
 function isPointNearNodeBorder(node, frame, worldX, worldY, thresholdPx = EDGE_HANDLE_BORDER_HIT_PX) {
   if (!node || !frame) return false;
-  if (isCircularNodeType(node)) {
+  if (isRenderedCircularNode(node)) {
     const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = worldX - cx;
     const dy = worldY - cy;
     const dist = Math.sqrt((dx * dx) + (dy * dy));
-    const circleThresholdPx = node.type === "portal"
+    const circleThresholdPx = (node.type === "portal" || isWorkspaceAnchorNode(node))
       ? (
         Number.isFinite(thresholdPx)
           ? Math.min(thresholdPx, EDGE_HANDLE_BORDER_HIT_PORTAL_PX)
@@ -2446,7 +4264,7 @@ function getDiamondBorderAnchor(frame, towardX, towardY) {
 
 function getNodeVisualCenter(node, frame) {
   if (!node || !frame) return { x: 0, y: 0 };
-  if (isCircularNodeType(node)) {
+  if (isRenderedCircularNode(node)) {
     const { cx, cy } = getCircleMetrics(node, frame);
     return { x: cx, y: cy };
   }
@@ -2458,7 +4276,7 @@ function getNodeVisualCenter(node, frame) {
 
 function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
   if (!node || !frame) return { x: worldX, y: worldY };
-  if (isCircularNodeType(node)) {
+  if (isRenderedCircularNode(node)) {
     const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = worldX - cx;
     const dy = worldY - cy;
@@ -2494,7 +4312,7 @@ function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
 
 function getBorderAnchorToward(node, frame, towardX, towardY) {
   if (!node || !frame) return { x: towardX, y: towardY };
-  if (isCircularNodeType(node)) {
+  if (isRenderedCircularNode(node)) {
     const { cx, cy, radius } = getCircleMetrics(node, frame);
     const dx = towardX - cx;
     const dy = towardY - cy;
@@ -2623,15 +4441,8 @@ function updateEdgeHoverIntent(candidate) {
   }
 }
 
-function generateGlobalEdgeId(sourceId, targetId) {
-  const existingIds = new Set(allEdgesRuntime.map((edge) => edge.id));
-  let candidate = `edge-${sourceId}-${targetId}`;
-  if (!existingIds.has(candidate)) return candidate;
-  let suffix = 2;
-  while (existingIds.has(`${candidate}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${candidate}-${suffix}`;
+function generateGlobalEdgeId(sourceId, targetId, workspaceId = currentWorkspaceId) {
+  return buildWorkspaceScopedEdgeId(sourceId, targetId, workspaceId || "workspace");
 }
 
 function workspaceHasEdgeBetweenNodes(workspaceRecord, nodeAId, nodeBId, options = {}) {
@@ -2643,6 +4454,20 @@ function workspaceHasEdgeBetweenNodes(workspaceRecord, nodeAId, nodeBId, options
   const scopedIds = new Set(workspaceRecord.edgeIds);
   return allEdgesRuntime.some((edge) =>
     scopedIds.has(edge.id) &&
+    (!edge.workspaceId || edge.workspaceId === workspaceRecord.id) &&
+    edge.id !== excludedEdgeId &&
+    (
+      (edge.sourceId === nodeAId && edge.targetId === nodeBId) ||
+      (edge.sourceId === nodeBId && edge.targetId === nodeAId)
+    )
+  );
+}
+
+function visibleEdgeExistsBetweenNodes(nodeAId, nodeBId, options = {}) {
+  if (!nodeAId || !nodeBId || nodeAId === nodeBId) return false;
+  const excludedEdgeId = options.excludeEdgeId || null;
+  return edges.some((edge) =>
+    edge &&
     edge.id !== excludedEdgeId &&
     (
       (edge.sourceId === nodeAId && edge.targetId === nodeBId) ||
@@ -2667,17 +4492,22 @@ function createEdgeInCurrentWorkspace(sourceId, targetId) {
   if (!workspaceRecord) return false;
   if (!sourceId || !targetId || sourceId === targetId) return false;
   if (!nodeById.has(sourceId) || !nodeById.has(targetId)) return false;
-  if (workspaceHasEdgeBetweenNodes(workspaceRecord, sourceId, targetId)) return false;
+  const sourceNode = nodeById.get(sourceId);
+  const targetNode = nodeById.get(targetId);
+  if (!canCreateEdgeInCurrentWorkspace(sourceNode, targetNode)) return false;
+  if (visibleEdgeExistsBetweenNodes(sourceId, targetId)) return false;
+  const persistedSourceNode = getAnyNodeById(sourceId);
+  const persistedTargetNode = getAnyNodeById(targetId);
+  if (!persistedSourceNode || !persistedTargetNode) return false;
   if (!Array.isArray(workspaceRecord.edgeIds)) {
     workspaceRecord.edgeIds = [];
   }
-  const sourceNode = nodeById.get(sourceId);
-  const targetNode = nodeById.get(targetId);
   const nextEdge = {
-    id: generateGlobalEdgeId(sourceId, targetId),
+    id: generateGlobalEdgeId(sourceId, targetId, workspaceRecord.id),
     sourceId,
     targetId,
-    kind: inferEdgeKindForPair(sourceNode, targetNode)
+    kind: inferEdgeKindForPair(sourceNode, targetNode),
+    workspaceId: workspaceRecord.id
   };
   allEdgesRuntime.push(nextEdge);
   workspaceRecord.edgeIds.push(nextEdge.id);
@@ -2685,21 +4515,277 @@ function createEdgeInCurrentWorkspace(sourceId, targetId) {
   rebuildEdgeIndexes();
   syncEdgeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
+  const collaboratorChanged = syncHandoverCollaboratorFromLinkedEntity(sourceId, targetId);
+  const handoverObjectChanged = syncHandoverObjectFromLinkedNode(sourceId, targetId);
+  if (collaboratorChanged || handoverObjectChanged) {
+    refreshAllHandoverDerivedState();
+    syncNodeRuntimeAndStore();
+    syncEdgeRuntimeAndStore();
+    syncWorkspaceRuntimeAndStore();
+  }
   persistStoreToLocalStorage();
   return true;
+}
+
+function syncHandoverStateForDeletedEdge(workspaceRecord, edgeRecord) {
+  if (!workspaceRecord || !edgeRecord) {
+    return { changed: false, allowProtectedDelete: false };
+  }
+  const sourceNode = getAnyNodeById(edgeRecord.sourceId);
+  const targetNode = getAnyNodeById(edgeRecord.targetId);
+  if (!sourceNode || !targetNode) {
+    return { changed: false, allowProtectedDelete: false };
+  }
+
+  let changed = false;
+  let allowProtectedDelete = false;
+
+  const maybeHandoverNode = sourceNode.type === "handover" ? sourceNode : (targetNode.type === "handover" ? targetNode : null);
+  const maybeOtherNode = maybeHandoverNode === sourceNode ? targetNode : (maybeHandoverNode === targetNode ? sourceNode : null);
+
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab" && maybeHandoverNode && maybeOtherNode?.type === "entity") {
+    const entityKind = normalizeEntityKind(maybeOtherNode.entityKind);
+    const refId = typeof maybeOtherNode.entityRefId === "string" ? maybeOtherNode.entityRefId : "";
+    if (entityKind && refId && removeHandoverCollaboratorEntry(maybeHandoverNode, entityKind, refId)) {
+      changed = true;
+      allowProtectedDelete = true;
+    }
+  }
+
+  if (
+    maybeHandoverNode &&
+    maybeOtherNode &&
+    isValidHandoverObjectNode(maybeOtherNode) &&
+    removeHandoverObjectIdEntry(maybeHandoverNode, maybeOtherNode.id)
+  ) {
+    changed = true;
+    allowProtectedDelete = true;
+    if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab" && isAutoManagedProjectionEdge(edgeRecord)) {
+      setProjectionTrackedNodeIds(
+        workspaceRecord,
+        getProjectionTrackedNodeIds(workspaceRecord).filter((nodeId) => nodeId !== maybeOtherNode.id)
+      );
+      setProjectionTrackedEdgeIds(
+        workspaceRecord,
+        getProjectionTrackedEdgeIds(workspaceRecord).filter((candidateEdgeId) => candidateEdgeId !== edgeRecord.id)
+      );
+      ensureWorkspaceNodeMembership(workspaceRecord, maybeOtherNode.id);
+    }
+  }
+
+  return { changed, allowProtectedDelete };
+}
+
+function demoteProjectedHandoverSubgraphInWorkspace(workspaceRecord, handoverNode, deletedEdgeId = null) {
+  if (!workspaceRecord || !handoverNode || handoverNode.type !== "handover") return false;
+  const trackedNodeIds = new Set(getProjectionTrackedNodeIds(workspaceRecord));
+  const trackedEdgeIds = new Set(getProjectionTrackedEdgeIds(workspaceRecord));
+  if (!trackedNodeIds.size && !trackedEdgeIds.size) return false;
+  const scopedEdgeIds = new Set(Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : []);
+  const preservedNodeIds = new Set([handoverNode.id]);
+  const preservedEdgeIds = new Set();
+  let changed = false;
+
+  allEdgesRuntime.forEach((edge) => {
+    if (!edge || !scopedEdgeIds.has(edge.id) || edge.id === deletedEdgeId) return;
+    if (!isAutoManagedProjectionEdge(edge)) return;
+    const projectionMeta = getHandoverProjectionMeta(edge);
+    if (projectionMeta?.sourceHandoverId !== handoverNode.id) return;
+    preservedEdgeIds.add(edge.id);
+    preservedNodeIds.add(edge.sourceId);
+    preservedNodeIds.add(edge.targetId);
+    if (clearProjectionMeta(edge)) {
+      changed = true;
+    }
+  });
+
+  preservedNodeIds.forEach((nodeId) => {
+    const node = getAnyNodeById(nodeId);
+    if (node && clearProjectionMeta(node)) {
+      changed = true;
+    }
+  });
+
+  const nextTrackedNodeIds = [...trackedNodeIds].filter((nodeId) => !preservedNodeIds.has(nodeId));
+  const nextTrackedEdgeIds = [...trackedEdgeIds].filter((edgeId) => !preservedEdgeIds.has(edgeId) && edgeId !== deletedEdgeId);
+  if (nextTrackedNodeIds.length !== trackedNodeIds.size) {
+    setProjectionTrackedNodeIds(workspaceRecord, nextTrackedNodeIds);
+    changed = true;
+  }
+  if (nextTrackedEdgeIds.length !== trackedEdgeIds.size) {
+    setProjectionTrackedEdgeIds(workspaceRecord, nextTrackedEdgeIds);
+    changed = true;
+  }
+
+  preservedNodeIds.forEach((nodeId) => ensureWorkspaceNodeMembership(workspaceRecord, nodeId));
+  preservedEdgeIds.forEach((edgeId) => ensureWorkspaceEdgeMembership(workspaceRecord, edgeId));
+  return changed;
+}
+
+function syncHandoverStateForDeletedNode(workspaceRecord, node) {
+  if (!workspaceRecord || !node) {
+    return { changed: false, allowProtectedDelete: false, removedEdgeIds: new Set() };
+  }
+  const scopedEdgeIds = new Set(Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : []);
+  const connectedEdges = allEdgesRuntime.filter((edge) =>
+    edge &&
+    scopedEdgeIds.has(edge.id) &&
+    (edge.sourceId === node.id || edge.targetId === node.id)
+  );
+  let changed = false;
+  let allowProtectedDelete = false;
+  const removedEdgeIds = new Set();
+
+  connectedEdges.forEach((edgeRecord) => {
+    const syncResult = syncHandoverStateForDeletedEdge(workspaceRecord, edgeRecord);
+    if (syncResult.changed) {
+      changed = true;
+    }
+    if (syncResult.allowProtectedDelete) {
+      allowProtectedDelete = true;
+    }
+    const sourceNode = getAnyNodeById(edgeRecord.sourceId);
+    const targetNode = getAnyNodeById(edgeRecord.targetId);
+    const handoverNode = sourceNode?.type === "handover" ? sourceNode : (targetNode?.type === "handover" ? targetNode : null);
+    if (edgeRecord && isAutoManagedProjectionEdge(edgeRecord) && handoverNode) {
+      demoteProjectedHandoverSubgraphInWorkspace(workspaceRecord, handoverNode, edgeRecord.id);
+      allowProtectedDelete = true;
+    }
+    removedEdgeIds.add(edgeRecord.id);
+  });
+
+  return { changed, allowProtectedDelete, removedEdgeIds };
+}
+
+function getVisibleNodeRecord(nodeId) {
+  return nodeById.get(nodeId) || getAnyNodeById(nodeId) || null;
+}
+
+function getWorkspaceConnectedAuthoredEdges(workspaceRecord, nodeId) {
+  if (!workspaceRecord || !nodeId || !Array.isArray(workspaceRecord.edgeIds)) return [];
+  return workspaceRecord.edgeIds
+    .map((edgeId) => getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId))
+    .filter((edge) => !!edge && (edge.sourceId === nodeId || edge.targetId === nodeId));
+}
+
+function retainProjectedCollaboratorEntitiesInWorkspace(workspaceRecord, handoverNode, entityNode) {
+  if (!workspaceRecord || !handoverNode || handoverNode.type !== "handover" || !entityNode || entityNode.type !== "entity") {
+    return false;
+  }
+  if (normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") return false;
+  const entityKind = normalizeEntityKind(entityNode.entityKind);
+  const refId = typeof entityNode.entityRefId === "string" ? entityNode.entityRefId : "";
+  if (!entityKind || !refId) return false;
+  const anchorNode = getAnyNodeById(buildCollaborationAnchorId(workspaceRecord.id));
+  if (!anchorNode) return false;
+
+  let changed = false;
+  if (entityKind === "org") {
+    const orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", refId);
+    if (orgNode && ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) {
+      changed = true;
+    }
+    return changed;
+  }
+
+  const userRecord = userById.get(refId) || null;
+  let orgNode = null;
+  if (userRecord?.orgId) {
+    orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", userRecord.orgId);
+    if (orgNode && ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) {
+      changed = true;
+    }
+  }
+  const userNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "user", refId);
+  if (!userNode) return changed;
+  if (orgNode) {
+    if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, userNode.id)) {
+      changed = true;
+    }
+  } else if (ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, userNode.id)) {
+    changed = true;
+  }
+  return changed;
+}
+
+function applyHandoverEffectsForEdgeUnlink(workspaceRecord, edgeRecord, options = {}) {
+  if (!workspaceRecord || !edgeRecord) {
+    return { changedNodeData: false, changedWorkspaceData: false };
+  }
+  const projectionMeta = options.projectionMeta || getCurrentProjectionEdgeMeta(edgeRecord.id);
+  const sourceNode = getVisibleNodeRecord(edgeRecord.sourceId);
+  const targetNode = getVisibleNodeRecord(edgeRecord.targetId);
+  const handoverNode = sourceNode?.type === "handover" ? sourceNode : (targetNode?.type === "handover" ? targetNode : null);
+  const otherNode = handoverNode === sourceNode ? targetNode : (handoverNode === targetNode ? sourceNode : null);
+  if (!handoverNode || !otherNode) {
+    return { changedNodeData: false, changedWorkspaceData: false };
+  }
+
+  let changedNodeData = false;
+  let changedWorkspaceData = false;
+
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab" && otherNode.type === "entity") {
+    const entityKind = normalizeEntityKind(otherNode.entityKind);
+    const refId = typeof otherNode.entityRefId === "string" ? otherNode.entityRefId : "";
+    if (entityKind && refId && removeHandoverCollaboratorEntry(handoverNode, entityKind, refId)) {
+      changedNodeData = true;
+    }
+    if (projectionMeta?.artifactRole === "handover-collaborator-link") {
+      if (retainProjectedCollaboratorEntitiesInWorkspace(workspaceRecord, handoverNode, otherNode)) {
+        changedWorkspaceData = true;
+      }
+    }
+  }
+
+  if (isValidHandoverObjectNode(otherNode) && removeHandoverObjectIdEntry(handoverNode, otherNode.id)) {
+    changedNodeData = true;
+  }
+  if (isValidHandoverObjectNode(otherNode)) {
+    if (clearProjectedObjectEdgeDirection(workspaceRecord, handoverNode.id, otherNode.id)) {
+      changedWorkspaceData = true;
+    }
+    if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab" && options.pinObjectNode !== false) {
+      const hadMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(otherNode.id);
+      ensureWorkspaceNodeMembership(workspaceRecord, otherNode.id);
+      if (!hadMembership) {
+        changedWorkspaceData = true;
+      }
+    }
+  }
+
+  return { changedNodeData, changedWorkspaceData };
 }
 
 function deleteEdgeFromCurrentWorkspace(edgeId) {
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
   if (!workspaceRecord || !edgeId) return false;
-  if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) {
+  const edgeRecord = edgeById.get(edgeId) || null;
+  if (!edgeRecord) return false;
+  const projectionMeta = getCurrentProjectionEdgeMeta(edgeId);
+  if (
+    projectionMeta &&
+    projectionMeta.artifactRole !== "handover-object-link" &&
+    projectionMeta.artifactRole !== "handover-collaborator-link"
+  ) {
     return false;
   }
-  workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((id) => id !== edgeId);
-  if (countWorkspaceReferencesForEdge(edgeId) === 0) {
-    allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
+  const authoredEdge = projectionMeta ? null : getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+  if (!projectionMeta && !authoredEdge) return false;
+
+  const unlinkResult = applyHandoverEffectsForEdgeUnlink(workspaceRecord, edgeRecord, { projectionMeta });
+
+  if (!projectionMeta) {
+    workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((id) => id !== edgeId);
+    if (countWorkspaceReferencesForEdge(edgeId) === 0) {
+      allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
+    }
+  }
+
+  if (unlinkResult.changedNodeData) {
+    refreshAllHandoverDerivedState();
   }
   syncEdgeRuntimeAndStore();
+  syncNodeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
   persistStoreToLocalStorage();
   hasAppliedWorkspace = false;
@@ -2709,49 +4795,44 @@ function deleteEdgeFromCurrentWorkspace(edgeId) {
 function reverseEdgeInCurrentWorkspace(edgeId) {
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
   if (!workspaceRecord || !edgeId) return false;
+  const visibleEdge = edgeById.get(edgeId) || null;
+  if (!visibleEdge) return false;
+  const projectionMeta = getCurrentProjectionEdgeMeta(edgeId);
+  if (projectionMeta) {
+    if (projectionMeta.artifactRole !== "handover-object-link") return false;
+    const handoverId = projectionMeta.sourceHandoverId || null;
+    const objectNodeId = projectionMeta.objectNodeId || null;
+    if (!handoverId || !objectNodeId) return false;
+    const nextDirection = visibleEdge.sourceId === handoverId
+      ? "object_to_handover"
+      : "handover_to_object";
+    if (!setProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId, nextDirection)) {
+      return false;
+    }
+    syncWorkspaceRuntimeAndStore();
+    persistStoreToLocalStorage();
+    hasAppliedWorkspace = false;
+    return true;
+  }
   if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) {
     return false;
   }
-  const edgeIndex = allEdgesRuntime.findIndex((edge) => edge.id === edgeId);
-  if (edgeIndex === -1) return false;
-  const edgeRecord = allEdgesRuntime[edgeIndex];
+  const edgeRecord = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
   if (!edgeRecord || !edgeRecord.sourceId || !edgeRecord.targetId) return false;
+  const reversedSourceNode = getVisibleNodeRecord(edgeRecord.targetId);
+  const reversedTargetNode = getVisibleNodeRecord(edgeRecord.sourceId);
+  if (!canCreateEdgeInCurrentWorkspace(reversedSourceNode, reversedTargetNode)) return false;
   if (
-    workspaceHasEdgeBetweenNodes(
-      workspaceRecord,
-      edgeRecord.targetId,
-      edgeRecord.sourceId,
-      { excludeEdgeId: edgeRecord.id }
-    )
+    visibleEdgeExistsBetweenNodes(edgeRecord.targetId, edgeRecord.sourceId, { excludeEdgeId: edgeRecord.id })
   ) {
     return false;
   }
-
-  const sharedCount = countWorkspaceReferencesForEdge(edgeId);
-  if (sharedCount > 1) {
-    const sourceNode = nodeById.get(edgeRecord.targetId);
-    const targetNode = nodeById.get(edgeRecord.sourceId);
-    const nextEdge = {
-      ...edgeRecord,
-      id: generateGlobalEdgeId(edgeRecord.targetId, edgeRecord.sourceId),
-      sourceId: edgeRecord.targetId,
-      targetId: edgeRecord.sourceId,
-      kind: inferEdgeKindForPair(sourceNode, targetNode)
-    };
-    allEdgesRuntime.push(nextEdge);
-    workspaceRecord.edgeIds = workspaceRecord.edgeIds.map((id) => (id === edgeId ? nextEdge.id : id));
-  } else {
-    const nextSourceId = edgeRecord.targetId;
-    const nextTargetId = edgeRecord.sourceId;
-    const sourceNode = nodeById.get(nextSourceId);
-    const targetNode = nodeById.get(nextTargetId);
-    allEdgesRuntime[edgeIndex] = {
-      ...edgeRecord,
-      sourceId: nextSourceId,
-      targetId: nextTargetId,
-      kind: inferEdgeKindForPair(sourceNode, targetNode)
-    };
-  }
+  const nextSourceId = edgeRecord.targetId;
+  const nextTargetId = edgeRecord.sourceId;
+  edgeRecord.sourceId = nextSourceId;
+  edgeRecord.targetId = nextTargetId;
+  edgeRecord.kind = inferEdgeKindForPair(reversedSourceNode, reversedTargetNode);
+  edgeRecord.workspaceId = workspaceRecord.id;
 
   syncEdgeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
@@ -2789,7 +4870,7 @@ function updateEdgeDraftFromPointer(event) {
       const targetNode = getNodeById(targetId);
       const sourceFrame = lastVisibleNodeFrames.get(edgeCreateDraft.sourceId);
       const targetFrame = lastVisibleNodeFrames.get(targetId);
-      if (sourceNode && targetNode && sourceFrame && targetFrame) {
+      if (sourceNode && targetNode && sourceFrame && targetFrame && canCreateEdgeInCurrentWorkspace(sourceNode, targetNode)) {
         const sourceCenter = getNodeVisualCenter(sourceNode, sourceFrame);
         const sourceCx = sourceCenter.x;
         const sourceCy = sourceCenter.y;
@@ -2813,6 +4894,10 @@ function finalizeEdgeCreateDraft(event) {
   const { sourceId, targetId } = edgeCreateDraft;
   const created = !!(sourceId && targetId && createEdgeInCurrentWorkspace(sourceId, targetId));
   cancelEdgeCreateDraft({ clearHover: true, redraw: true });
+  if (created) {
+    hasAppliedWorkspace = false;
+    renderAll();
+  }
   return created;
 }
 
@@ -2868,25 +4953,73 @@ function refreshActiveCollaborationWorkspace() {
 function deleteNodeFromCurrentWorkspace(nodeId) {
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
   if (!workspaceRecord || !nodeId) return false;
-  const node = allNodesRuntime.find((entry) => entry.id === nodeId);
-  if (node?.type === "collaboration") return false;
+  const node = getVisibleNodeRecord(nodeId);
+  if (!node || isWorkspaceProtectedNode(workspaceRecord, node)) return false;
   if (!Array.isArray(workspaceRecord.nodeIds)) {
     workspaceRecord.nodeIds = [];
   }
   const hadNode = workspaceRecord.nodeIds.includes(nodeId);
-  if (!hadNode) return false;
+  const projectionMeta = getCurrentProjectionNodeMeta(nodeId);
+  const isProjectedHandoverObject = !!projectionMeta?.roles?.includes("handover-object");
+  if (!hadNode && !isProjectedHandoverObject) return false;
 
-  const removedEdgeIds = new Set(
-    allEdgesRuntime
-      .filter((edge) => edge && (edge.sourceId === nodeId || edge.targetId === nodeId))
-      .map((edge) => edge.id)
-  );
+  let changedNodeData = false;
+  let changedWorkspaceData = false;
+  const connectedEdges = getWorkspaceConnectedAuthoredEdges(workspaceRecord, nodeId);
+  const pinConnectedObjects = node.type === "handover";
+  connectedEdges.forEach((edgeRecord) => {
+    const unlinkResult = applyHandoverEffectsForEdgeUnlink(workspaceRecord, edgeRecord, { pinObjectNode: pinConnectedObjects });
+    if (unlinkResult.changedNodeData) {
+      changedNodeData = true;
+    }
+    if (unlinkResult.changedWorkspaceData) {
+      changedWorkspaceData = true;
+    }
+  });
+
+  if (isProjectedHandoverObject && Array.isArray(projectionMeta.handoverIds)) {
+    projectionMeta.handoverIds.forEach((handoverId) => {
+      const handoverNode = getAnyNodeById(handoverId);
+      if (handoverNode && removeHandoverObjectIdEntry(handoverNode, nodeId)) {
+        changedNodeData = true;
+      }
+      if (clearProjectedObjectEdgeDirection(workspaceRecord, handoverId, nodeId)) {
+        changedWorkspaceData = true;
+      }
+    });
+  }
 
   workspaceRecord.nodeIds = workspaceRecord.nodeIds.filter((id) => id !== nodeId);
   if (!Array.isArray(workspaceRecord.edgeIds)) {
     workspaceRecord.edgeIds = [];
   }
+  const removedEdgeIds = new Set(connectedEdges.map((edge) => edge.id));
   workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((edgeId) => !removedEdgeIds.has(edgeId));
+  if (node.type === "handover") {
+    if ((Array.isArray(node.handoverCollaborators) && node.handoverCollaborators.length) || getHandoverObjects(node).length) {
+      node.handoverCollaborators = [];
+      node.handoverObjects = [];
+      changedNodeData = true;
+    }
+  }
+  const hasRemainingMembership = workspaces.some((workspace) =>
+    Array.isArray(workspace.nodeIds) && workspace.nodeIds.includes(nodeId)
+  );
+  if (!hasRemainingMembership) {
+    allNodesRuntime = allNodesRuntime.filter((entry) => entry.id !== nodeId);
+    allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.sourceId !== nodeId && edge.targetId !== nodeId);
+  } else {
+    removedEdgeIds.forEach((edgeId) => {
+      if (countWorkspaceReferencesForEdge(edgeId) === 0) {
+        allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
+      }
+    });
+  }
+  if (changedNodeData || changedWorkspaceData || node.type === "handover") {
+    refreshAllHandoverDerivedState();
+  }
+  syncNodeRuntimeAndStore();
+  syncEdgeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
   sanitizeAfterNodeDelete();
   persistStoreToLocalStorage();
@@ -2901,7 +5034,7 @@ function deleteNodeGlobally(nodeId) {
   const nodeRecord = allNodesRuntime.find((node) => node.id === nodeId) || getNodeById(nodeId) || null;
   const nodeExists = !!nodeRecord || workspaceMemberships.length > 0;
   if (!nodeExists) return false;
-  if (nodeRecord?.type === "collaboration" || workspaceMemberships.some((workspace) => workspace.homeNodeId === nodeId)) {
+  if (nodeRecord?.type === "collaboration" || isAutoManagedProjectionNode(nodeRecord) || workspaceMemberships.some((workspace) => workspace.homeNodeId === nodeId)) {
     return false;
   }
 
@@ -2942,7 +5075,16 @@ function deleteNodeGlobally(nodeId) {
 function requestNodeDelete(nodeId) {
   const node = getNodeById(nodeId);
   if (!node) return;
-  if (node.type === "collaboration") return;
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (workspaceRecord && isWorkspaceProtectedNode(workspaceRecord, node)) return;
+  const projectionMeta = getCurrentProjectionNodeMeta(nodeId);
+  if (currentWorkspaceKind === "collab" && projectionMeta?.roles?.includes("handover-object")) {
+    const deletedProjectedObject = deleteNodeFromCurrentWorkspace(nodeId);
+    if (!deletedProjectedObject) return;
+    closeCreateNodeMenu();
+    renderAll();
+    return;
+  }
   const membershipCount = getWorkspaceMembershipCount(nodeId);
   let deleted = false;
 
@@ -3463,14 +5605,18 @@ function renderHandoverObjectPickerModal() {
     handoverObjectPickerModalState = {
       open: false,
       nodeId: null,
-      selectedNodeIds: []
+      selectedNodeIds: [],
+      selectedRole: "reference"
     };
     handoverObjectPickerModalOverlayEl.classList.remove("is-open");
     handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", "true");
     return;
   }
 
-  const options = getHandoverObjectPickerOptions(handoverNode);
+  const options = getHandoverObjectPickerOptions(
+    handoverNode,
+    normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole)
+  );
   const validNodeIds = new Set(options.map((option) => option.id));
   handoverObjectPickerModalState.selectedNodeIds = handoverObjectPickerModalState.selectedNodeIds
     .filter((nodeId) => validNodeIds.has(nodeId));
@@ -3482,6 +5628,24 @@ function renderHandoverObjectPickerModal() {
     : "No additional objects are currently available.";
 
   if (!options.length) {
+    const roleWrapEl = document.createElement("div");
+    roleWrapEl.className = "picker-modal-group";
+    const roleTitleEl = document.createElement("h4");
+    roleTitleEl.className = "picker-modal-group-title";
+    roleTitleEl.textContent = "Role";
+    const roleSelectEl = document.createElement("select");
+    roleSelectEl.className = "portal-link-modal-select";
+    HANDOVER_OBJECT_ROLES.forEach((role) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = role;
+      optionEl.textContent = HANDOVER_OBJECT_ROLE_LABELS[role];
+      roleSelectEl.appendChild(optionEl);
+    });
+    roleSelectEl.value = normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole);
+    roleSelectEl.disabled = true;
+    roleWrapEl.appendChild(roleTitleEl);
+    roleWrapEl.appendChild(roleSelectEl);
+    handoverObjectPickerModalBodyEl.appendChild(roleWrapEl);
     const emptyState = document.createElement("p");
     emptyState.className = "picker-modal-empty";
     emptyState.textContent = "No additional objects can be added right now.";
@@ -3489,6 +5653,28 @@ function renderHandoverObjectPickerModal() {
     handoverObjectPickerModalConfirmBtnEl.disabled = true;
     return;
   }
+
+  const roleGroupEl = document.createElement("section");
+  roleGroupEl.className = "picker-modal-group";
+  const roleTitleEl = document.createElement("h4");
+  roleTitleEl.className = "picker-modal-group-title";
+  roleTitleEl.textContent = "Role";
+  const roleSelectEl = document.createElement("select");
+  roleSelectEl.className = "portal-link-modal-select";
+  HANDOVER_OBJECT_ROLES.forEach((role) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = role;
+    optionEl.textContent = HANDOVER_OBJECT_ROLE_LABELS[role];
+    roleSelectEl.appendChild(optionEl);
+  });
+  roleSelectEl.value = normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole);
+  roleSelectEl.addEventListener("change", () => {
+    handoverObjectPickerModalState.selectedRole = normalizeHandoverObjectRole(roleSelectEl.value);
+    renderHandoverObjectPickerModal();
+  });
+  roleGroupEl.appendChild(roleTitleEl);
+  roleGroupEl.appendChild(roleSelectEl);
+  handoverObjectPickerModalBodyEl.appendChild(roleGroupEl);
 
   const groupEl = document.createElement("section");
   groupEl.className = "picker-modal-group";
@@ -3532,7 +5718,8 @@ function openHandoverObjectPickerModal(nodeId) {
   handoverObjectPickerModalState = {
     open: true,
     nodeId: handoverNode.id,
-    selectedNodeIds: []
+    selectedNodeIds: [],
+    selectedRole: "reference"
   };
   renderHandoverObjectPickerModal();
   requestAnimationFrame(() => {
@@ -3551,7 +5738,8 @@ function closeHandoverObjectPickerModal() {
   handoverObjectPickerModalState = {
     open: false,
     nodeId: null,
-    selectedNodeIds: []
+    selectedNodeIds: [],
+    selectedRole: "reference"
   };
   renderHandoverObjectPickerModal();
 }
@@ -3563,7 +5751,11 @@ function confirmHandoverObjectPickerModal() {
     closeHandoverObjectPickerModal();
     return;
   }
-  const changed = addHandoverObjectIds(handoverNode.id, handoverObjectPickerModalState.selectedNodeIds);
+  const changed = addHandoverObjectIds(
+    handoverNode.id,
+    handoverObjectPickerModalState.selectedNodeIds,
+    handoverObjectPickerModalState.selectedRole
+  );
   closeHandoverObjectPickerModal();
   if (changed) {
     renderAll();
@@ -4036,10 +6228,34 @@ function renderCreateNodeMenu() {
       });
       createNodeMenuEl.appendChild(editButton);
 
+      const workspaceRecord = getCurrentWorkspaceRecord();
+      const canManageAnchor = !!workspaceRecord && normalizeWorkspaceKind(workspaceRecord.kind) !== "collab" && isSelectableNode(node);
+      if (canManageAnchor) {
+        const anchorButton = document.createElement("button");
+        anchorButton.type = "button";
+        anchorButton.className = "map-create-menu-item";
+        anchorButton.textContent = workspaceRecord.homeNodeId === node.id ? "Clear workspace anchor" : "Set as workspace anchor";
+        anchorButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const changed = workspaceRecord.homeNodeId === node.id
+            ? clearCurrentWorkspaceAnchorNode()
+            : setCurrentWorkspaceAnchorNode(node.id);
+          if (!changed) return;
+          closeCreateNodeMenu();
+          renderAll();
+        });
+        createNodeMenuEl.appendChild(anchorButton);
+      }
+
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
       deleteButton.className = "map-create-menu-item is-danger";
       deleteButton.textContent = "Delete";
+      if (workspaceRecord && isWorkspaceProtectedNode(workspaceRecord, node)) {
+        deleteButton.disabled = true;
+        deleteButton.title = "Clear or replace the workspace anchor before deleting this node";
+      }
       deleteButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -4193,6 +6409,7 @@ function toPersistableNode(node) {
   delete clone.label;
   delete clone.owner;
   delete clone.linkedNodeIds;
+  delete clone.handoverNodeIds;
   return clone;
 }
 
@@ -4269,6 +6486,7 @@ async function persistStoreSnapshotToServer(payload) {
 function persistStoreToLocalStorage() {
   let payload = null;
   try {
+    refreshAllHandoverDerivedState();
     payload = buildPersistableDataSnapshot();
   } catch (error) {
     persistErrorMessage = "Failed to build the canonical store snapshot.";
@@ -4769,6 +6987,56 @@ function sanitizeStateForWorkspace() {
   }
 }
 
+function rebuildVisibleWorkspaceGraph(workspaceRecord) {
+  resetCurrentProjectionViewState();
+  if (!workspaceRecord) {
+    nodes = [];
+    edges = [];
+    nodeById = new Map();
+    edgeRuntimeCounter = 0;
+    rebuildEdgeIndexes();
+    return;
+  }
+
+  const visibleNodeMap = new Map();
+  const authoredEdges = [];
+  const authoredNodeIds = Array.isArray(workspaceRecord.nodeIds) ? workspaceRecord.nodeIds : [];
+  authoredNodeIds.forEach((nodeId) => {
+    const node = getAnyNodeById(nodeId);
+    if (node) {
+      visibleNodeMap.set(node.id, node);
+    }
+  });
+
+  const authoredEdgeIds = Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : [];
+  authoredEdgeIds.forEach((edgeId) => {
+    const edge = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+    if (!edge) return;
+    const sourceNode = getAnyNodeById(edge.sourceId);
+    const targetNode = getAnyNodeById(edge.targetId);
+    if (!sourceNode || !targetNode) return;
+    if (!visibleNodeMap.has(sourceNode.id)) {
+      visibleNodeMap.set(sourceNode.id, sourceNode);
+    }
+    if (!visibleNodeMap.has(targetNode.id)) {
+      visibleNodeMap.set(targetNode.id, targetNode);
+    }
+    authoredEdges.push({ ...edge });
+  });
+
+  let overlayEdges = [];
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab") {
+    overlayEdges = buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap).overlayEdges;
+  }
+
+  nodes = [...visibleNodeMap.values()];
+  nodeById = new Map(nodes.map((node) => [node.id, node]));
+  edges = [...authoredEdges, ...overlayEdges];
+  edgeRuntimeCounter = 0;
+  rebuildEdgeIndexes();
+  attachLinkedNodeAccessors();
+}
+
 function applyWorkspaceData(workspaceId, options = {}) {
   const workspaceRecord = getWorkspaceRecordById(workspaceId);
   const workspaceOption = getWorkspaceOptionById(workspaceId);
@@ -4776,38 +7044,13 @@ function applyWorkspaceData(workspaceId, options = {}) {
   currentWorkspaceKind = normalizeWorkspaceKind(workspaceRecord?.kind || workspaceOption?.kind);
 
   if (!workspaceRecord) {
-    nodes = [];
-    edges = [];
-    nodeById = new Map();
-    edgeRuntimeCounter = 0;
-    rebuildEdgeIndexes();
+    rebuildVisibleWorkspaceGraph(null);
     if (options.sanitizeState !== false) {
       sanitizeStateForWorkspace();
     }
     return;
   }
-
-  const scopedNodeIds = new Set(
-    workspaceRecord && Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.length
-      ? workspaceRecord.nodeIds
-      : []
-  );
-  nodes = allNodesRuntime.filter((node) => scopedNodeIds.has(node.id));
-  nodeById = new Map(nodes.map((node) => [node.id, node]));
-
-  const scopedEdgeIds = new Set(
-    workspaceRecord && Array.isArray(workspaceRecord.edgeIds) && workspaceRecord.edgeIds.length
-      ? workspaceRecord.edgeIds
-      : []
-  );
-  edges = allEdgesRuntime
-    .filter((edge) => scopedEdgeIds.has(edge.id))
-    .filter((edge) => nodeById.has(edge.sourceId) && nodeById.has(edge.targetId))
-    .map((edge) => ({ ...edge }));
-
-  edgeRuntimeCounter = 0;
-  rebuildEdgeIndexes();
-  attachLinkedNodeAccessors();
+  rebuildVisibleWorkspaceGraph(workspaceRecord);
 
   if (options.sanitizeState !== false) {
     sanitizeStateForWorkspace();
@@ -6055,7 +8298,8 @@ function applyWorkspaceData(workspaceId, options = {}) {
           const rowEl = document.createElement("div");
           rowEl.className = "workspace-menu-row";
           const isActive = workspace.id === currentWorkspaceId;
-          const isRenaming = workspaceRenameId === workspace.id;
+          const isSharedWorkspace = workspace.access === "shared";
+          const isRenaming = !isSharedWorkspace && workspaceRenameId === workspace.id;
           if (isActive) {
             rowEl.classList.add("is-active");
           }
@@ -6099,16 +8343,25 @@ function applyWorkspaceData(workspaceId, options = {}) {
             rowEl.appendChild(renameInput);
             renameInputEl = renameInput;
           } else {
-            const item = document.createElement("button");
-            item.type = "button";
-            item.role = "menuitemradio";
-            item.className = "workspace-menu-item";
-            item.setAttribute("aria-checked", String(isActive));
+             const item = document.createElement("button");
+             item.type = "button";
+             item.role = "menuitemradio";
+              item.className = "workspace-menu-item";
+              item.setAttribute("aria-checked", String(isActive));
 
-            const labelEl = document.createElement("span");
-            labelEl.className = "workspace-menu-item-label";
-            labelEl.textContent = workspace.name || workspace.id;
-            item.appendChild(labelEl);
+              const labelWrapEl = document.createElement("span");
+              labelWrapEl.className = "workspace-menu-item-text";
+              const labelEl = document.createElement("span");
+              labelEl.className = "workspace-menu-item-label";
+              labelEl.textContent = workspace.name || workspace.id;
+              labelWrapEl.appendChild(labelEl);
+              if (workspace.sharedByLabel) {
+                const secondaryLabelEl = document.createElement("span");
+                secondaryLabelEl.className = "workspace-menu-item-subtitle";
+                secondaryLabelEl.textContent = workspace.sharedByLabel;
+                labelWrapEl.appendChild(secondaryLabelEl);
+              }
+              item.appendChild(labelWrapEl);
 
             item.addEventListener("click", (event) => {
               event.preventDefault();
@@ -6123,7 +8376,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
             rowEl.appendChild(item);
           }
 
-          if (isActive && !isRenaming) {
+          if (isActive && !isRenaming && !isSharedWorkspace) {
             const actionsEl = document.createElement("div");
             actionsEl.className = "workspace-menu-item-actions";
 
@@ -7272,7 +9525,7 @@ function onViewportMouseDown(event) {
           changed = true;
         }
         if (typeof node.summary !== "string" || !node.summary.trim()) {
-          node.summary = `${node.label || node.title || node.id} node`;
+          node.summary = "Click to enter node description";
           changed = true;
         }
         if (node.type === "location") {
@@ -7376,10 +9629,13 @@ function onViewportMouseDown(event) {
       }
 
       if (Array.isArray(workspaceRecord.edgeIds)) {
-        const validNodeIds = new Set(workspaceRecord.nodeIds);
+        const runtimeEdgeById = new Map(allEdgesRuntime.map((edge) => [edge.id, edge]));
         const nextEdgeIds = workspaceRecord.edgeIds.filter((edgeId) => {
-          const edge = allEdgesRuntime.find((edgeRecord) => edgeRecord.id === edgeId);
-          return !!edge && validNodeIds.has(edge.sourceId) && validNodeIds.has(edge.targetId);
+          const edge = runtimeEdgeById.get(edgeId) || null;
+          return !!edge &&
+            (!edge.workspaceId || edge.workspaceId === workspaceRecord.id) &&
+            runtimeNodeById.has(edge.sourceId) &&
+            runtimeNodeById.has(edge.targetId);
         });
         if (
           nextEdgeIds.length !== workspaceRecord.edgeIds.length ||
@@ -7400,17 +9656,13 @@ function onViewportMouseDown(event) {
         changed = true;
       }
 
-      const scopedRuntimeNodes = workspaceRecord.nodeIds
-        .map((nodeId) => runtimeNodeById.get(nodeId))
-        .filter(Boolean);
-      nodes = scopedRuntimeNodes;
-      nodeById = new Map(scopedRuntimeNodes.map((node) => [node.id, node]));
+      rebuildVisibleWorkspaceGraph(workspaceRecord);
 
       const baseResult = normalizeProjectWorkspaceSemantics();
       if (baseResult.changed) {
         changed = true;
       }
-      scopedRuntimeNodes.forEach((node) => {
+      nodes.forEach((node) => {
         if (node.type === "collaboration") {
           if (node.title !== "" || node.label !== "") {
             node.title = "";
@@ -7850,6 +10102,9 @@ function onViewportMouseDown(event) {
       if (!node) {
         return { width: COLLAPSED_CARD_W, height: NODE_HEIGHT };
       }
+      if (isWorkspaceAnchorNode(node)) {
+        return { width: ANCHOR_NODE_DIAMETER_PX, height: ANCHOR_NODE_DIAMETER_PX };
+      }
       if (node.type === "location" && expandedLocationId === node.id) {
         const metrics = getExpandedLocationMetrics(node);
         return { width: metrics.cardWidthPx, height: metrics.cardHeightPx };
@@ -7980,7 +10235,7 @@ function onViewportMouseDown(event) {
     }
 
     function computeNodeFrame(node, expandedLocationId, layoutOverride = null) {
-      if (node && node.type === "portal") {
+      if (node && node.type === "portal" && !isWorkspaceAnchorNode(node)) {
         const size = getCardSize(node, expandedLocationId);
         const extents = getNodeOccupiedExtents(node, expandedLocationId);
         if (layoutOverride) {
@@ -8245,9 +10500,13 @@ function onViewportMouseDown(event) {
     function createNodeCard(node, isSelected, layoutOverride = null) {
       const frame = computeNodeFrame(node, state.expandedCanvasLocationId, layoutOverride);
       const isExpandedLocationCard = node.type === "location" && isLocationCardExpanded(node.id);
+      const isAnchorCard = isWorkspaceAnchorNode(node);
 
       const card = document.createElement("div");
       card.className = `node-card ${node.type}${isSelected ? " selected" : ""}`;
+      if (isAnchorCard) {
+        card.classList.add("anchor");
+      }
       if (isExpandedLocationCard) {
         card.classList.add("expanded");
       } else {
@@ -8261,15 +10520,23 @@ function onViewportMouseDown(event) {
       card.dataset.nodeId = node.id;
       buildNodeCardContent(card, node, frame);
       const dragHandle = card.querySelector(".node-drag-handle");
-      const portalBody = node.type === "portal" ? card.querySelector(".node-portal-body") : null;
+      const portalBody = node.type === "portal" && !isAnchorCard ? card.querySelector(".node-portal-body") : null;
+      const anchorBody = isAnchorCard ? card.querySelector(".node-anchor-body") : null;
       if (isExpandedLocationCard && dragHandle) {
         dragHandle.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
+      } else if (anchorBody) {
+        anchorBody.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
       } else if (node.type === "portal" && portalBody) {
         portalBody.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
       } else {
         card.addEventListener("mousedown", (event) => startNodeDrag(event, node.id, card));
       }
-      if (node.type === "portal" && portalBody) {
+      if (anchorBody) {
+        anchorBody.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleGraphNodeCardClick(node, event);
+        });
+      } else if (node.type === "portal" && portalBody) {
         portalBody.addEventListener("click", (event) => {
           event.stopPropagation();
           handleGraphNodeCardClick(node, event);
@@ -8418,6 +10685,10 @@ function onViewportMouseDown(event) {
     }
 
     function buildNodeCardContent(card, node, frame) {
+      if (isWorkspaceAnchorNode(node)) {
+        buildAnchorCardContent(card, node, frame);
+        return;
+      }
       if (node.type === "location") {
         buildLocationCardContent(card, node);
         return;
@@ -8439,10 +10710,61 @@ function onViewportMouseDown(event) {
         return;
       }
       if (node.type === "collaboration") {
-        buildCollaborationCardContent(card, node);
+        buildCollaborationCardContent(card, node, frame);
         return;
       }
       buildArtifactCardContent(card, node);
+    }
+
+    function buildAnchorCardContent(card, node, frame) {
+      const labelText = getAnchorNodeDisplayLabel(node);
+      if (labelText) {
+        const hoverLabel = document.createElement("div");
+        hoverLabel.className = "node-portal-hover-label";
+        hoverLabel.textContent = labelText;
+        hoverLabel.style.left = `${frame.w / 2}px`;
+        hoverLabel.style.top = `${-PORTAL_LABEL_GAP_PX}px`;
+        card.appendChild(hoverLabel);
+      }
+      const body = document.createElement("div");
+      body.className = "node-anchor-body node-drag-handle";
+      body.style.left = "0px";
+      body.style.top = "0px";
+      body.style.width = `${frame.w}px`;
+      body.style.height = `${frame.h}px`;
+      const icon = document.createElementNS(SVG_NS, "svg");
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("aria-hidden", "true");
+      icon.classList.add("node-anchor-glyph");
+      const roof = createSvgElement("path", {
+        d: "M4.5 11.25 12 5l7.5 6.25",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.8",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      });
+      const house = createSvgElement("path", {
+        d: "M7 10.75V19h10v-8.25",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.8",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      });
+      const door = createSvgElement("path", {
+        d: "M10.5 19v-4.75h3V19",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.8",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      });
+      icon.appendChild(roof);
+      icon.appendChild(house);
+      icon.appendChild(door);
+      body.appendChild(icon);
+      card.appendChild(body);
     }
 
     function buildLocationCardContent(card, node) {
@@ -8578,20 +10900,13 @@ function onViewportMouseDown(event) {
       owner.className = "node-card-owner";
       owner.textContent = node.owner;
 
-      const status = document.createElement("button");
-      status.type = "button";
-      const statusValue = normalizeProcessStatus(node.status);
-      status.className = `node-card-status node-card-status-btn ${getStatusClass(statusValue)}`.trim();
-      status.textContent = statusValue;
-      status.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        cycleProcessStatus(node.id);
-      });
+      const status = createStatusControlForNode(node, "graph");
 
       card.appendChild(header);
       footer.appendChild(owner);
-      footer.appendChild(status);
+      if (status) {
+        footer.appendChild(status);
+      }
       card.appendChild(footer);
     }
 
@@ -8855,180 +11170,18 @@ function onViewportMouseDown(event) {
       card.appendChild(content);
     }
 
-    function buildSpiralArmPathData(options = {}) {
-      const centerX = Number.isFinite(options.centerX) ? options.centerX : 50;
-      const centerY = Number.isFinite(options.centerY) ? options.centerY : 50;
-      const startRadius = Number.isFinite(options.startRadius) ? options.startRadius : 1.5;
-      const endRadius = Number.isFinite(options.endRadius) ? options.endRadius : 42;
-      const turns = Number.isFinite(options.turns) ? options.turns : 1.4;
-      const angleOffsetDeg = Number.isFinite(options.angleOffsetDeg) ? options.angleOffsetDeg : 0;
-      const steps = Number.isFinite(options.steps) ? Math.max(12, Math.round(options.steps)) : 72;
-      const angleOffsetRad = angleOffsetDeg * (Math.PI / 180);
-      let path = `M ${centerX.toFixed(2)} ${centerY.toFixed(2)}`;
-      for (let step = 0; step <= steps; step += 1) {
-        const t = step / steps;
-        const angle = angleOffsetRad + (turns * Math.PI * 2 * t);
-        const radius = startRadius + ((endRadius - startRadius) * Math.pow(t, 1.08));
-        const x = centerX + (Math.cos(angle) * radius);
-        const y = centerY + (Math.sin(angle) * radius);
-        path += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-      }
-      return path;
-    }
-
-    function buildCollaborationCardContent(card, node) {
-      const idBase = String(node?.id || "collaboration").replace(/[^A-Za-z0-9_-]/g, "_");
-      const clipId = `collabClip_${idBase}`;
-      const armGradientId = `collabArmGrad_${idBase}`;
-      const highlightGradientId = `collabHighlightGrad_${idBase}`;
-      const coreGradientId = `collabCoreGrad_${idBase}`;
-      const glowFilterId = `collabGlow_${idBase}`;
-      const spiral = createSvgElement("svg", {
-        class: "node-collaboration-spiral",
-        viewBox: "0 0 100 100",
-        "aria-hidden": "true"
-      });
-      const defs = createSvgElement("defs");
-      const clipPath = createSvgElement("clipPath", { id: clipId });
-      clipPath.appendChild(createSvgElement("circle", {
-        cx: "50",
-        cy: "50",
-        r: "49"
-      }));
-      defs.appendChild(clipPath);
-
-      const armGradient = createSvgElement("linearGradient", {
-        id: armGradientId,
-        x1: "18",
-        y1: "14",
-        x2: "84",
-        y2: "86",
-        gradientUnits: "userSpaceOnUse"
-      });
-      [
-        { offset: "0%", color: "#e0f2fe", opacity: "0.92" },
-        { offset: "48%", color: "#7dd3fc", opacity: "0.76" },
-        { offset: "100%", color: "#bfdbfe", opacity: "0.28" }
-      ].forEach((stop) => {
-        armGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      defs.appendChild(armGradient);
-
-      const highlightGradient = createSvgElement("linearGradient", {
-        id: highlightGradientId,
-        x1: "24",
-        y1: "20",
-        x2: "72",
-        y2: "74",
-        gradientUnits: "userSpaceOnUse"
-      });
-      [
-        { offset: "0%", color: "#ffffff", opacity: "0.96" },
-        { offset: "45%", color: "#eff6ff", opacity: "0.78" },
-        { offset: "100%", color: "#ffffff", opacity: "0.12" }
-      ].forEach((stop) => {
-        highlightGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      defs.appendChild(highlightGradient);
-
-      const coreGradient = createSvgElement("radialGradient", {
-        id: coreGradientId,
-        cx: "50%",
-        cy: "50%",
-        r: "60%"
-      });
-      [
-        { offset: "0%", color: "#ffffff", opacity: "0.92" },
-        { offset: "45%", color: "#bfdbfe", opacity: "0.62" },
-        { offset: "100%", color: "#bfdbfe", opacity: "0" }
-      ].forEach((stop) => {
-        coreGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      defs.appendChild(coreGradient);
-
-      const glowFilter = createSvgElement("filter", {
-        id: glowFilterId,
-        x: "-18%",
-        y: "-18%",
-        width: "136%",
-        height: "136%"
-      });
-      glowFilter.appendChild(createSvgElement("feGaussianBlur", {
-        stdDeviation: "1.45"
-      }));
-      defs.appendChild(glowFilter);
-
-      spiral.appendChild(defs);
-
-      const spiralGroup = createSvgElement("g", {
-        "clip-path": `url(#${clipId})`
-      });
-      spiralGroup.appendChild(createSvgElement("circle", {
-        class: "node-collaboration-core",
-        cx: "50",
-        cy: "50",
-        r: "8.4",
-        fill: `url(#${coreGradientId})`,
-        opacity: "0.82"
-      }));
-
-      [0, 120, 240].forEach((angleOffsetDeg) => {
-        const d = buildSpiralArmPathData({
-          centerX: 50,
-          centerY: 50,
-          startRadius: 1.8,
-          endRadius: 43,
-          turns: 1.45,
-          angleOffsetDeg: angleOffsetDeg - 16,
-          steps: 78
-        });
-        spiralGroup.appendChild(createSvgElement("path", {
-          class: "node-collaboration-arm-glow",
-          d,
-          fill: "none",
-          stroke: `url(#${armGradientId})`,
-          "stroke-width": "8.4",
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
-          opacity: "0.28",
-          filter: `url(#${glowFilterId})`
-        }));
-        spiralGroup.appendChild(createSvgElement("path", {
-          class: "node-collaboration-arm",
-          d,
-          fill: "none",
-          stroke: `url(#${armGradientId})`,
-          "stroke-width": "5.6",
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
-          opacity: "0.76"
-        }));
-        spiralGroup.appendChild(createSvgElement("path", {
-          class: "node-collaboration-arm-highlight",
-          d,
-          fill: "none",
-          stroke: `url(#${highlightGradientId})`,
-          "stroke-width": "2.15",
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
-          opacity: "0.86"
-        }));
-      });
-
-      spiral.appendChild(spiralGroup);
-      card.appendChild(spiral);
+    function buildCollaborationCardContent(card, node, frame) {
+      const body = document.createElement("div");
+      body.className = "node-anchor-body node-collaboration-body node-drag-handle";
+      body.style.left = "0px";
+      body.style.top = "0px";
+      body.style.width = `${frame.w}px`;
+      body.style.height = `${frame.h}px`;
+      const caustics = document.createElement("div");
+      caustics.className = "orb-caustics";
+      caustics.setAttribute("aria-hidden", "true");
+      body.appendChild(caustics);
+      card.appendChild(body);
     }
 
     function buildArtifactCardContent(card, node) {
@@ -9055,10 +11208,10 @@ function onViewportMouseDown(event) {
 
       const statusValue = getNodeStatusValue(node);
       if (statusValue) {
-        const status = document.createElement("span");
-        status.className = `node-card-status ${getStatusClass(statusValue)}`.trim();
-        status.textContent = statusValue;
-        footer.appendChild(status);
+        const status = createStatusControlForNode(node, "graph");
+        if (status) {
+          footer.appendChild(status);
+        }
       } else if (node.type !== "handover") {
         const badge = document.createElement("span");
         badge.className = "node-card-type-badge";
@@ -10339,6 +12492,13 @@ function onViewportMouseDown(event) {
       ownerLine.className = "details-owner-line";
       ownerLine.textContent = getOwnerDisplayName(selectedNode) || "Unknown";
       header.appendChild(ownerLine);
+      const contextLabel = getNodeDetailsHeaderContextLabel(selectedNode);
+      if (contextLabel) {
+        const contextLine = document.createElement("p");
+        contextLine.className = "details-header-context-line";
+        contextLine.textContent = `Context: ${contextLabel}`;
+        header.appendChild(contextLine);
+      }
       section.appendChild(header);
       return section;
     }
@@ -10553,12 +12713,18 @@ function onViewportMouseDown(event) {
             shareBtn.type = "button";
             shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
             shareBtn.textContent = "↗";
-            shareBtn.title = "share workspace";
-            shareBtn.setAttribute("aria-label", "share workspace");
-            shareBtn.addEventListener("click", () => {
-              if (!toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId)) return;
-              renderDetailsPane();
-            });
+            const shareDisabled = isCollabWorkspaceOnlyHandover(selectedNode);
+            shareBtn.title = shareDisabled ? "Collaboration-workspace handovers cannot share workspaces" : "share workspace";
+            shareBtn.setAttribute("aria-label", shareDisabled ? "share workspace unavailable" : "share workspace");
+            shareBtn.disabled = shareDisabled;
+            if (shareDisabled) {
+              shareBtn.classList.add("is-disabled");
+            } else {
+              shareBtn.addEventListener("click", () => {
+                if (!toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId)) return;
+                renderDetailsPane();
+              });
+            }
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
             removeBtn.className = "collaborator-remove-btn";
@@ -10603,7 +12769,14 @@ function onViewportMouseDown(event) {
       }
       section.appendChild(sectionHeader);
 
-      const handoverObjects = getHandoverObjectCandidates(selectedNode);
+      const handoverObjects = getHandoverObjects(selectedNode)
+        .filter((handoverObject) => handoverObject.role !== "context")
+        .map((handoverObject) => {
+          const objectNode = getAnyNodeById(handoverObject.id);
+          return objectNode ? { handoverObject, node: objectNode } : null;
+        })
+        .filter(Boolean)
+        .sort((left, right) => compareNodesByDisplayLabel(left.node, right.node));
       if (!handoverObjects.length) {
         const none = document.createElement("p");
         none.className = "muted";
@@ -10613,14 +12786,49 @@ function onViewportMouseDown(event) {
       }
 
       const list = document.createElement("div");
-      list.className = "chip-list";
-      handoverObjects.forEach((node) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "chip-btn";
-        chip.textContent = `${getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) })} (${node.type})`;
-        chip.addEventListener("click", () => selectNode(node.id));
-        list.appendChild(chip);
+      list.className = "handover-object-pill-list";
+      handoverObjects.forEach(({ node, handoverObject }) => {
+        const pill = document.createElement("div");
+        pill.className = "handover-object-pill";
+
+        const objectBtn = document.createElement("button");
+        objectBtn.type = "button";
+        objectBtn.className = "handover-object-pill-main";
+        objectBtn.addEventListener("click", () => selectNode(node.id));
+
+        const title = document.createElement("span");
+        title.className = "handover-object-pill-title";
+        title.textContent = getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) });
+        const owner = document.createElement("span");
+        owner.className = "handover-object-pill-owner";
+        owner.textContent = getNodeOwnerShortLabel(node) || "Unknown";
+
+        objectBtn.appendChild(title);
+        objectBtn.appendChild(owner);
+        pill.appendChild(objectBtn);
+
+        if (isNodeOwnedByCurrentUser(selectedNode)) {
+          const roleSelect = document.createElement("select");
+          roleSelect.className = "handover-object-role-pill";
+          HANDOVER_OBJECT_ROLES.forEach((candidateRole) => {
+            const option = document.createElement("option");
+            option.value = candidateRole;
+            option.textContent = HANDOVER_OBJECT_ROLE_LABELS[candidateRole];
+            roleSelect.appendChild(option);
+          });
+          roleSelect.value = handoverObject.role;
+          roleSelect.addEventListener("change", () => {
+            if (!setHandoverObjectRole(selectedNode.id, handoverObject.id, roleSelect.value)) return;
+            renderAll();
+          });
+          pill.appendChild(roleSelect);
+        } else {
+          const roleLabel = document.createElement("span");
+          roleLabel.className = "handover-object-role-pill is-readonly";
+          roleLabel.textContent = HANDOVER_OBJECT_ROLE_LABELS[handoverObject.role];
+          pill.appendChild(roleLabel);
+        }
+        list.appendChild(pill);
       });
       section.appendChild(list);
       return section;

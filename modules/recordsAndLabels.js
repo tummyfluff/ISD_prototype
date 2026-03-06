@@ -8,7 +8,18 @@ export function createRecordsAndLabels(deps) {
   function getWorkspaceOptionsForCurrentUser() {
     const currentUserId = deps.getCurrentUserId();
     if (!currentUserId) return [];
-    return deps.getWorkspaceOptions().filter((workspace) => workspace.ownerId === currentUserId);
+    const ownedOptions = deps.getWorkspaceOptions().filter((workspace) => workspace.ownerId === currentUserId);
+    const sharedOptions = typeof deps.getSharedWorkspaceOptionsForUser === "function"
+      ? deps.getSharedWorkspaceOptionsForUser(currentUserId)
+      : [];
+    const mergedOptions = [...ownedOptions];
+    const seenIds = new Set(mergedOptions.map((workspace) => workspace.id));
+    sharedOptions.forEach((workspace) => {
+      if (!workspace?.id || seenIds.has(workspace.id)) return;
+      seenIds.add(workspace.id);
+      mergedOptions.push(workspace);
+    });
+    return mergedOptions;
   }
 
   function getWorkspaceRecordById(workspaceId) {
