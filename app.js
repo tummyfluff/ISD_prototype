@@ -1,3 +1,24 @@
+import {
+  TYPE_ORDER,
+  PROCESS_STATUSES,
+  HANDOVER_STATUSES,
+  HANDOVER_COLLABORATOR_EDITABLE_STATUSES,
+  normalizeWorkspaceKind,
+  normalizeNodeType,
+  normalizeProcessStatus,
+  normalizeHandoverStatus,
+  getNextProcessStatus,
+  normalizeEntityKind,
+  isSelectableNode,
+  canInlineEditNodeTitle,
+  isCircularNodeType,
+  isDiamondNodeType,
+  getStatusClass,
+  getTypeShort,
+  getTypeSortIndex,
+  compareNodesStable
+} from "./modules/nodeNormalization.js";
+
 const d3 = window.d3;
 if (!window.d3 || !window.d3.forceSimulation) {
   console.error("D3 force not loaded");
@@ -43,18 +64,6 @@ const CURRENT_USER_HANDLE = "@Hannah";
 //   expandedInnerWidthPx?: number // legacy runtime field
 // }
 
-const TYPE_ORDER = [
-  "location",
-  "process",
-  "standard",
-  "handover",
-  "portal",
-  "entity",
-  "collaboration"
-];
-const PROCESS_STATUSES = ["Planned", "Active", "Complete", "Abandoned"];
-const HANDOVER_STATUSES = ["Draft", "Active", "Blocked", "Withdrawn", "Complete"];
-const HANDOVER_COLLABORATOR_EDITABLE_STATUSES = ["Active", "Blocked", "Complete"];
     const SVG_NS = "http://www.w3.org/2000/svg";
     const CANVAS_WIDTH = 1320;
     const CANVAS_HEIGHT = 760;
@@ -306,49 +315,6 @@ const HANDOVER_COLLABORATOR_EDITABLE_STATUSES = ["Active", "Blocked", "Complete"
     linkedObjectIds: [],
     slashRange: null
   };
-
-    function normalizeWorkspaceKind(rawKind) {
-      if (rawKind === "collab" || rawKind === "collaboration") return "collab";
-      if (rawKind === "normal" || rawKind === "global" || rawKind === "project") return "normal";
-      return "normal";
-    }
-
-    function normalizeNodeType(rawType) {
-      const type = String(rawType || "").toLowerCase();
-      if (type === "location") return "location";
-      if (type === "portal") return "portal";
-      if (type === "handover") return "handover";
-      if (type === "entity" || type === "person" || type === "organization" || type === "organisation") return "entity";
-      if (type === "collaboration" || type === "hub") return "collaboration";
-      if (type === "process" || type === "experiment") return "process";
-      if (type === "standard" || type === "protocol") return "standard";
-      return "standard";
-    }
-
-    function normalizeProcessStatus(rawStatus) {
-      const status = String(rawStatus || "").trim().toLowerCase();
-      if (status === "planned") return "Planned";
-      if (status === "active") return "Active";
-      if (status === "complete" || status === "completed") return "Complete";
-      if (status === "abandoned") return "Abandoned";
-      return "Planned";
-    }
-
-    function normalizeHandoverStatus(rawStatus) {
-      const status = String(rawStatus || "").trim().toLowerCase();
-      if (status === "draft" || status === "prepared") return "Draft";
-      if (status === "active") return "Active";
-      if (status === "blocked") return "Blocked";
-      if (status === "withdrawn" || status === "abandoned" || status === "cancelled" || status === "canceled") return "Withdrawn";
-      if (status === "complete" || status === "completed") return "Complete";
-      return "Draft";
-    }
-
-    function getNextProcessStatus(status) {
-      const normalized = normalizeProcessStatus(status);
-      const index = PROCESS_STATUSES.indexOf(normalized);
-      return PROCESS_STATUSES[(index + 1) % PROCESS_STATUSES.length];
-    }
 
     function enforceCollabUniqueness(workspaceRecords) {
       const seenCollabByOwner = new Set();
@@ -727,26 +693,6 @@ function getCurrentUserCommentAuthorLabels() {
   return labels;
 }
 
-function normalizeEntityKind(rawKind) {
-  const kind = String(rawKind || "").trim().toLowerCase();
-  if (kind === "user" || kind === "person") return "user";
-  if (kind === "org" || kind === "organisation" || kind === "organization") return "org";
-  return null;
-}
-
-function isSelectableNode(node) {
-  return !!node && node.type !== "collaboration";
-}
-
-function canInlineEditNodeTitle(node) {
-  return !!node && (
-    node.type === "location" ||
-    node.type === "process" ||
-    node.type === "standard" ||
-    node.type === "handover"
-  );
-}
-
 function getNodeDisplayTitle(node, options = {}) {
   const fallback = typeof options.fallback === "string" && options.fallback ? options.fallback : "Untitled";
   if (!node) return fallback;
@@ -760,14 +706,6 @@ function getNodeDisplayTitle(node, options = {}) {
     return node.label || node.title || "Collaboration";
   }
   return String(node.label || node.title || "").trim() || fallback;
-}
-
-function isCircularNodeType(node) {
-  return !!node && (node.type === "portal" || node.type === "collaboration");
-}
-
-function isDiamondNodeType(node) {
-  return !!node && node.type === "entity";
 }
 
 function getLegacyEntityLinkForNode(node) {
@@ -5756,11 +5694,6 @@ function onViewportMouseDown(event) {
       return [...new Set(values.filter((id) => !!id && nodeById.has(id)))];
     }
 
-    function getStatusClass(status) {
-      if (!status) return "";
-      return `status-${String(status).toLowerCase().replace(/\s+/g, "-")}`;
-    }
-
     function finishInlineNodeTitleEdit(nodeId, nextTitle, options = {}) {
       const shouldCommit = options.commit !== false;
       if (shouldCommit) {
@@ -5855,35 +5788,6 @@ function onViewportMouseDown(event) {
           markerEl.style.height = `${markerSizePx}px`;
         });
       });
-    }
-
-    function getTypeShort(type) {
-      const map = {
-        location: "LOC",
-        process: "PRC",
-        standard: "STD",
-        handover: "HND",
-        portal: "PRTL",
-        entity: "ENT",
-        collaboration: "CLB"
-      };
-      return map[type] || type.toUpperCase();
-    }
-
-    function getTypeSortIndex(type) {
-      const index = TYPE_ORDER.indexOf(type);
-      return index >= 0 ? index : TYPE_ORDER.length;
-    }
-
-    function compareNodesStable(aNode, bNode) {
-      if (!aNode && !bNode) return 0;
-      if (!aNode) return 1;
-      if (!bNode) return -1;
-      const typeDiff = getTypeSortIndex(aNode.type) - getTypeSortIndex(bNode.type);
-      if (typeDiff !== 0) return typeDiff;
-      const labelDiff = aNode.label.localeCompare(bNode.label);
-      if (labelDiff !== 0) return labelDiff;
-      return aNode.id.localeCompare(bNode.id);
     }
 
     function getSelectedNode() {

@@ -1,0 +1,109 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab Collaboration Prototype</title>
+  <script type="module" crossorigin src="/assets/index-DbjJAjwP.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-D28MSYio.css">
+</head>
+<body>
+  <div class="app-grid">
+    <section id="leftDrawer" class="panel floating-panel">
+      <div class="panel-header">
+        <h2>Nodes</h2>
+      </div>
+      <div id="leftPanelBody" class="panel-body">
+        <div class="toggle-row">
+          <button id="byLocationBtn" type="button">By location</button>
+          <button id="allNodesBtn" type="button">All nodes</button>
+        </div>
+        <div id="nodeList" class="node-list"></div>
+      </div>
+      <button id="leftPanelCollapseTab" class="panel-collapse-tab panel-collapse-tab-left" type="button" aria-label="Collapse left panel">◀</button>
+    </section>
+
+    <section class="workspace-panel">
+      <h2>Workspace</h2>
+      <div class="canvas-header">
+        <button id="focusBackBtn" class="focus-back" type="button">Back</button>
+        <div id="focusBreadcrumb" class="breadcrumb"></div>
+      </div>
+      <div id="viewport" aria-label="Graph viewport">
+        <div id="bg-grid" aria-hidden="true">
+          <svg id="bg-grid-svg" aria-hidden="true" focusable="false" preserveAspectRatio="none">
+            <defs>
+              <pattern
+                id="bgGridPattern"
+                x="0"
+                y="0"
+                width="48"
+                height="48"
+                patternUnits="userSpaceOnUse"
+                patternTransform="skewX(-18) rotate(12)"
+              >
+                <path d="M 48 0 H 0 V 48" fill="none" stroke="#0000003a" stroke-width="1"></path>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#bgGridPattern)"></rect>
+          </svg>
+        </div>
+        <div id="bg-light" aria-hidden="true"></div>
+        <div id="bg-grain" aria-hidden="true"></div>
+        <div id="world">
+          <svg id="edges-layer" aria-hidden="true"></svg>
+        </div>
+      </div>
+      <div class="muted" style="margin-top: 8px;">Global node-card view with a transform camera (`#world`) for pan/zoom-ready navigation.</div>
+    </section>
+
+    <section id="rightDrawer" class="panel floating-panel">
+      <div id="rightPanelBody" class="panel-body">
+        <div id="detailsPane" class="details-pane"></div>
+      </div>
+      <button id="rightPanelCollapseTab" class="panel-collapse-tab panel-collapse-tab-right" type="button" aria-label="Collapse right panel">▶</button>
+    </section>
+  </div>
+  <div id="workspaceMenu" class="workspace-menu-wrap">
+    <button
+      id="workspaceMenuBtn"
+      class="workspace-menu-btn"
+      type="button"
+      aria-label="Workspaces"
+      aria-expanded="false"
+      title="Workspaces"
+    >☰</button>
+    <div id="workspaceMenuPanel" class="workspace-menu-panel" role="menu" aria-label="Workspace list"></div>
+  </div>
+  <button id="leftPanelPill" class="panel-pill panel-pill-left hidden" type="button" aria-label="Open nodes panel">
+    <span class="panel-pill-chevron" aria-hidden="true">▶</span>
+    <span class="panel-pill-label">Nodes</span>
+  </button>
+  <button id="rightPanelPill" class="panel-pill panel-pill-right hidden" type="button" aria-label="Open details panel">
+    <span class="panel-pill-chevron" aria-hidden="true">◀</span>
+    <span class="panel-pill-label">Details</span>
+  </button>
+  <div class="layout-mode-controls" aria-label="Layout mode controls">
+    <button id="forceModeBtn" class="layout-mode-icon-btn" type="button" aria-label="Force layout" title="Force layout">◎</button>
+    <button id="hybridModeBtn" class="layout-mode-icon-btn" type="button" aria-label="Hybrid layout" title="Hybrid layout">◧</button>
+  </div>
+  <div id="notifControl" class="notif-wrap">
+    <button id="notifBell" class="notif-btn" type="button" aria-label="Notifications">
+      <span class="bell-icon" aria-hidden="true"></span>
+      <span>Alerts</span>
+      <span id="notifCount" class="notif-count zero">0</span>
+    </button>
+    <div id="notificationsPanel" class="notifications-panel hidden"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+  <!--
+    Prompt 5.3 migration: the workspace now uses a viewport/world camera model.
+    Node cards and SVG edges share the same transformed world layer so pan/zoom
+    can be applied uniformly while node coordinates remain in world space.
+    Selection, expansion filtering, tasks/comments, and notifications remain unchanged.
+  -->
+</body>
+</html>
