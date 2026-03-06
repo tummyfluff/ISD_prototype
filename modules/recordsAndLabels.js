@@ -1,6 +1,10 @@
 import { normalizeEntityKind } from "./nodeNormalization.js";
 
 export function createRecordsAndLabels(deps) {
+  function isAdminUserId(userId) {
+    return !!deps.ADMIN_USER_ID && userId === deps.ADMIN_USER_ID;
+  }
+
   function getWorkspaceOptionsForCurrentUser() {
     const currentUserId = deps.getCurrentUserId();
     if (!currentUserId) return [];
@@ -132,6 +136,9 @@ export function createRecordsAndLabels(deps) {
 
   function getLegacyEntityLinkForNode(node) {
     if (!node || typeof node.id !== "string") return null;
+    if (node.meta && typeof node.meta === "object" && node.meta.suppressLegacyEntityLink) {
+      return null;
+    }
     return deps.legacyEntityLinkByNodeId[node.id] || null;
   }
 
@@ -210,12 +217,13 @@ export function createRecordsAndLabels(deps) {
       }));
     }
     return getSortedUsersForMenu().map((userRecord) => {
+      if (isAdminUserId(userRecord.id)) return null;
       const orgName = userRecord.orgId && orgById.has(userRecord.orgId) ? orgById.get(userRecord.orgId).name : "";
       return {
         id: userRecord.id,
         label: orgName ? `${userRecord.name || userRecord.id} (${orgName})` : (userRecord.name || userRecord.id)
       };
-    });
+    }).filter(Boolean);
   }
 
   function getInitialEntitySelectionForNode(node) {

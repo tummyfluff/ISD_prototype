@@ -462,6 +462,11 @@
       color: #1d4ed8;
     }
 
+    .portal-link-modal-btn.is-danger {
+      border-color: rgba(220, 38, 38, 0.36);
+      color: #b91c1c;
+    }
+
     .portal-link-modal-btn:disabled {
       opacity: 0.64;
       cursor: not-allowed;
@@ -525,6 +530,35 @@
       color: #64748b;
       font-size: 0.9rem;
       line-height: 1.45;
+    }
+
+    .admin-editor-modal {
+      width: min(520px, calc(100vw - 24px));
+    }
+
+    .admin-editor-input {
+      width: 100%;
+    }
+
+    .admin-editor-body {
+      max-height: min(56vh, 440px);
+      gap: 8px;
+    }
+
+    .admin-editor-row {
+      padding: 0;
+      border-color: rgba(203, 213, 225, 0.8);
+      background: rgba(255, 255, 255, 0.52);
+    }
+
+    .admin-editor-label {
+      width: 100%;
+      cursor: default;
+    }
+
+    .admin-menu-action {
+      width: 100%;
+      font-weight: 600;
     }
 
     .edge-create-handle {

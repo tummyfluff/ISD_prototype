@@ -141,6 +141,9 @@ const CURRENT_USER_HANDLE = "@Hannah";
     ];
 
     const STORE_KEY = "amytis_store_v1";
+    const STORE_API_ENDPOINT = "/api/store";
+    const ADMIN_USER_ID = "user-admin";
+    const ADMIN_USER_NAME = "Admin";
     const LEGACY_ENTITY_LINK_BY_NODE_ID = Object.freeze({
       org_evans_lab: { entityKind: "org", entityRefId: "org-evans-lab" },
       org_genomics_core: { entityKind: "org", entityRefId: "org-genomics-core" },
@@ -151,9 +154,7 @@ const CURRENT_USER_HANDLE = "@Hannah";
     const LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID = Object.freeze({
       portal_genomics_core: { kind: "org", refId: "org-genomics-core" }
     });
-    const REQUIRED_ORG_RECORDS = Object.freeze([
-      { id: "org-genomics-core", name: "Genomics Core (External)" }
-    ]);
+    const REQUIRED_ORG_RECORDS = Object.freeze([]);
 
     function extractEntityArray(data, key) {
       if (!data || typeof data !== "object") return [];
@@ -168,44 +169,14 @@ const CURRENT_USER_HANDLE = "@Hannah";
     }
 
     async function loadInitialData() {
-      try {
-        const storedRaw = window.localStorage.getItem(STORE_KEY);
-        if (storedRaw) {
-          try {
-            return JSON.parse(storedRaw);
-          } catch (error) {
-            console.warn("Failed to parse local storage amytis_store_v1 payload.", error);
-          }
-        }
-      } catch (error) {
-        console.warn("Failed to read local storage amytis_store_v1 payload.", error);
+      const response = await fetch(STORE_API_ENDPOINT, {
+        method: "GET",
+        cache: "no-store"
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load canonical store: ${response.status} ${response.statusText}`);
       }
-
-      try {
-        const response = await fetch("data/defaultData.json");
-        if (response.ok) {
-          return await response.json();
-        }
-      } catch (error) {
-        console.warn("Failed to load data/defaultData.json.", error);
-      }
-
-      try {
-        const moduleData = await import("./data/sampleData.js");
-        if (moduleData && moduleData.sampleData) {
-          return moduleData.sampleData;
-        }
-      } catch (error) {
-        console.error("Failed to import fallback data/sampleData.js.", error);
-      }
-
-      return {
-        users: [],
-        orgs: [],
-        nodes: [],
-        edges: [],
-        workspaces: []
-      };
+      return await response.json();
     }
 
     function buildStore(data) {
@@ -257,6 +228,10 @@ const CURRENT_USER_HANDLE = "@Hannah";
     let currentWorkspaceId = null;
     let currentWorkspaceKind = "normal";
     let currentUserId = null;
+    let bootErrorMessage = "";
+    let persistErrorMessage = "";
+    let persistStoreRequestChain = Promise.resolve();
+    let persistStatusBannerEl = null;
     let appliedWorkspaceId = null;
     let hasAppliedWorkspace = false;
     let workspaceMenuOpen = false;
@@ -300,6 +275,27 @@ const CURRENT_USER_HANDLE = "@Hannah";
     open: false,
     nodeId: null,
     selectedNodeIds: []
+  };
+  let adminOrgModalState = {
+    open: false,
+    draftName: "",
+    renameOrgId: null,
+    renameDraft: ""
+  };
+  let adminUserModalState = {
+    open: false,
+    selectedOrgId: "",
+    draftName: "",
+    renameUserId: null,
+    renameDraft: ""
+  };
+  let confirmationModalState = {
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Delete",
+    confirmTone: "delete",
+    onConfirm: null
   };
   let detailsTaskComposerState = {
     nodeId: null,
@@ -348,6 +344,7 @@ const {
   getPortalLinkedWorkspaceName
 } = createRecordsAndLabels({
   CURRENT_USER,
+  ADMIN_USER_ID,
   legacyEntityLinkByNodeId: LEGACY_ENTITY_LINK_BY_NODE_ID,
   getUsers: () => users,
   getOrgs: () => orgs,
@@ -378,6 +375,7 @@ const {
     function initializeRuntimeDataFromStore(nextStore) {
       store = nextStore;
       const seededOrgRecords = seedRequiredOrgRecordsInStore(store);
+      const seededUserRecords = seedRequiredUserRecordsInStore(store);
 
       users = Array.from(store.usersById.values()).map((user) => ({ ...user }));
       orgs = Array.from(store.orgsById.values()).map((org) => ({ ...org }));
@@ -420,7 +418,9 @@ const {
                 : null,
             owner: (node.ownerId && userById.get(node.ownerId)
               ? userById.get(node.ownerId).name
-              : (node.ownerId || "Unknown")),
+              : (typeof node.meta?.deletedOwnerLabel === "string" && node.meta.deletedOwnerLabel.trim()
+                ? node.meta.deletedOwnerLabel.trim()
+                : (node.ownerId || "Unknown"))),
             summary: typeof node.summary === "string" && node.summary.trim()
               ? node.summary
               : `${typeof node.title === "string" ? node.title : node.id} node`,
@@ -462,7 +462,8 @@ const {
       allEdgesRuntime = Array.from(store.edgesById.values())
         .map((edge) => ({ ...edge }));
       workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-      if (seededOrgRecords || migratedNodeData) {
+      if (seededOrgRecords || seededUserRecords || migratedNodeData) {
+        syncUsersRuntimeAndStore();
         syncNodeRuntimeAndStore();
         persistStoreToLocalStorage();
       }
@@ -825,6 +826,37 @@ function seedRequiredOrgRecordsInStore(targetStore) {
   return true;
 }
 
+function seedRequiredUserRecordsInStore(targetStore) {
+  if (!targetStore) return false;
+  const nextUserMap = targetStore.usersById instanceof Map
+    ? new Map(targetStore.usersById)
+    : new Map(extractEntityArray(targetStore, "users").map((userRecord) => [userRecord.id, { ...userRecord }]));
+  if (!nextUserMap.has(ADMIN_USER_ID)) {
+    nextUserMap.set(ADMIN_USER_ID, {
+      id: ADMIN_USER_ID,
+      name: ADMIN_USER_NAME,
+      orgId: null
+    });
+  }
+  const nextAdminRecord = nextUserMap.get(ADMIN_USER_ID);
+  let changed = false;
+  if (!nextAdminRecord || nextAdminRecord.name !== ADMIN_USER_NAME || nextAdminRecord.orgId !== null) {
+    nextUserMap.set(ADMIN_USER_ID, {
+      id: ADMIN_USER_ID,
+      name: ADMIN_USER_NAME,
+      orgId: null
+    });
+    changed = true;
+  } else if (!targetStore.usersById?.has?.(ADMIN_USER_ID)) {
+    changed = true;
+  }
+  if (!changed) return false;
+  const nextUsers = Array.from(nextUserMap.values());
+  targetStore.users = nextUsers.map((userRecord) => ({ ...userRecord }));
+  targetStore.usersById = new Map(nextUsers.map((userRecord) => [userRecord.id, { ...userRecord }]));
+  return true;
+}
+
 function getDirectlyLinkedNodeIds(nodeId) {
   if (!nodeId) return [];
   const seenIds = new Set();
@@ -925,7 +957,7 @@ function getCollaboratorPickerGroups(node) {
     getResolvedHandoverCollaborators(node).map((collaborator) => getHandoverCollaboratorSignature(collaborator.kind, collaborator.refId))
   );
   const userOptions = getSortedUsersForMenu()
-    .filter((userRecord) => userRecord.id !== node.ownerId)
+    .filter((userRecord) => userRecord.id !== node.ownerId && !isAdminUserId(userRecord.id))
     .map((userRecord) => ({
       key: getHandoverCollaboratorSignature("user", userRecord.id),
       kind: "user",
@@ -1576,6 +1608,44 @@ function resetWorkspaceCreateState() {
 function resetWorkspaceRenameState() {
   workspaceRenameId = null;
   workspaceRenameDraft = "";
+}
+
+function isAdminUserId(userId) {
+  return !!userId && userId === ADMIN_USER_ID;
+}
+
+function isAdminMode() {
+  return isAdminUserId(currentUserId);
+}
+
+function resetAdminOrgModalState() {
+  adminOrgModalState = {
+    open: false,
+    draftName: "",
+    renameOrgId: null,
+    renameDraft: ""
+  };
+}
+
+function resetAdminUserModalState() {
+  adminUserModalState = {
+    open: false,
+    selectedOrgId: "",
+    draftName: "",
+    renameUserId: null,
+    renameDraft: ""
+  };
+}
+
+function resetConfirmationModalState() {
+  confirmationModalState = {
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Delete",
+    confirmTone: "delete",
+    onConfirm: null
+  };
 }
 
 function resetDetailsEditState() {
@@ -2781,6 +2851,20 @@ function sanitizeAfterNodeDelete() {
   }
 }
 
+function refreshActiveCollaborationWorkspace() {
+  if (currentWorkspaceKind !== "collab" || !currentWorkspaceId) return false;
+  const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
+  if (!workspaceRecord) return false;
+  applyWorkspaceData(currentWorkspaceId, { sanitizeState: true });
+  const result = normalizeCollaborationWorkspaceSemantics();
+  if (result.reloadWorkspace) {
+    applyWorkspaceData(currentWorkspaceId, { sanitizeState: true });
+  }
+  appliedWorkspaceId = null;
+  hasAppliedWorkspace = false;
+  return !!result.changed || !!result.reloadWorkspace;
+}
+
 function deleteNodeFromCurrentWorkspace(nodeId) {
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
   if (!workspaceRecord || !nodeId) return false;
@@ -2811,10 +2895,15 @@ function deleteNodeFromCurrentWorkspace(nodeId) {
 
 function deleteNodeGlobally(nodeId) {
   if (!nodeId) return false;
-  const nodeRecord = allNodesRuntime.find((node) => node.id === nodeId);
-  const nodeExists = !!nodeRecord;
+  const workspaceMemberships = workspaces.filter(
+    (workspace) => Array.isArray(workspace.nodeIds) && workspace.nodeIds.includes(nodeId)
+  );
+  const nodeRecord = allNodesRuntime.find((node) => node.id === nodeId) || getNodeById(nodeId) || null;
+  const nodeExists = !!nodeRecord || workspaceMemberships.length > 0;
   if (!nodeExists) return false;
-  if (nodeRecord?.type === "collaboration") return false;
+  if (nodeRecord?.type === "collaboration" || workspaceMemberships.some((workspace) => workspace.homeNodeId === nodeId)) {
+    return false;
+  }
 
   allNodesRuntime = allNodesRuntime.filter((node) => node.id !== nodeId);
   const removedEdgeIds = new Set(
@@ -2823,15 +2912,24 @@ function deleteNodeGlobally(nodeId) {
       .map((edge) => edge.id)
   );
   allEdgesRuntime = allEdgesRuntime.filter((edge) => !removedEdgeIds.has(edge.id));
+  const remainingEdgeById = new Map(allEdgesRuntime.map((edge) => [edge.id, edge]));
 
   workspaces.forEach((workspace) => {
     if (Array.isArray(workspace.nodeIds)) {
       workspace.nodeIds = workspace.nodeIds.filter((id) => id !== nodeId);
     }
-    if (Array.isArray(workspace.edgeIds) && removedEdgeIds.size) {
-      workspace.edgeIds = workspace.edgeIds.filter((edgeId) => !removedEdgeIds.has(edgeId));
+    if (Array.isArray(workspace.edgeIds)) {
+      workspace.edgeIds = workspace.edgeIds.filter((edgeId) => {
+        if (removedEdgeIds.has(edgeId)) return false;
+        const edgeRecord = remainingEdgeById.get(edgeId);
+        return !!edgeRecord && edgeRecord.sourceId !== nodeId && edgeRecord.targetId !== nodeId;
+      });
     }
   });
+
+  if (currentWorkspaceKind === "collab") {
+    refreshActiveCollaborationWorkspace();
+  }
 
   syncNodeRuntimeAndStore();
   syncEdgeRuntimeAndStore();
@@ -2859,6 +2957,10 @@ function requestNodeDelete(nodeId) {
       const confirmedGlobal = window.confirm(`Delete "${node.label || node.id}" globally from all workspaces?`);
       if (!confirmedGlobal) return;
       deleted = deleteNodeGlobally(nodeId);
+      if (!deleted && currentWorkspaceKind === "collab") {
+        refreshActiveCollaborationWorkspace();
+        deleted = deleteNodeGlobally(nodeId);
+      }
     } else if (normalizedScope === "w") {
       deleted = deleteNodeFromCurrentWorkspace(nodeId);
     } else {
@@ -3023,6 +3125,13 @@ function applyEntityLinkToNode(node, entityKind, entityRefId) {
   }
   if (node.entityRefId !== entityRefId) {
     node.entityRefId = entityRefId;
+    changed = true;
+  }
+  if (node.meta && typeof node.meta === "object" && node.meta.suppressLegacyEntityLink) {
+    delete node.meta.suppressLegacyEntityLink;
+    if (!Object.keys(node.meta).length) {
+      delete node.meta;
+    }
     changed = true;
   }
   if (applyDerivedEntityIdentity(node)) {
@@ -3463,6 +3572,378 @@ function confirmHandoverObjectPickerModal() {
   renderDetailsPane();
 }
 
+function openConfirmationModal({ title, message, confirmLabel = "Delete", confirmTone = "delete", onConfirm = null }) {
+  confirmationModalState = {
+    open: true,
+    title: String(title || "Confirm action"),
+    message: String(message || ""),
+    confirmLabel: String(confirmLabel || "Delete"),
+    confirmTone,
+    onConfirm: typeof onConfirm === "function" ? onConfirm : null
+  };
+  renderConfirmationModal();
+  requestAnimationFrame(() => {
+    if (!confirmationModalState.open) return;
+    confirmationModalConfirmBtnEl.focus();
+  });
+}
+
+function closeConfirmationModal() {
+  resetConfirmationModalState();
+  renderConfirmationModal();
+}
+
+function confirmConfirmationModal() {
+  if (!confirmationModalState.open) return;
+  const handler = confirmationModalState.onConfirm;
+  closeConfirmationModal();
+  if (typeof handler === "function") {
+    handler();
+  }
+}
+
+function renderConfirmationModal() {
+  if (!confirmationModalOverlayEl || !confirmationModalEl) return;
+  const isOpen = !!confirmationModalState.open;
+  confirmationModalOverlayEl.classList.toggle("is-open", isOpen);
+  confirmationModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+  confirmationModalTitleEl.textContent = confirmationModalState.title || "Confirm action";
+  confirmationModalMessageEl.textContent = confirmationModalState.message || "";
+  confirmationModalConfirmBtnEl.textContent = confirmationModalState.confirmLabel || "Delete";
+  confirmationModalConfirmBtnEl.classList.toggle("is-danger", confirmationModalState.confirmTone === "delete");
+}
+
+function openAdminOrgModal() {
+  if (!isAdminMode()) return false;
+  adminOrgModalState.open = true;
+  adminOrgModalState.renameOrgId = null;
+  adminOrgModalState.renameDraft = "";
+  renderAdminOrgModal();
+  requestAnimationFrame(() => {
+    if (!adminOrgModalState.open) return;
+    adminOrgModalInputEl.focus();
+  });
+  return true;
+}
+
+function closeAdminOrgModal() {
+  resetAdminOrgModalState();
+  renderAdminOrgModal();
+}
+
+function renderAdminOrgModal() {
+  if (!adminOrgModalOverlayEl || !adminOrgModalBodyEl || !adminOrgModalInputEl) return;
+  const isOpen = !!adminOrgModalState.open && isAdminMode();
+  adminOrgModalOverlayEl.classList.toggle("is-open", isOpen);
+  adminOrgModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const sortedOrgs = getSortedOrgsForMenu();
+  adminOrgModalInputEl.value = adminOrgModalState.draftName;
+  adminOrgModalInputEl.onkeydown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const trimmedName = String(adminOrgModalState.draftName || adminOrgModalInputEl.value || "").trim();
+    if (!trimmedName) return;
+    const nextOrgId = generateOrgId(trimmedName);
+    orgs.push({ id: nextOrgId, name: trimmedName });
+    syncOrgsRuntimeAndStore();
+    adminOrgModalState.draftName = "";
+    persistStoreToLocalStorage();
+    renderAdminOrgModal();
+    renderAll();
+    requestAnimationFrame(() => adminOrgModalInputEl.focus());
+  };
+
+  adminOrgModalBodyEl.innerHTML = "";
+  if (!sortedOrgs.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "picker-modal-empty";
+    emptyState.textContent = "No organisations yet.";
+    adminOrgModalBodyEl.appendChild(emptyState);
+    return;
+  }
+
+  sortedOrgs.forEach((orgRecord) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "workspace-menu-row admin-editor-row";
+    const isRenaming = adminOrgModalState.renameOrgId === orgRecord.id;
+    if (isRenaming) {
+      const inputEl = document.createElement("input");
+      inputEl.type = "text";
+      inputEl.className = "workspace-rename-input";
+      inputEl.maxLength = 80;
+      inputEl.value = adminOrgModalState.renameDraft;
+      inputEl.addEventListener("input", () => {
+        adminOrgModalState.renameDraft = inputEl.value;
+      });
+      inputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (renameOrganisationRecord(orgRecord.id, adminOrgModalState.renameDraft)) {
+            adminOrgModalState.renameOrgId = null;
+            adminOrgModalState.renameDraft = "";
+            renderAll();
+          } else {
+            renderAdminOrgModal();
+          }
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          adminOrgModalState.renameOrgId = null;
+          adminOrgModalState.renameDraft = "";
+          renderAdminOrgModal();
+        }
+      });
+      inputEl.addEventListener("blur", () => {
+        if (adminOrgModalState.renameOrgId !== orgRecord.id) return;
+        adminOrgModalState.renameOrgId = null;
+        adminOrgModalState.renameDraft = "";
+        renderAdminOrgModal();
+      });
+      rowEl.appendChild(inputEl);
+      requestAnimationFrame(() => {
+        if (!inputEl.isConnected) return;
+        inputEl.focus();
+        inputEl.select();
+      });
+    } else {
+      const labelEl = document.createElement("div");
+      labelEl.className = "workspace-menu-item admin-editor-label";
+      labelEl.textContent = orgRecord.name || orgRecord.id;
+      rowEl.appendChild(labelEl);
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "workspace-menu-item-actions";
+      const renameBtnEl = document.createElement("button");
+      renameBtnEl.type = "button";
+      renameBtnEl.className = "workspace-row-icon-btn rename";
+      renameBtnEl.setAttribute("aria-label", `Rename organisation ${orgRecord.name || orgRecord.id}`);
+      renameBtnEl.textContent = "✎";
+      renameBtnEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        adminOrgModalState.renameOrgId = orgRecord.id;
+        adminOrgModalState.renameDraft = orgRecord.name || "";
+        renderAdminOrgModal();
+      });
+      actionsEl.appendChild(renameBtnEl);
+      const deleteBtnEl = document.createElement("button");
+      deleteBtnEl.type = "button";
+      deleteBtnEl.className = "workspace-row-icon-btn delete";
+      deleteBtnEl.setAttribute("aria-label", `Delete organisation ${orgRecord.name || orgRecord.id}`);
+      deleteBtnEl.textContent = "✕";
+      deleteBtnEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openConfirmationModal({
+          title: "Delete organisation?",
+          message: `Deleting "${orgRecord.name || orgRecord.id}" will delete all its workspaces, nodes, and edges unless they are still shared elsewhere.`,
+          confirmLabel: "Delete organisation",
+          confirmTone: "delete",
+          onConfirm: () => {
+            if (!deleteOrganisationRecordById(orgRecord.id)) return;
+            if (adminUserModalState.selectedOrgId === orgRecord.id) {
+              adminUserModalState.selectedOrgId = "";
+            }
+            renderAll();
+            renderAdminOrgModal();
+            renderAdminUserModal();
+          }
+        });
+      });
+      actionsEl.appendChild(deleteBtnEl);
+      rowEl.appendChild(actionsEl);
+    }
+    adminOrgModalBodyEl.appendChild(rowEl);
+  });
+}
+
+function openAdminUserModal() {
+  if (!isAdminMode()) return false;
+  if (!adminUserModalState.selectedOrgId || !orgById.has(adminUserModalState.selectedOrgId)) {
+    adminUserModalState.selectedOrgId = getSortedOrgsForMenu()[0]?.id || "";
+  }
+  adminUserModalState.open = true;
+  adminUserModalState.renameUserId = null;
+  adminUserModalState.renameDraft = "";
+  renderAdminUserModal();
+  requestAnimationFrame(() => {
+    if (!adminUserModalState.open) return;
+    if (!adminUserModalOrgSelectEl.disabled) {
+      adminUserModalOrgSelectEl.focus();
+    }
+  });
+  return true;
+}
+
+function closeAdminUserModal() {
+  resetAdminUserModalState();
+  renderAdminUserModal();
+}
+
+function renderAdminUserModal() {
+  if (!adminUserModalOverlayEl || !adminUserModalBodyEl || !adminUserModalInputEl || !adminUserModalOrgSelectEl) return;
+  const isOpen = !!adminUserModalState.open && isAdminMode();
+  adminUserModalOverlayEl.classList.toggle("is-open", isOpen);
+  adminUserModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
+  if (!isOpen) return;
+
+  const sortedOrgs = getSortedOrgsForMenu();
+  if (!adminUserModalState.selectedOrgId || !sortedOrgs.some((orgRecord) => orgRecord.id === adminUserModalState.selectedOrgId)) {
+    adminUserModalState.selectedOrgId = sortedOrgs[0]?.id || "";
+  }
+
+  adminUserModalOrgSelectEl.innerHTML = "";
+  sortedOrgs.forEach((orgRecord) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = orgRecord.id;
+    optionEl.textContent = orgRecord.name || orgRecord.id;
+    adminUserModalOrgSelectEl.appendChild(optionEl);
+  });
+  adminUserModalOrgSelectEl.disabled = sortedOrgs.length === 0;
+  adminUserModalOrgSelectEl.value = adminUserModalState.selectedOrgId;
+
+  adminUserModalInputEl.value = adminUserModalState.draftName;
+  adminUserModalInputEl.disabled = !adminUserModalState.selectedOrgId;
+  adminUserModalInputEl.onkeydown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const trimmedName = String(adminUserModalState.draftName || adminUserModalInputEl.value || "").trim();
+    if (!trimmedName || !adminUserModalState.selectedOrgId) return;
+    const nextUserId = generateUserId(trimmedName);
+    users.push({
+      id: nextUserId,
+      name: trimmedName,
+      orgId: adminUserModalState.selectedOrgId
+    });
+    syncUsersRuntimeAndStore();
+    adminUserModalState.draftName = "";
+    persistStoreToLocalStorage();
+    renderAdminUserModal();
+    renderAll();
+    requestAnimationFrame(() => adminUserModalInputEl.focus());
+  };
+
+  adminUserModalBodyEl.innerHTML = "";
+  if (!sortedOrgs.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "picker-modal-empty";
+    emptyState.textContent = "Create an organisation first.";
+    adminUserModalBodyEl.appendChild(emptyState);
+    return;
+  }
+
+  const visibleUsers = getSortedUsersForMenu().filter((userRecord) => {
+    if (isAdminUserId(userRecord.id)) return false;
+    return userRecord.orgId === adminUserModalState.selectedOrgId;
+  });
+  if (!visibleUsers.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "picker-modal-empty";
+    emptyState.textContent = "No users in this organisation yet.";
+    adminUserModalBodyEl.appendChild(emptyState);
+    return;
+  }
+
+  visibleUsers.forEach((userRecord) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "workspace-menu-row admin-editor-row";
+    const isRenaming = adminUserModalState.renameUserId === userRecord.id;
+    if (isRenaming) {
+      const inputEl = document.createElement("input");
+      inputEl.type = "text";
+      inputEl.className = "workspace-rename-input";
+      inputEl.maxLength = 80;
+      inputEl.value = adminUserModalState.renameDraft;
+      inputEl.addEventListener("input", () => {
+        adminUserModalState.renameDraft = inputEl.value;
+      });
+      inputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (renameUserRecord(userRecord.id, adminUserModalState.renameDraft)) {
+            adminUserModalState.renameUserId = null;
+            adminUserModalState.renameDraft = "";
+            renderAll();
+          } else {
+            renderAdminUserModal();
+          }
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          adminUserModalState.renameUserId = null;
+          adminUserModalState.renameDraft = "";
+          renderAdminUserModal();
+        }
+      });
+      inputEl.addEventListener("blur", () => {
+        if (adminUserModalState.renameUserId !== userRecord.id) return;
+        adminUserModalState.renameUserId = null;
+        adminUserModalState.renameDraft = "";
+        renderAdminUserModal();
+      });
+      rowEl.appendChild(inputEl);
+      requestAnimationFrame(() => {
+        if (!inputEl.isConnected) return;
+        inputEl.focus();
+        inputEl.select();
+      });
+    } else {
+      const labelEl = document.createElement("div");
+      labelEl.className = "workspace-menu-item admin-editor-label";
+      labelEl.textContent = userRecord.name || userRecord.id;
+      rowEl.appendChild(labelEl);
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "workspace-menu-item-actions";
+      const renameBtnEl = document.createElement("button");
+      renameBtnEl.type = "button";
+      renameBtnEl.className = "workspace-row-icon-btn rename";
+      renameBtnEl.setAttribute("aria-label", `Rename user ${userRecord.name || userRecord.id}`);
+      renameBtnEl.textContent = "✎";
+      renameBtnEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        adminUserModalState.renameUserId = userRecord.id;
+        adminUserModalState.renameDraft = userRecord.name || "";
+        renderAdminUserModal();
+      });
+      actionsEl.appendChild(renameBtnEl);
+      const deleteBtnEl = document.createElement("button");
+      deleteBtnEl.type = "button";
+      deleteBtnEl.className = "workspace-row-icon-btn delete";
+      deleteBtnEl.setAttribute("aria-label", `Delete user ${userRecord.name || userRecord.id}`);
+      deleteBtnEl.textContent = "✕";
+      deleteBtnEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openConfirmationModal({
+          title: "Delete user?",
+          message: `Deleting "${userRecord.name || userRecord.id}" will delete all of their workspaces, nodes, and edges unless they are still shared elsewhere.`,
+          confirmLabel: "Delete user",
+          confirmTone: "delete",
+          onConfirm: () => {
+            if (!deleteUserRecordById(userRecord.id)) return;
+            renderAll();
+            renderAdminUserModal();
+          }
+        });
+      });
+      actionsEl.appendChild(deleteBtnEl);
+      rowEl.appendChild(actionsEl);
+    }
+    adminUserModalBodyEl.appendChild(rowEl);
+  });
+}
+
 function handlePortalDoubleClick(nodeId) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "portal") return;
@@ -3611,6 +4092,22 @@ function openCreateNodeMenu(clientX, clientY, worldX, worldY) {
   renderCreateNodeMenu();
 }
 
+function syncUsersRuntimeAndStore() {
+  userById = new Map(users.map((user) => [user.id, user]));
+  if (store) {
+    store.users = users.map((user) => ({ ...user }));
+    store.usersById = new Map(users.map((user) => [user.id, { ...user }]));
+  }
+}
+
+function syncOrgsRuntimeAndStore() {
+  orgById = new Map(orgs.map((org) => [org.id, org]));
+  if (store) {
+    store.orgs = orgs.map((org) => ({ ...org }));
+    store.orgsById = new Map(orgs.map((org) => [org.id, { ...org }]));
+  }
+}
+
 function syncWorkspaceRuntimeAndStore() {
   enforceCollabUniqueness(workspaces);
   workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
@@ -3655,6 +4152,42 @@ function generateWorkspaceId(ownerId, name) {
   return `${candidate}-${counter}`;
 }
 
+function generateOrgId(name) {
+  const nameSlug = sanitizeWorkspaceSlug(name) || "org";
+  let candidate = `org-${nameSlug}`;
+  if (!orgById.has(candidate)) {
+    return candidate;
+  }
+  const stamp = Date.now().toString(36);
+  candidate = `org-${nameSlug}-${stamp}`;
+  if (!orgById.has(candidate)) {
+    return candidate;
+  }
+  let counter = 2;
+  while (orgById.has(`${candidate}-${counter}`)) {
+    counter += 1;
+  }
+  return `${candidate}-${counter}`;
+}
+
+function generateUserId(name) {
+  const nameSlug = sanitizeWorkspaceSlug(name) || "user";
+  let candidate = `user-${nameSlug}`;
+  if (!userById.has(candidate)) {
+    return candidate;
+  }
+  const stamp = Date.now().toString(36);
+  candidate = `user-${nameSlug}-${stamp}`;
+  if (!userById.has(candidate)) {
+    return candidate;
+  }
+  let counter = 2;
+  while (userById.has(`${candidate}-${counter}`)) {
+    counter += 1;
+  }
+  return `${candidate}-${counter}`;
+}
+
 function toPersistableNode(node) {
   const clone = { ...node };
   delete clone.label;
@@ -3674,17 +4207,95 @@ function buildPersistableDataSnapshot() {
   };
 }
 
-function persistStoreToLocalStorage() {
-  try {
-    const payload = buildPersistableDataSnapshot();
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    console.warn("Failed to persist amytis_store_v1 payload.", error);
+function ensurePersistStatusBanner() {
+  if (persistStatusBannerEl && persistStatusBannerEl.isConnected) return persistStatusBannerEl;
+  if (!document.body) return null;
+  const banner = document.createElement("div");
+  banner.hidden = true;
+  banner.style.position = "fixed";
+  banner.style.top = "12px";
+  banner.style.right = "12px";
+  banner.style.zIndex = "9999";
+  banner.style.maxWidth = "360px";
+  banner.style.padding = "10px 12px";
+  banner.style.borderRadius = "12px";
+  banner.style.border = "1px solid rgba(180, 58, 58, 0.3)";
+  banner.style.background = "rgba(122, 23, 23, 0.94)";
+  banner.style.color = "#fff7f7";
+  banner.style.fontSize = "12px";
+  banner.style.lineHeight = "1.4";
+  banner.style.boxShadow = "0 10px 28px rgba(0, 0, 0, 0.2)";
+  banner.style.backdropFilter = "blur(8px)";
+  document.body.appendChild(banner);
+  persistStatusBannerEl = banner;
+  return banner;
+}
+
+function renderPersistStatusBanner() {
+  const banner = ensurePersistStatusBanner();
+  if (!banner) return;
+  if (!persistErrorMessage) {
+    banner.hidden = true;
+    banner.textContent = "";
+    return;
+  }
+  banner.hidden = false;
+  banner.textContent = persistErrorMessage;
+}
+
+async function persistStoreSnapshotToServer(payload) {
+  const response = await fetch(STORE_API_ENDPOINT, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    cache: "no-store",
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    let reason = `${response.status} ${response.statusText}`;
+    try {
+      const errorPayload = await response.json();
+      if (errorPayload && typeof errorPayload.error === "string" && errorPayload.error.trim()) {
+        reason = errorPayload.error.trim();
+      }
+    } catch (error) {
+      // Ignore response parsing errors and keep the HTTP status text.
+    }
+    throw new Error(reason);
   }
 }
 
+function persistStoreToLocalStorage() {
+  let payload = null;
+  try {
+    payload = buildPersistableDataSnapshot();
+  } catch (error) {
+    persistErrorMessage = "Failed to build the canonical store snapshot.";
+    renderPersistStatusBanner();
+    console.warn("Failed to build canonical store payload.", error);
+    return;
+  }
+
+  persistStoreRequestChain = persistStoreRequestChain
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await persistStoreSnapshotToServer(payload);
+        if (persistErrorMessage) {
+          persistErrorMessage = "";
+          renderPersistStatusBanner();
+        }
+      } catch (error) {
+        persistErrorMessage = `Failed to save data to ${STORE_API_ENDPOINT}.`;
+        renderPersistStatusBanner();
+        console.warn("Failed to persist canonical store payload.", error);
+      }
+    });
+}
+
 function createWorkspaceForCurrentUser(name) {
-  if (!currentUserId) return null;
+  if (!currentUserId || isAdminMode()) return null;
   const trimmedName = String(name || "").trim();
   if (!trimmedName) return null;
 
@@ -3740,6 +4351,353 @@ function deleteWorkspace(workspaceId) {
     hasAppliedWorkspace = false;
   }
 
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function getOwnerFallbackLabel(node) {
+  if (!node) return "Unknown";
+  const deletedOwnerLabel = typeof node.meta?.deletedOwnerLabel === "string" ? node.meta.deletedOwnerLabel.trim() : "";
+  if (deletedOwnerLabel) return deletedOwnerLabel;
+  return node.ownerId || "Unknown";
+}
+
+function refreshRuntimeOwnerLabels() {
+  allNodesRuntime.forEach((node) => {
+    if (!node) return;
+    if (node.ownerId && userById.has(node.ownerId)) {
+      node.owner = userById.get(node.ownerId)?.name || node.ownerId;
+      return;
+    }
+    node.owner = getOwnerFallbackLabel(node);
+  });
+}
+
+function getTaskAssignmentLabelsForUserRecord(userRecord, overrideOrgName = null) {
+  const labels = new Set();
+  if (!userRecord) return labels;
+  const userName = String(userRecord.name || "").trim();
+  if (userName) {
+    labels.add(userName);
+  }
+  const orgName = typeof overrideOrgName === "string"
+    ? overrideOrgName.trim()
+    : getOrgDisplayName(userRecord.orgId);
+  if (userName && orgName) {
+    labels.add(`${orgName} / ${userName}`);
+  }
+  return labels;
+}
+
+function getTaskAssignmentLabelsForOrgRecord(orgRecord) {
+  const labels = new Set();
+  const orgName = String(orgRecord?.name || "").trim();
+  if (orgName) {
+    labels.add(orgName);
+  }
+  return labels;
+}
+
+function rewriteTaskAssigneeLabels(labelMap) {
+  if (!(labelMap instanceof Map) || !labelMap.size) return false;
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || !Array.isArray(node.tasks)) return;
+    node.tasks.forEach((task) => {
+      const currentValue = String(task?.assignedTo || "").trim();
+      if (!currentValue || !labelMap.has(currentValue)) return;
+      const nextValue = labelMap.get(currentValue);
+      if (typeof nextValue !== "string" || !nextValue.trim() || nextValue === task.assignedTo) return;
+      task.assignedTo = nextValue;
+      changed = true;
+    });
+  });
+  return changed;
+}
+
+function removeTasksAssignedToLabels(labelsToDelete) {
+  if (!(labelsToDelete instanceof Set) || !labelsToDelete.size) return false;
+  const groupedTaskIds = new Set();
+  const singleTasks = [];
+  allNodesRuntime.forEach((node) => {
+    if (!node || !Array.isArray(node.tasks)) return;
+    node.tasks.forEach((task) => {
+      const assignedTo = String(task?.assignedTo || "").trim();
+      if (!assignedTo || !labelsToDelete.has(assignedTo)) return;
+      if (task.taskGroupId) {
+        groupedTaskIds.add(task.taskGroupId);
+      } else if (task.id) {
+        singleTasks.push({ nodeId: node.id, taskId: task.id });
+      }
+    });
+  });
+
+  let changed = false;
+  groupedTaskIds.forEach((taskGroupId) => {
+    if (removeTaskCopiesByGroupId(taskGroupId)) {
+      changed = true;
+    }
+  });
+  singleTasks.forEach(({ nodeId, taskId }) => {
+    if (deleteTaskById(nodeId, taskId)) {
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function unlinkEntityNodeRecord(node) {
+  if (!node || node.type !== "entity") return false;
+  const preservedLabel = getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) });
+  let changed = false;
+  if (!node.meta || typeof node.meta !== "object") {
+    node.meta = {};
+  }
+  if (!node.meta.suppressLegacyEntityLink) {
+    node.meta.suppressLegacyEntityLink = true;
+    changed = true;
+  }
+  if (node.entityKind !== null) {
+    node.entityKind = null;
+    changed = true;
+  }
+  if (node.entityRefId !== null) {
+    node.entityRefId = null;
+    changed = true;
+  }
+  if (node.label !== preservedLabel) {
+    node.label = preservedLabel;
+    changed = true;
+  }
+  if (node.title !== preservedLabel) {
+    node.title = preservedLabel;
+    changed = true;
+  }
+  return changed;
+}
+
+function clearPortalLinksToWorkspaceIds(workspaceIds) {
+  if (!(workspaceIds instanceof Set) || !workspaceIds.size) return false;
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "portal") return;
+    if (!workspaceIds.has(node.linkedWorkspaceId)) return;
+    node.linkedWorkspaceId = null;
+    changed = true;
+  });
+  return changed;
+}
+
+function removeDeletedCollaboratorsFromHandovers(deletedUserIds, deletedOrgIds) {
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "handover" || !Array.isArray(node.handoverCollaborators)) return;
+    const nextCollaborators = node.handoverCollaborators.filter((collaborator) => {
+      if (collaborator?.kind === "user" && deletedUserIds.has(collaborator.refId)) return false;
+      if (collaborator?.kind === "org" && deletedOrgIds.has(collaborator.refId)) return false;
+      return true;
+    });
+    if (nextCollaborators.length !== node.handoverCollaborators.length) {
+      node.handoverCollaborators = nextCollaborators;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function disconnectDeletedEntityReferences(deletedUserIds, deletedOrgIds) {
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || node.type !== "entity") return;
+    if (node.entityKind === "user" && deletedUserIds.has(node.entityRefId) && unlinkEntityNodeRecord(node)) {
+      changed = true;
+    }
+    if (node.entityKind === "org" && deletedOrgIds.has(node.entityRefId) && unlinkEntityNodeRecord(node)) {
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function markDeletedOwnersOnSharedNodes(deletedUserIds) {
+  let changed = false;
+  allNodesRuntime.forEach((node) => {
+    if (!node || !deletedUserIds.has(node.ownerId)) return;
+    const deletedOwnerLabel = getUserDisplayNameWithOrg(node.ownerId) || node.owner || node.ownerId;
+    if (!node.meta || typeof node.meta !== "object") {
+      node.meta = {};
+    }
+    if (deletedOwnerLabel && node.meta.deletedOwnerLabel !== deletedOwnerLabel) {
+      node.meta.deletedOwnerLabel = deletedOwnerLabel;
+      changed = true;
+    }
+    if (node.ownerId !== null) {
+      node.ownerId = null;
+      changed = true;
+    }
+    if (node.owner !== deletedOwnerLabel) {
+      node.owner = deletedOwnerLabel;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function deleteWorkspacesOwnedByUsers(deletedUserIds) {
+  const deletedWorkspaceIds = new Set();
+  workspaces = workspaces.filter((workspace) => {
+    if (workspace && deletedUserIds.has(workspace.ownerId)) {
+      deletedWorkspaceIds.add(workspace.id);
+      return false;
+    }
+    return true;
+  });
+  return deletedWorkspaceIds;
+}
+
+function pruneGraphToReferencedWorkspaceItems() {
+  const referencedNodeIds = new Set();
+  const referencedEdgeIds = new Set();
+  workspaces.forEach((workspace) => {
+    (Array.isArray(workspace.nodeIds) ? workspace.nodeIds : []).forEach((nodeId) => {
+      if (nodeId) referencedNodeIds.add(nodeId);
+    });
+    (Array.isArray(workspace.edgeIds) ? workspace.edgeIds : []).forEach((edgeId) => {
+      if (edgeId) referencedEdgeIds.add(edgeId);
+    });
+  });
+
+  allNodesRuntime = allNodesRuntime.filter((node) => referencedNodeIds.has(node.id));
+  const survivingNodeIds = new Set(allNodesRuntime.map((node) => node.id));
+  allEdgesRuntime = allEdgesRuntime.filter((edge) => {
+    if (!referencedEdgeIds.has(edge.id)) return false;
+    return survivingNodeIds.has(edge.sourceId) && survivingNodeIds.has(edge.targetId);
+  });
+  const survivingEdgeIds = new Set(allEdgesRuntime.map((edge) => edge.id));
+
+  workspaces.forEach((workspace) => {
+    workspace.nodeIds = (Array.isArray(workspace.nodeIds) ? workspace.nodeIds : []).filter((nodeId) => survivingNodeIds.has(nodeId));
+    workspace.edgeIds = (Array.isArray(workspace.edgeIds) ? workspace.edgeIds : []).filter((edgeId) => survivingEdgeIds.has(edgeId));
+    if (workspace.homeNodeId && !survivingNodeIds.has(workspace.homeNodeId)) {
+      workspace.homeNodeId = workspace.nodeIds[0] || null;
+    }
+  });
+}
+
+function syncAllRuntimeDataAndPersist() {
+  syncUsersRuntimeAndStore();
+  syncOrgsRuntimeAndStore();
+  syncNodeRuntimeAndStore();
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  sanitizeAfterNodeDelete();
+  persistStoreToLocalStorage();
+}
+
+function finalizePrincipalDeletion(deletedUserIds, deletedOrgIds, deletedWorkspaceIds) {
+  markDeletedOwnersOnSharedNodes(deletedUserIds);
+  disconnectDeletedEntityReferences(deletedUserIds, deletedOrgIds);
+  clearPortalLinksToWorkspaceIds(deletedWorkspaceIds);
+  removeDeletedCollaboratorsFromHandovers(deletedUserIds, deletedOrgIds);
+  pruneGraphToReferencedWorkspaceItems();
+  refreshRuntimeOwnerLabels();
+  syncAllRuntimeDataAndPersist();
+  setCurrentWorkspaceForCurrentUser();
+  hasAppliedWorkspace = false;
+}
+
+function deleteUserRecordById(userId) {
+  if (!userId || isAdminUserId(userId) || !userById.has(userId)) return false;
+  const userRecord = userById.get(userId);
+  const orgName = getOrgDisplayName(userRecord.orgId);
+  const deletedUserIds = new Set([userId]);
+  const deletedOrgIds = new Set();
+  const deletedWorkspaceIds = deleteWorkspacesOwnedByUsers(deletedUserIds);
+  users = users.filter((user) => user.id !== userId);
+  const labelsToDelete = getTaskAssignmentLabelsForUserRecord(userRecord, orgName);
+  removeTasksAssignedToLabels(labelsToDelete);
+  finalizePrincipalDeletion(deletedUserIds, deletedOrgIds, deletedWorkspaceIds);
+  return true;
+}
+
+function deleteOrganisationRecordById(orgId) {
+  if (!orgId || !orgById.has(orgId)) return false;
+  const orgRecord = orgById.get(orgId);
+  const usersInOrg = users.filter((user) => user.orgId === orgId && !isAdminUserId(user.id));
+  const deletedUserIds = new Set(usersInOrg.map((user) => user.id));
+  const deletedOrgIds = new Set([orgId]);
+  const deletedWorkspaceIds = deleteWorkspacesOwnedByUsers(deletedUserIds);
+  users = users.filter((user) => user.orgId !== orgId || isAdminUserId(user.id));
+  orgs = orgs.filter((org) => org.id !== orgId);
+  const labelsToDelete = new Set(getTaskAssignmentLabelsForOrgRecord(orgRecord));
+  usersInOrg.forEach((userRecord) => {
+    getTaskAssignmentLabelsForUserRecord(userRecord, orgRecord.name).forEach((label) => labelsToDelete.add(label));
+  });
+  removeTasksAssignedToLabels(labelsToDelete);
+  finalizePrincipalDeletion(deletedUserIds, deletedOrgIds, deletedWorkspaceIds);
+  return true;
+}
+
+function renameUserRecord(userId, nextName) {
+  const userRecord = userById.get(userId);
+  const trimmedName = String(nextName || "").trim();
+  if (!userRecord || !trimmedName || isAdminUserId(userId)) return false;
+  const oldLabels = getTaskAssignmentLabelsForUserRecord(userRecord);
+  if (userRecord.name === trimmedName) return false;
+  userRecord.name = trimmedName;
+  const userIndex = users.findIndex((user) => user.id === userId);
+  if (userIndex >= 0) {
+    users[userIndex].name = trimmedName;
+  }
+  syncUsersRuntimeAndStore();
+  refreshRuntimeOwnerLabels();
+  const nextLabels = getTaskAssignmentLabelsForUserRecord(userById.get(userId));
+  const labelMap = new Map();
+  [...oldLabels].forEach((oldLabel) => {
+    if (!oldLabel) return;
+    const nextLabel = [...nextLabels].find((candidate) => candidate.endsWith(trimmedName) || candidate === trimmedName) || trimmedName;
+    if (nextLabel && nextLabel !== oldLabel) {
+      labelMap.set(oldLabel, nextLabel);
+    }
+  });
+  rewriteTaskAssigneeLabels(labelMap);
+  syncNodeRuntimeAndStore();
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function renameOrganisationRecord(orgId, nextName) {
+  const orgRecord = orgById.get(orgId);
+  const trimmedName = String(nextName || "").trim();
+  if (!orgRecord || !trimmedName) return false;
+  const oldOrgName = orgRecord.name || "";
+  if (oldOrgName === trimmedName) return false;
+  const usersInOrg = users.filter((user) => user.orgId === orgId && !isAdminUserId(user.id));
+  const labelMap = new Map();
+  getTaskAssignmentLabelsForOrgRecord(orgRecord).forEach((oldLabel) => {
+    if (oldLabel && oldLabel !== trimmedName) {
+      labelMap.set(oldLabel, trimmedName);
+    }
+  });
+  usersInOrg.forEach((userRecord) => {
+    const oldLabels = getTaskAssignmentLabelsForUserRecord(userRecord, oldOrgName);
+    const nextLabels = getTaskAssignmentLabelsForUserRecord(userRecord, trimmedName);
+    [...oldLabels].forEach((oldLabel) => {
+      if (!oldLabel) return;
+      const matchingNext = [...nextLabels].find((candidate) => candidate.endsWith(userRecord.name));
+      if (matchingNext && matchingNext !== oldLabel) {
+        labelMap.set(oldLabel, matchingNext);
+      }
+    });
+  });
+  orgRecord.name = trimmedName;
+  const orgIndex = orgs.findIndex((org) => org.id === orgId);
+  if (orgIndex >= 0) {
+    orgs[orgIndex].name = trimmedName;
+  }
+  syncOrgsRuntimeAndStore();
+  rewriteTaskAssigneeLabels(labelMap);
+  syncNodeRuntimeAndStore();
   persistStoreToLocalStorage();
   return true;
 }
@@ -4248,6 +5206,122 @@ function applyWorkspaceData(workspaceId, options = {}) {
     handoverObjectPickerModalEl.appendChild(handoverObjectPickerModalActionsEl);
     handoverObjectPickerModalOverlayEl.appendChild(handoverObjectPickerModalEl);
     document.body.appendChild(handoverObjectPickerModalOverlayEl);
+    const adminOrgModalOverlayEl = document.createElement("div");
+    adminOrgModalOverlayEl.id = "adminOrgModalOverlay";
+    adminOrgModalOverlayEl.className = "portal-link-modal-overlay";
+    adminOrgModalOverlayEl.setAttribute("aria-hidden", "true");
+    const adminOrgModalEl = document.createElement("div");
+    adminOrgModalEl.className = "portal-link-modal picker-modal admin-editor-modal";
+    adminOrgModalEl.setAttribute("role", "dialog");
+    adminOrgModalEl.setAttribute("aria-modal", "true");
+    adminOrgModalEl.setAttribute("aria-labelledby", "adminOrgModalTitle");
+    const adminOrgModalCloseBtnEl = document.createElement("button");
+    adminOrgModalCloseBtnEl.type = "button";
+    adminOrgModalCloseBtnEl.className = "portal-link-modal-close";
+    adminOrgModalCloseBtnEl.setAttribute("aria-label", "Close");
+    adminOrgModalCloseBtnEl.textContent = "✕";
+    const adminOrgModalTitleEl = document.createElement("h3");
+    adminOrgModalTitleEl.id = "adminOrgModalTitle";
+    adminOrgModalTitleEl.className = "portal-link-modal-title";
+    adminOrgModalTitleEl.textContent = "Edit organisations";
+    const adminOrgModalHintEl = document.createElement("p");
+    adminOrgModalHintEl.className = "portal-link-modal-hint";
+    adminOrgModalHintEl.textContent = "Add, rename, or delete organisations.";
+    const adminOrgModalInputEl = document.createElement("input");
+    adminOrgModalInputEl.type = "text";
+    adminOrgModalInputEl.className = "workspace-create-input admin-editor-input";
+    adminOrgModalInputEl.placeholder = "Add New Organisation";
+    adminOrgModalInputEl.maxLength = 80;
+    const adminOrgModalBodyEl = document.createElement("div");
+    adminOrgModalBodyEl.className = "picker-modal-body admin-editor-body";
+    adminOrgModalEl.appendChild(adminOrgModalCloseBtnEl);
+    adminOrgModalEl.appendChild(adminOrgModalTitleEl);
+    adminOrgModalEl.appendChild(adminOrgModalHintEl);
+    adminOrgModalEl.appendChild(adminOrgModalInputEl);
+    adminOrgModalEl.appendChild(adminOrgModalBodyEl);
+    adminOrgModalOverlayEl.appendChild(adminOrgModalEl);
+    document.body.appendChild(adminOrgModalOverlayEl);
+    const adminUserModalOverlayEl = document.createElement("div");
+    adminUserModalOverlayEl.id = "adminUserModalOverlay";
+    adminUserModalOverlayEl.className = "portal-link-modal-overlay";
+    adminUserModalOverlayEl.setAttribute("aria-hidden", "true");
+    const adminUserModalEl = document.createElement("div");
+    adminUserModalEl.className = "portal-link-modal picker-modal admin-editor-modal";
+    adminUserModalEl.setAttribute("role", "dialog");
+    adminUserModalEl.setAttribute("aria-modal", "true");
+    adminUserModalEl.setAttribute("aria-labelledby", "adminUserModalTitle");
+    const adminUserModalCloseBtnEl = document.createElement("button");
+    adminUserModalCloseBtnEl.type = "button";
+    adminUserModalCloseBtnEl.className = "portal-link-modal-close";
+    adminUserModalCloseBtnEl.setAttribute("aria-label", "Close");
+    adminUserModalCloseBtnEl.textContent = "✕";
+    const adminUserModalTitleEl = document.createElement("h3");
+    adminUserModalTitleEl.id = "adminUserModalTitle";
+    adminUserModalTitleEl.className = "portal-link-modal-title";
+    adminUserModalTitleEl.textContent = "Edit users";
+    const adminUserModalHintEl = document.createElement("p");
+    adminUserModalHintEl.className = "portal-link-modal-hint";
+    adminUserModalHintEl.textContent = "Choose an organisation, then add, rename, or delete users.";
+    const adminUserModalOrgFieldEl = document.createElement("label");
+    adminUserModalOrgFieldEl.className = "portal-link-modal-field";
+    adminUserModalOrgFieldEl.setAttribute("for", "adminUserOrgSelect");
+    adminUserModalOrgFieldEl.textContent = "Organisation";
+    const adminUserModalOrgSelectEl = document.createElement("select");
+    adminUserModalOrgSelectEl.id = "adminUserOrgSelect";
+    adminUserModalOrgSelectEl.className = "portal-link-modal-select";
+    const adminUserModalInputEl = document.createElement("input");
+    adminUserModalInputEl.type = "text";
+    adminUserModalInputEl.className = "workspace-create-input admin-editor-input";
+    adminUserModalInputEl.placeholder = "Add New User";
+    adminUserModalInputEl.maxLength = 80;
+    const adminUserModalBodyEl = document.createElement("div");
+    adminUserModalBodyEl.className = "picker-modal-body admin-editor-body";
+    adminUserModalEl.appendChild(adminUserModalCloseBtnEl);
+    adminUserModalEl.appendChild(adminUserModalTitleEl);
+    adminUserModalEl.appendChild(adminUserModalHintEl);
+    adminUserModalEl.appendChild(adminUserModalOrgFieldEl);
+    adminUserModalEl.appendChild(adminUserModalOrgSelectEl);
+    adminUserModalEl.appendChild(adminUserModalInputEl);
+    adminUserModalEl.appendChild(adminUserModalBodyEl);
+    adminUserModalOverlayEl.appendChild(adminUserModalEl);
+    document.body.appendChild(adminUserModalOverlayEl);
+    const confirmationModalOverlayEl = document.createElement("div");
+    confirmationModalOverlayEl.id = "confirmationModalOverlay";
+    confirmationModalOverlayEl.className = "portal-link-modal-overlay";
+    confirmationModalOverlayEl.setAttribute("aria-hidden", "true");
+    const confirmationModalEl = document.createElement("div");
+    confirmationModalEl.className = "portal-link-modal";
+    confirmationModalEl.setAttribute("role", "dialog");
+    confirmationModalEl.setAttribute("aria-modal", "true");
+    confirmationModalEl.setAttribute("aria-labelledby", "confirmationModalTitle");
+    const confirmationModalCloseBtnEl = document.createElement("button");
+    confirmationModalCloseBtnEl.type = "button";
+    confirmationModalCloseBtnEl.className = "portal-link-modal-close";
+    confirmationModalCloseBtnEl.setAttribute("aria-label", "Close");
+    confirmationModalCloseBtnEl.textContent = "✕";
+    const confirmationModalTitleEl = document.createElement("h3");
+    confirmationModalTitleEl.id = "confirmationModalTitle";
+    confirmationModalTitleEl.className = "portal-link-modal-title";
+    const confirmationModalMessageEl = document.createElement("p");
+    confirmationModalMessageEl.className = "portal-link-modal-hint";
+    const confirmationModalActionsEl = document.createElement("div");
+    confirmationModalActionsEl.className = "portal-link-modal-actions";
+    const confirmationModalCancelBtnEl = document.createElement("button");
+    confirmationModalCancelBtnEl.type = "button";
+    confirmationModalCancelBtnEl.className = "portal-link-modal-btn is-cancel";
+    confirmationModalCancelBtnEl.textContent = "Cancel";
+    const confirmationModalConfirmBtnEl = document.createElement("button");
+    confirmationModalConfirmBtnEl.type = "button";
+    confirmationModalConfirmBtnEl.className = "portal-link-modal-btn is-confirm";
+    confirmationModalConfirmBtnEl.textContent = "Delete";
+    confirmationModalActionsEl.appendChild(confirmationModalCancelBtnEl);
+    confirmationModalActionsEl.appendChild(confirmationModalConfirmBtnEl);
+    confirmationModalEl.appendChild(confirmationModalCloseBtnEl);
+    confirmationModalEl.appendChild(confirmationModalTitleEl);
+    confirmationModalEl.appendChild(confirmationModalMessageEl);
+    confirmationModalEl.appendChild(confirmationModalActionsEl);
+    confirmationModalOverlayEl.appendChild(confirmationModalEl);
+    document.body.appendChild(confirmationModalOverlayEl);
     portalLinkModalEl.addEventListener("mousedown", (event) => {
       event.stopPropagation();
     });
@@ -4258,6 +5332,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.stopPropagation();
     });
     handoverObjectPickerModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    adminOrgModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    adminUserModalEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    confirmationModalEl.addEventListener("mousedown", (event) => {
       event.stopPropagation();
     });
     portalLinkModalCloseBtnEl.addEventListener("click", (event) => {
@@ -4280,6 +5363,21 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.stopPropagation();
       closeHandoverObjectPickerModal();
     });
+    adminOrgModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAdminOrgModal();
+    });
+    adminUserModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAdminUserModal();
+    });
+    confirmationModalCloseBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConfirmationModal();
+    });
     portalLinkModalCancelBtnEl.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -4299,6 +5397,11 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.preventDefault();
       event.stopPropagation();
       closeHandoverObjectPickerModal();
+    });
+    confirmationModalCancelBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConfirmationModal();
     });
     portalLinkModalConfirmBtnEl.addEventListener("click", (event) => {
       event.preventDefault();
@@ -4320,6 +5423,11 @@ function applyWorkspaceData(workspaceId, options = {}) {
       event.stopPropagation();
       confirmHandoverObjectPickerModal();
     });
+    confirmationModalConfirmBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmConfirmationModal();
+    });
     portalLinkModalSelectEl.addEventListener("change", () => {
       portalLinkModalState.selectedWorkspaceId = portalLinkModalSelectEl.value;
     });
@@ -4331,6 +5439,18 @@ function applyWorkspaceData(workspaceId, options = {}) {
     entityLinkModalRefSelectEl.addEventListener("change", () => {
       entityLinkModalState.selectedEntityRefId = entityLinkModalRefSelectEl.value;
       entityLinkModalConfirmBtnEl.disabled = !entityLinkModalState.selectedEntityRefId;
+    });
+    adminUserModalOrgSelectEl.addEventListener("change", () => {
+      adminUserModalState.selectedOrgId = adminUserModalOrgSelectEl.value;
+      adminUserModalState.renameUserId = null;
+      adminUserModalState.renameDraft = "";
+      renderAdminUserModal();
+    });
+    adminOrgModalInputEl.addEventListener("input", () => {
+      adminOrgModalState.draftName = adminOrgModalInputEl.value;
+    });
+    adminUserModalInputEl.addEventListener("input", () => {
+      adminUserModalState.draftName = adminUserModalInputEl.value;
     });
     portalLinkModalEl.addEventListener("keydown", (event) => {
       if (!portalLinkModalState.open) return;
@@ -4392,6 +5512,36 @@ function applyWorkspaceData(workspaceId, options = {}) {
         event.preventDefault();
         event.stopPropagation();
         confirmHandoverObjectPickerModal();
+      }
+    });
+    adminOrgModalEl.addEventListener("keydown", (event) => {
+      if (!adminOrgModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAdminOrgModal();
+      }
+    });
+    adminUserModalEl.addEventListener("keydown", (event) => {
+      if (!adminUserModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAdminUserModal();
+      }
+    });
+    confirmationModalEl.addEventListener("keydown", (event) => {
+      if (!confirmationModalState.open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeConfirmationModal();
+        return;
+      }
+      if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+        event.stopPropagation();
+        confirmConfirmationModal();
       }
     });
     const CREATE_NODE_MENU_ITEMS = [
@@ -4472,6 +5622,18 @@ function applyWorkspaceData(workspaceId, options = {}) {
         closeHandoverObjectPickerModal();
         return;
       }
+      if (adminOrgModalState.open) {
+        closeAdminOrgModal();
+        return;
+      }
+      if (adminUserModalState.open) {
+        closeAdminUserModal();
+        return;
+      }
+      if (confirmationModalState.open) {
+        closeConfirmationModal();
+        return;
+      }
       if (portalLinkModalState.open) {
         closePortalLinkModal({ keepNode: true });
         return;
@@ -4539,6 +5701,30 @@ function applyWorkspaceData(workspaceId, options = {}) {
         clickTarget instanceof Node &&
         handoverObjectPickerModalOverlayEl &&
         handoverObjectPickerModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        adminOrgModalState.open &&
+        clickTarget instanceof Node &&
+        adminOrgModalOverlayEl &&
+        adminOrgModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        adminUserModalState.open &&
+        clickTarget instanceof Node &&
+        adminUserModalOverlayEl &&
+        adminUserModalOverlayEl.contains(clickTarget)
+      ) {
+        return;
+      }
+      if (
+        confirmationModalState.open &&
+        clickTarget instanceof Node &&
+        confirmationModalOverlayEl &&
+        confirmationModalOverlayEl.contains(clickTarget)
       ) {
         return;
       }
@@ -4808,6 +5994,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
               userMenuOpen = false;
               resetWorkspaceCreateState();
               resetWorkspaceRenameState();
+              closeAdminOrgModal();
+              closeAdminUserModal();
+              closeConfirmationModal();
               renderAll();
             });
             userDropdownEl.appendChild(userItemEl);
@@ -4816,6 +6005,42 @@ function applyWorkspaceData(workspaceId, options = {}) {
         userSelectEl.appendChild(userDropdownEl);
       }
       workspaceMenuPanelEl.appendChild(userSelectEl);
+
+      if (isAdminMode()) {
+        const adminActionsEl = document.createElement("div");
+        adminActionsEl.className = "workspace-workspace-list";
+
+        const orgActionRowEl = document.createElement("div");
+        orgActionRowEl.className = "workspace-menu-row";
+        const orgActionBtnEl = document.createElement("button");
+        orgActionBtnEl.type = "button";
+        orgActionBtnEl.className = "workspace-menu-item admin-menu-action";
+        orgActionBtnEl.textContent = "Edit Organisations";
+        orgActionBtnEl.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openAdminOrgModal();
+        });
+        orgActionRowEl.appendChild(orgActionBtnEl);
+        adminActionsEl.appendChild(orgActionRowEl);
+
+        const userActionRowEl = document.createElement("div");
+        userActionRowEl.className = "workspace-menu-row";
+        const userActionBtnEl = document.createElement("button");
+        userActionBtnEl.type = "button";
+        userActionBtnEl.className = "workspace-menu-item admin-menu-action";
+        userActionBtnEl.textContent = "Edit Users";
+        userActionBtnEl.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openAdminUserModal();
+        });
+        userActionRowEl.appendChild(userActionBtnEl);
+        adminActionsEl.appendChild(userActionRowEl);
+
+        workspaceMenuPanelEl.appendChild(adminActionsEl);
+        return;
+      }
 
       const workspaceListEl = document.createElement("div");
       workspaceListEl.className = "workspace-workspace-list";
@@ -6131,9 +7356,10 @@ function onViewportMouseDown(event) {
 
       const seenCollaborationAnchor = new Set();
       const nextWorkspaceNodeIds = workspaceRecord.nodeIds.filter((nodeId) => {
+        const node = runtimeNodeById.get(nodeId);
+        if (!node) return false;
         if (nodeId !== anchorNode.id) {
-          const node = runtimeNodeById.get(nodeId);
-          if (node?.type !== "collaboration") return true;
+          if (node.type !== "collaboration") return true;
           return false;
         }
         if (seenCollaborationAnchor.has(nodeId)) return false;
@@ -6430,6 +7656,14 @@ function onViewportMouseDown(event) {
       nodeListEl.innerHTML = "";
       byLocationBtn.classList.toggle("active", state.listMode === "by-location");
       allNodesBtn.classList.toggle("active", state.listMode === "all-nodes");
+
+      if (isAdminMode()) {
+        const emptyState = document.createElement("div");
+        emptyState.className = "node-list-empty";
+        emptyState.textContent = "Admin mode. Use the menu to edit organisations or users.";
+        nodeListEl.appendChild(emptyState);
+        return;
+      }
 
       const parentMap = buildParentMap();
       const hasLocationNodes = getLocationNodes().length > 0;
@@ -8265,7 +9499,7 @@ function onViewportMouseDown(event) {
       focusBreadcrumbEl.innerHTML = "";
       const current = document.createElement("span");
       current.className = "crumb-current";
-      current.textContent = "Graph";
+      current.textContent = isAdminMode() ? "Admin" : "Graph";
       focusBreadcrumbEl.appendChild(current);
       focusBackBtn.disabled = true;
     }
@@ -9866,6 +11100,13 @@ function onViewportMouseDown(event) {
     }
     function renderDetailsPane() {
       detailsPaneEl.innerHTML = "";
+      if (isAdminMode()) {
+        const placeholder = document.createElement("p");
+        placeholder.className = "muted details-empty-state";
+        placeholder.textContent = "Admin mode. Open Edit Organisations or Edit Users from the menu.";
+        detailsPaneEl.appendChild(placeholder);
+        return;
+      }
       const selectedNode = getSelectedNode();
       if (!selectedNode) {
         const placeholder = document.createElement("p");
@@ -9949,6 +11190,9 @@ function onViewportMouseDown(event) {
       renderEntityLinkModal();
       renderCollaboratorPickerModal();
       renderHandoverObjectPickerModal();
+      renderAdminOrgModal();
+      renderAdminUserModal();
+      renderConfirmationModal();
     }
 
     function renderLoadingState() {
@@ -9968,9 +11212,37 @@ function onViewportMouseDown(event) {
       }
     }
 
+    function renderLoadErrorState(message) {
+      const nextMessage = String(message || "Failed to load the canonical store.");
+      if (nodeListEl) {
+        nodeListEl.innerHTML = "";
+        const errorMessage = document.createElement("div");
+        errorMessage.className = "node-list-empty";
+        errorMessage.textContent = nextMessage;
+        nodeListEl.appendChild(errorMessage);
+      }
+      if (detailsPaneEl) {
+        detailsPaneEl.innerHTML = "";
+        const detailsError = document.createElement("p");
+        detailsError.className = "muted";
+        detailsError.textContent = nextMessage;
+        detailsPaneEl.appendChild(detailsError);
+      }
+    }
+
+    function clearLegacyLocalStore() {
+      try {
+        window.localStorage.removeItem(STORE_KEY);
+      } catch (error) {
+        console.warn("Failed to clear legacy local storage amytis_store_v1 payload.", error);
+      }
+    }
+
     async function bootApp() {
       renderPanelState();
       renderLoadingState();
+      clearLegacyLocalStore();
+      renderPersistStatusBanner();
 
       try {
         const initialData = await loadInitialData();
@@ -9978,7 +11250,9 @@ function onViewportMouseDown(event) {
         initializeRuntimeDataFromStore(initialStore);
       } catch (error) {
         console.error("Failed to initialize app store from initial data.", error);
-        initializeRuntimeDataFromStore(buildStore({}));
+        bootErrorMessage = "Failed to load the canonical store from /api/store. Run the app via the Vite server.";
+        renderLoadErrorState(bootErrorMessage);
+        return;
       }
 
       renderAll();
