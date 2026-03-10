@@ -3267,7 +3267,7 @@ function ensureCollaborationWorkspaceForUser(userId) {
   if (existingWorkspace) return existingWorkspace;
   const workspaceRecord = {
     id: buildCollaborationWorkspaceIdForUser(userId),
-    name: "Collaboration map",
+    name: "Collab Map",
     kind: "collab",
     ownerId: userId,
     nodeIds: [],
@@ -9209,6 +9209,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const collabShellModeBtnEl = document.getElementById("collabShellModeBtn");
     const workspaceMenuWrapEl = document.getElementById("workspaceMenu");
     const workspaceMenuBtnEl = document.getElementById("workspaceMenuBtn");
+    const workspaceMenuBtnAvatarEl = workspaceMenuBtnEl?.querySelector(".workspace-menu-btn-avatar") || null;
+    const workspaceMenuBtnNameEl = workspaceMenuBtnEl?.querySelector(".workspace-menu-btn-name") || null;
+    const workspaceMenuBtnChevronEl = workspaceMenuBtnEl?.querySelector(".workspace-menu-btn-chevron") || null;
     const workspaceMenuPanelEl = document.getElementById("workspaceMenuPanel");
     const createNodeMenuEl = document.createElement("div");
     createNodeMenuEl.id = "mapCreateMenu";
@@ -10181,13 +10184,62 @@ function applyWorkspaceData(workspaceId, options = {}) {
       }
     }
 
+    function getOwnerInitial(ownerName) {
+      const normalized = String(ownerName || "").trim();
+      if (!normalized) return "?";
+      const firstLetterMatch = normalized.match(/[A-Za-z0-9]/);
+      if (!firstLetterMatch) return "?";
+      return firstLetterMatch[0].toUpperCase();
+    }
+
+    function getWorkspaceMenuTriggerDisplayData() {
+      const currentWorkspaceRecord = getCurrentWorkspaceRecord();
+      const currentWorkspaceOption = getWorkspaceOptionById(currentWorkspaceId) || null;
+      const workspaceName = String(
+        currentWorkspaceOption?.name ||
+        currentWorkspaceRecord?.name ||
+        "No workspace"
+      ).trim() || "No workspace";
+      const ownerId = currentWorkspaceOption?.ownerId || currentWorkspaceRecord?.ownerId || null;
+      const ownerRecord = ownerId ? userById.get(ownerId) || null : null;
+      const ownerName = String(ownerRecord?.name || "").trim() || "Unknown owner";
+      const ownerInitial = ownerRecord ? getOwnerInitial(ownerName) : "?";
+      const ariaLabel = `Workspace: ${workspaceName}. Owner: ${ownerName}. Open workspace menu.`;
+      const title = `${workspaceName} · Owner: ${ownerName}`;
+      return {
+        workspaceName,
+        ownerName,
+        ownerInitial,
+        ariaLabel,
+        title
+      };
+    }
+
+    function renderWorkspaceMenuTrigger() {
+      if (!workspaceMenuBtnEl) return;
+      const triggerData = getWorkspaceMenuTriggerDisplayData();
+      workspaceMenuBtnEl.setAttribute("aria-label", triggerData.ariaLabel);
+      workspaceMenuBtnEl.setAttribute("title", triggerData.title);
+      workspaceMenuBtnEl.setAttribute("aria-expanded", String(workspaceMenuOpen));
+      if (workspaceMenuBtnAvatarEl) {
+        workspaceMenuBtnAvatarEl.textContent = triggerData.ownerInitial;
+      } else {
+        workspaceMenuBtnEl.dataset.ownerInitial = triggerData.ownerInitial;
+      }
+      if (workspaceMenuBtnNameEl) {
+        workspaceMenuBtnNameEl.textContent = triggerData.workspaceName;
+      }
+      if (workspaceMenuBtnChevronEl) {
+        workspaceMenuBtnChevronEl.textContent = "▼";
+      }
+    }
+
     function renderWorkspaceMenu() {
       if (!workspaceMenuBtnEl || !workspaceMenuPanelEl) return;
       let createInputEl = null;
       let renameInputEl = null;
       const currentUserName = getCurrentUserName();
-      workspaceMenuBtnEl.setAttribute("aria-expanded", String(workspaceMenuOpen));
-      workspaceMenuBtnEl.setAttribute("title", `Workspaces · User: ${currentUserName}`);
+      renderWorkspaceMenuTrigger();
       workspaceMenuPanelEl.classList.toggle("is-open", workspaceMenuOpen);
       workspaceMenuPanelEl.setAttribute("aria-label", `Workspace and user list. Current user: ${currentUserName}`);
       workspaceMenuPanelEl.innerHTML = "";
@@ -10270,7 +10322,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         }
         userSelectEl.appendChild(userDropdownEl);
       }
-      workspaceMenuPanelEl.appendChild(userSelectEl);
+      userSelectEl.classList.add("is-bottom");
 
       if (isAdminMode()) {
         const adminActionsEl = document.createElement("div");
@@ -10305,6 +10357,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
         adminActionsEl.appendChild(userActionRowEl);
 
         workspaceMenuPanelEl.appendChild(adminActionsEl);
+        workspaceMenuPanelEl.appendChild(userSelectEl);
         return;
       }
 
@@ -10511,6 +10564,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
       }
 
       workspaceMenuPanelEl.appendChild(createWrapEl);
+      workspaceMenuPanelEl.appendChild(userSelectEl);
 
       if (createInputEl) {
         requestAnimationFrame(() => {

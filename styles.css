@@ -52,6 +52,12 @@
         0 3px 10px rgba(15, 23, 42, 0.1),
         inset 0 1px 0 rgba(255, 255, 255, 0.72),
         inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+      --top-control-h: 32px;
+      --workspace-pill-h: var(--top-control-h);
+      --workspace-avatar-d: calc(var(--top-control-h) + 3px);
+      --workspace-body-r: calc(var(--top-control-h) / 2);
+      --workspace-avatar-r: calc(var(--workspace-avatar-d) / 2);
+      --workspace-overlap: calc(var(--workspace-avatar-r) + var(--workspace-body-r));
     }
 
     * {
@@ -242,31 +248,118 @@
     }
 
     .workspace-menu-btn {
-      width: 40px;
-      height: 40px;
-      border-radius: 999px;
-      border: 1px solid var(--ui-glass-strong-border);
-      background: var(--ui-glass-strong-bg);
-      backdrop-filter: var(--ui-glass-strong-filter);
-      -webkit-backdrop-filter: var(--ui-glass-strong-filter);
-      box-shadow: var(--ui-glass-strong-shadow);
+      width: auto;
+      min-width: 0;
+      max-width: min(360px, calc(100vw - 24px));
+      height: var(--top-control-h);
+      box-sizing: border-box;
+      overflow: visible;
+      padding: 0;
+      gap: 0;
+      border: 0;
+      background: transparent;
       color: #334155;
-      font-size: 1rem;
+      font-size: 0.8rem;
+      font-weight: 400;
       line-height: 1;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      transition: box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
-      background-clip: padding-box;
+      justify-content: flex-start;
+      transition: none;
     }
 
-    .workspace-menu-btn:hover,
     .workspace-menu-btn:focus-visible {
+      outline: none;
+    }
+
+    .workspace-menu-btn-avatar {
+      width: var(--workspace-avatar-d);
+      height: var(--workspace-avatar-d);
+      border-radius: 999px;
+      background: rgba(219, 229, 241, 0.96);
+      border: 1px solid rgba(148, 163, 184, 0.62);
+      box-shadow:
+        0 8px 18px rgba(15, 23, 42, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+        inset -1px 0 0 rgba(219, 229, 241, 0.96);
+      color: #334155;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.86rem;
+      font-weight: 700;
+      line-height: 1;
+      flex: 0 0 auto;
+      user-select: none;
+      z-index: 2;
+      transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .workspace-menu-btn-body {
+      min-width: 0;
+      flex: 1 1 auto;
+      height: var(--top-control-h);
+      margin-left: calc(-1 * var(--workspace-overlap));
+      padding: 0 10px 0 calc(10px + var(--workspace-overlap));
+      border: 1px solid var(--ui-glass-strong-border);
+      border-left-color: transparent;
+      border-radius: 999px;
+      background: var(--ui-glass-strong-bg);
+      backdrop-filter: var(--ui-glass-strong-filter);
+      -webkit-backdrop-filter: var(--ui-glass-strong-filter);
+      box-shadow: var(--ui-glass-strong-shadow);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      overflow: hidden;
+      background-clip: padding-box;
+      transition: box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+
+    .workspace-menu-btn:hover .workspace-menu-btn-body,
+    .workspace-menu-btn:focus-visible .workspace-menu-btn-body {
       background: var(--ui-glass-strong-hover-bg);
       border-color: rgba(255, 255, 255, 0.84);
+      border-left-color: transparent;
       box-shadow: var(--ui-glass-strong-shadow-hover);
-      outline: none;
+    }
+
+    .workspace-menu-btn:hover .workspace-menu-btn-avatar,
+    .workspace-menu-btn:focus-visible .workspace-menu-btn-avatar {
+      background: rgba(226, 236, 248, 0.98);
+      border-color: rgba(148, 163, 184, 0.74);
+      box-shadow:
+        0 10px 22px rgba(15, 23, 42, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72),
+        inset -1px 0 0 rgba(226, 236, 248, 0.98);
+    }
+
+    .workspace-menu-btn-name {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1;
+      font-size: inherit;
+      font-weight: 400;
+      color: inherit;
+      letter-spacing: 0.01em;
+    }
+
+    .workspace-menu-btn-chevron {
+      font-size: 0.72rem;
+      line-height: 1;
+      color: #64748b;
+      flex: 0 0 auto;
+      user-select: none;
+      transform: translateY(0.5px);
+      transition: transform 120ms ease;
+    }
+
+    .workspace-menu-btn[aria-expanded="true"] .workspace-menu-btn-chevron {
+      transform: rotate(180deg) translateY(0.5px);
     }
 
     .workspace-menu-panel {
@@ -679,7 +772,7 @@
 
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       .panel-pill,
-      .workspace-menu-btn,
+      .workspace-menu-btn-body,
       .layout-mode-icon-btn,
       .notif-btn {
         background:
@@ -749,9 +842,15 @@
 
     .workspace-user-select {
       position: relative;
-      margin: 2px 2px 8px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      margin: 2px;
+      padding: 0;
+      border: none;
+    }
+
+    .workspace-user-select.is-bottom {
+      margin: 8px 2px 2px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
     }
 
     .workspace-user-toggle {
@@ -759,7 +858,7 @@
       border: 1px solid transparent;
       background: transparent;
       border-radius: 8px;
-      color: #334155;
+      color: #475569;
       text-align: left;
       padding: 6px 8px;
       cursor: pointer;
@@ -767,8 +866,8 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      font-size: 0.8rem;
-      font-weight: 600;
+      font-size: 0.78rem;
+      font-weight: 400;
       transition: background 120ms ease, border-color 120ms ease;
     }
 
@@ -781,6 +880,7 @@
 
     .workspace-user-toggle-name {
       line-height: 1.2;
+      font-weight: 400;
     }
 
     .workspace-user-chevron {
@@ -4103,13 +4203,16 @@
       border: 1px solid var(--ui-glass-strong-border);
       background: var(--ui-glass-strong-bg);
       border-radius: 999px;
-      padding: 6px 10px;
+      height: var(--top-control-h);
+      box-sizing: border-box;
+      padding: 0 10px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 7px;
       color: #334155;
       font-size: 0.8rem;
+      line-height: 1;
       box-shadow: var(--ui-glass-strong-shadow);
       backdrop-filter: var(--ui-glass-strong-filter);
       -webkit-backdrop-filter: var(--ui-glass-strong-filter);

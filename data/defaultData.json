@@ -64,8 +64,8 @@
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": 183.13151818805065,
-        "y": -153.96058149382685
+        "x": 304.80847905873634,
+        "y": -46.42096807387739
       },
       "linkedWorkspaceId": null
     },
@@ -125,8 +125,8 @@
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": 391.1319034258421,
-        "y": -23.548013024892114
+        "x": 61.58083531274761,
+        "y": -13.041997529965839
       },
       "linkedWorkspaceId": null
     },
@@ -140,8 +140,8 @@
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": 156.1616057311387,
-        "y": 83.94750323587313
+        "x": 195.96163867454408,
+        "y": 166.83919978719308
       },
       "status": "Active",
       "linkedWorkspaceId": null
@@ -378,21 +378,6 @@
       "linkedWorkspaceId": null
     },
     {
-      "id": "projection-node-ws-user-bob-collaboration-portal-ws-user-alice-project-a",
-      "type": "portal",
-      "title": "",
-      "ownerId": "user-alice",
-      "summary": "Projected shared workspace portal",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "linkedWorkspaceId": "ws-user-alice-project-a",
-      "graphPos": {
-        "x": 192.5605785044538,
-        "y": -215.05103287476842
-      }
-    },
-    {
       "id": "standard-mmf6r3o6",
       "type": "standard",
       "title": "Data",
@@ -432,8 +417,8 @@
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": -102.49461949201786,
-        "y": 403.0333059734969
+        "x": -311.513626740501,
+        "y": -54.44895965044652
       },
       "status": "Active",
       "handoverCollaborators": [
@@ -462,8 +447,8 @@
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": -59.0958524988658,
-        "y": 147.80027139382614
+        "x": -26.064440776924467,
+        "y": 200.23960294028672
       },
       "linkedWorkspaceId": null
     },
@@ -761,43 +746,48 @@
       "meta": {
         "viewportByUserId": {
           "user-alice": {
-            "panX": 375.49751752439283,
-            "panY": 417.6721298172041,
-            "zoom": 0.7090790347826623
+            "panX": 416.1726993487143,
+            "panY": 464.1811148142963,
+            "zoom": 0.8110051821267852
+          },
+          "user-bob": {
+            "panX": 379.1370866863874,
+            "panY": 414.76195487490145,
+            "zoom": 0.7012448035256801
           }
         },
         "runtimeNodePositions": {
           "standard-mmf1kzuh": {
-            "x": 183.13151818805065,
-            "y": -153.96058149382685
+            "x": 304.80847905873634,
+            "y": -46.42096807387739
           },
           "handover-mmf1mfga": {
-            "x": -323.58011179890735,
-            "y": -295.87703631685605
+            "x": -110.23320542345301,
+            "y": -203.09641526455593
           },
           "standard-mmf1mz22": {
-            "x": 391.1319034258421,
-            "y": -23.548013024892114
+            "x": 61.58083531274761,
+            "y": -13.041997529965839
           },
           "process-mmf1n8rp": {
-            "x": 156.1616057311387,
-            "y": 83.94750323587313
+            "x": 195.96163867454408,
+            "y": 166.83919978719308
           },
           "standard-mmf1ntgh": {
-            "x": -224.943321791588,
-            "y": -12.414275521447465
+            "x": 141.19412460035093,
+            "y": -229.45710134730615
           },
           "standard-mmf6r3o6": {
-            "x": -61.47238301335454,
-            "y": -175.05305863840948
+            "x": -255.71478173756938,
+            "y": 179.39209297262664
           },
           "handover-mmjnp96e": {
-            "x": -102.49461949201786,
-            "y": 403.0333059734969
+            "x": -311.513626740501,
+            "y": -54.44895965044652
           },
           "standard-mmjnq12b": {
-            "x": -59.0958524988658,
-            "y": 147.80027139382614
+            "x": -26.064440776924467,
+            "y": 200.23960294028672
           }
         }
       },
@@ -805,7 +795,7 @@
     },
     {
       "id": "ws-user-alice-collaboration",
-      "name": "Collaboration map",
+      "name": "Collab Map",
       "kind": "collab",
       "ownerId": "user-alice",
       "nodeIds": [
@@ -855,9 +845,9 @@
         },
         "viewportByUserId": {
           "user-alice": {
-            "panX": 398.8299007571467,
-            "panY": 495.61298674543906,
-            "zoom": 0.3720646775939072
+            "panX": 397.7267344407093,
+            "panY": 492.2990763878607,
+            "zoom": 0.35875132887147976
           }
         },
         "runtimeNodePositions": {
@@ -966,8 +956,7 @@
         "standard-mmf6r3o6",
         "handover-mmf1mfga",
         "projection-node-ws-user-bob-collaboration-linked-user-user-alice-user-alice",
-        "projection-node-ws-user-bob-collaboration-linked-org-org-bootstrap-org-bootstrap",
-        "projection-node-ws-user-bob-collaboration-portal-ws-user-alice-project-a"
+        "projection-node-ws-user-bob-collaboration-linked-org-org-bootstrap-org-bootstrap"
       ],
       "edgeIds": [
         "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf1ntgh",
@@ -982,9 +971,9 @@
         },
         "viewportByUserId": {
           "user-bob": {
-            "panX": 588.7099197880057,
-            "panY": 271.0619380887443,
-            "zoom": 0.5475481071481259
+            "panX": 545.3365708268043,
+            "panY": 273.3795157744315,
+            "zoom": 0.476805499543984
           }
         },
         "runtimeNodePositions": {
@@ -1015,6 +1004,14 @@
           "standard-mmf1ntgh": {
             "x": -835.0689039865251,
             "y": 754.8629142270174
+          },
+          "handover-mmkj9ukk": {
+            "x": 6.3626416517134485,
+            "y": 220.60327329286815
+          },
+          "standard-mmkjbspk": {
+            "x": 289.2292575847008,
+            "y": -67.35989035351717
           }
         }
       }
