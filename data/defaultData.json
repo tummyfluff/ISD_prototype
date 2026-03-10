@@ -338,8 +338,8 @@
       "entityKind": "org",
       "entityRefId": "org-bootstrap",
       "graphPos": {
-        "x": 247.44332440971993,
-        "y": -111.9785861504533
+        "x": 245.28636740751583,
+        "y": -98.14574347475414
       },
       "linkedWorkspaceId": null
     },
@@ -552,7 +552,8 @@
           "role": "input"
         }
       ],
-      "sourceWorkspaceId": "ws-user-alice-collaboration"
+      "sourceWorkspaceId": "ws-user-alice-collaboration",
+      "linkedWorkspaceId": null
     },
     {
       "id": "entity-mmkja8k2",
@@ -568,7 +569,8 @@
       "graphPos": {
         "x": -267.406760020861,
         "y": 6.268854126499509
-      }
+      },
+      "linkedWorkspaceId": null
     },
     {
       "id": "standard-mmkjbspk",
@@ -605,7 +607,8 @@
       "graphPos": {
         "x": -791.6461533959441,
         "y": 87.5995340251949
-      }
+      },
+      "linkedWorkspaceId": null
     },
     {
       "id": "collaboration-ws-user-ashley-collaboration",
@@ -619,7 +622,8 @@
       "graphPos": {
         "x": 0,
         "y": 0
-      }
+      },
+      "linkedWorkspaceId": null
     }
   ],
   "edges": [
@@ -680,20 +684,6 @@
       "workspaceId": "ws-user-alice-collaboration"
     },
     {
-      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf1ntgh",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf1ntgh",
-      "kind": "link",
-      "workspaceId": "ws-user-bob-collaboration"
-    },
-    {
-      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf6r3o6",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf6r3o6",
-      "kind": "link",
-      "workspaceId": "ws-user-bob-collaboration"
-    },
-    {
       "id": "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-handover-mmkj9ukk",
       "sourceId": "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
       "targetId": "handover-mmkj9ukk",
@@ -727,6 +717,20 @@
       "targetId": "handover-mmkj9ukk",
       "kind": "link",
       "workspaceId": "ws-user-alice-collaboration"
+    },
+    {
+      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf1ntgh",
+      "sourceId": "handover-mmf1mfga",
+      "targetId": "standard-mmf1ntgh",
+      "kind": "link",
+      "workspaceId": "ws-user-bob-collaboration"
+    },
+    {
+      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf6r3o6",
+      "sourceId": "handover-mmf1mfga",
+      "targetId": "standard-mmf6r3o6",
+      "kind": "link",
+      "workspaceId": "ws-user-bob-collaboration"
     }
   ],
   "workspaces": [
@@ -851,9 +855,9 @@
         },
         "viewportByUserId": {
           "user-alice": {
-            "panX": 823.1294133696787,
-            "panY": 546.4756456165735,
-            "zoom": 0.8390816247778013
+            "panX": 398.8299007571467,
+            "panY": 495.61298674543906,
+            "zoom": 0.3720646775939072
           }
         },
         "runtimeNodePositions": {
@@ -870,8 +874,8 @@
             "y": -266.40418820011365
           },
           "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap": {
-            "x": 247.44332440971993,
-            "y": -111.9785861504533
+            "x": 245.28636740751583,
+            "y": -98.14574347475414
           },
           "handover-mmjrnwt9": {
             "x": 536.9570267650436,

@@ -180,6 +180,18 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
       artifact: 0.12,
       other: 0.08
     });
+    const LAYOUT_EDGE_CLEARANCE_MIN_NODE_COUNT = 3;
+    const LAYOUT_EDGE_CLEARANCE_CURVE_SEGMENTS = 10;
+    const LAYOUT_EDGE_CLEARANCE_NODE_EDGE_PAD_PX = 10;
+    const LAYOUT_EDGE_CLEARANCE_NODE_NODE_PAD_PX = 4;
+    const LAYOUT_EDGE_CLEARANCE_ENDPOINT_SKIP_PX = 24;
+    const LAYOUT_EDGE_CLEARANCE_ENDPOINT_SKIP_MAX_T = 0.22;
+    const LAYOUT_EDGE_CLEARANCE_MAX_PASSES = 3;
+    const LAYOUT_EDGE_CLEARANCE_STEP_LADDER_PX = Object.freeze([6, 10, 14, 18, 24]);
+    const LAYOUT_EDGE_CLEARANCE_MAX_DISPLACEMENT_PX = 36;
+    const LAYOUT_EDGE_CLEARANCE_MIN_IMPROVEMENT_PX = 0.4;
+    const COLLAB_SHELL_EDGE_CLEARANCE_BAND_TOLERANCE_PX = 14;
+    const COLLAB_SHELL_EDGE_CLEARANCE_SECTOR_TOLERANCE_RAD = Math.PI / 36;
     const MARKER_OFFSETS = [
       [0, 0],
       [10, 0],
@@ -11668,6 +11680,489 @@ function isInteractiveDragBlockTarget(target) {
       return { nodesForSim, linksForSim, modelById };
     }
 
+    function getLayoutEdgeClearanceRadius(nodeEntry) {
+      if (!nodeEntry) return 72;
+      const simRadius = Number(nodeEntry.collisionRadius);
+      if (Number.isFinite(simRadius) && simRadius > 0) return simRadius;
+      return getNodePlacementCollisionRadius(nodeEntry.node);
+    }
+
+    function computeNodeFrameAtGraphPos(node, centerX, centerY, expandedLocationId = null) {
+      if (!node) {
+        return { x: centerX || 0, y: centerY || 0, w: 0, h: 0 };
+      }
+      if (node.type === "portal" && !isWorkspaceAnchorNode(node)) {
+        const extents = getNodeOccupiedExtents(node, expandedLocationId);
+        return {
+          x: centerX + extents.left,
+          y: centerY + extents.top,
+          w: extents.width,
+          h: extents.height
+        };
+      }
+      const size = getCardSize(node, expandedLocationId);
+      return {
+        x: centerX - (size.width / 2),
+        y: centerY - (size.height / 2),
+        w: size.width,
+        h: size.height
+      };
+    }
+
+    function getPointToSegmentDistanceData(px, py, ax, ay, bx, by) {
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = (dx * dx) + (dy * dy);
+      if (lenSq <= 1e-9) {
+        const dist = Math.hypot(px - ax, py - ay);
+        return {
+          distance: dist,
+          t: 0,
+          closestX: ax,
+          closestY: ay,
+          segDx: dx,
+          segDy: dy
+        };
+      }
+      const rawT = (((px - ax) * dx) + ((py - ay) * dy)) / lenSq;
+      const t = clamp(rawT, 0, 1);
+      const closestX = ax + (dx * t);
+      const closestY = ay + (dy * t);
+      return {
+        distance: Math.hypot(px - closestX, py - closestY),
+        t,
+        closestX,
+        closestY,
+        segDx: dx,
+        segDy: dy
+      };
+    }
+
+    function buildEdgeClearanceEdgeRecords(layoutLinks, nodeEntryById) {
+      const records = [];
+      const sampleSegments = Math.max(4, LAYOUT_EDGE_CLEARANCE_CURVE_SEGMENTS);
+      (layoutLinks || []).forEach((link) => {
+        const sourceId = getLinkEndpointId(link?.source);
+        const targetId = getLinkEndpointId(link?.target);
+        if (!sourceId || !targetId || sourceId === targetId) return;
+        const sourceEntry = nodeEntryById.get(sourceId);
+        const targetEntry = nodeEntryById.get(targetId);
+        if (!sourceEntry || !targetEntry) return;
+        const sourceNode = sourceEntry.node;
+        const targetNode = targetEntry.node;
+        if (!sourceNode || !targetNode) return;
+        const sourcePos = sourceNode.graphPos;
+        const targetPos = targetNode.graphPos;
+        if (
+          !Number.isFinite(sourcePos?.x) ||
+          !Number.isFinite(sourcePos?.y) ||
+          !Number.isFinite(targetPos?.x) ||
+          !Number.isFinite(targetPos?.y)
+        ) {
+          return;
+        }
+        const sourceFrame = computeNodeFrameAtGraphPos(sourceNode, sourcePos.x, sourcePos.y, null);
+        const targetFrame = computeNodeFrameAtGraphPos(targetNode, targetPos.x, targetPos.y, null);
+        const sourceCenter = getNodeVisualCenter(sourceNode, sourceFrame);
+        const targetCenter = getNodeVisualCenter(targetNode, targetFrame);
+        const anchorA = getBorderAnchorToward(sourceNode, sourceFrame, targetCenter.x, targetCenter.y);
+        const anchorB = getBorderAnchorToward(targetNode, targetFrame, sourceCenter.x, sourceCenter.y);
+        const worldControl = getQuadraticControlPoint(anchorA.x, anchorA.y, anchorB.x, anchorB.y);
+        const controlX = worldControl.cx;
+        const controlY = worldControl.cy;
+        const points = [];
+        for (let index = 0; index <= sampleSegments; index += 1) {
+          const t = index / sampleSegments;
+          const point = getQuadraticPointAndTangentAt(
+            anchorA.x,
+            anchorA.y,
+            controlX,
+            controlY,
+            anchorB.x,
+            anchorB.y,
+            t
+          );
+          points.push({
+            x: point.px,
+            y: point.py,
+            t
+          });
+        }
+        if (points.length < 2) return;
+        const segments = [];
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        let totalLength = 0;
+        for (let index = 1; index < points.length; index += 1) {
+          const prev = points[index - 1];
+          const next = points[index];
+          const segLen = Math.hypot(next.x - prev.x, next.y - prev.y);
+          totalLength += segLen;
+          segments.push({
+            ax: prev.x,
+            ay: prev.y,
+            bx: next.x,
+            by: next.y,
+            t0: prev.t,
+            t1: next.t
+          });
+        }
+        points.forEach((point) => {
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+        });
+        if (!segments.length || !Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+          return;
+        }
+        const endpointSkipT = clamp(
+          LAYOUT_EDGE_CLEARANCE_ENDPOINT_SKIP_PX / Math.max(1, totalLength),
+          0,
+          LAYOUT_EDGE_CLEARANCE_ENDPOINT_SKIP_MAX_T
+        );
+        records.push({
+          sourceId,
+          targetId,
+          endpointSkipT,
+          aabb: { left: minX, top: minY, right: maxX, bottom: maxY },
+          segments
+        });
+      });
+      return records;
+    }
+
+    function evaluateNodeEdgePenetrationAtPosition(nodeEntry, centerX, centerY, edgeRecords) {
+      const frame = computeNodeFrameAtGraphPos(nodeEntry.node, centerX, centerY, null);
+      const center = getNodeVisualCenter(nodeEntry.node, frame);
+      const nodeRadius = getLayoutEdgeClearanceRadius(nodeEntry);
+      const clearanceRadius = nodeRadius + LAYOUT_EDGE_CLEARANCE_NODE_EDGE_PAD_PX;
+      const nodeAabb = {
+        left: center.x - clearanceRadius,
+        top: center.y - clearanceRadius,
+        right: center.x + clearanceRadius,
+        bottom: center.y + clearanceRadius
+      };
+      let totalPenetration = 0;
+      let strongestPenetration = 0;
+      let weightedNormalX = 0;
+      let weightedNormalY = 0;
+      let conflictCount = 0;
+      for (const edgeRecord of edgeRecords) {
+        if (!edgeRecord) continue;
+        if (edgeRecord.sourceId === nodeEntry.id || edgeRecord.targetId === nodeEntry.id) continue;
+        if (!intersectsRect(nodeAabb, edgeRecord.aabb)) continue;
+        let bestDistance = Infinity;
+        let bestData = null;
+        for (const segment of edgeRecord.segments) {
+          if (!segment) continue;
+          if (segment.t1 <= edgeRecord.endpointSkipT || segment.t0 >= (1 - edgeRecord.endpointSkipT)) {
+            continue;
+          }
+          const distData = getPointToSegmentDistanceData(
+            center.x,
+            center.y,
+            segment.ax,
+            segment.ay,
+            segment.bx,
+            segment.by
+          );
+          const globalT = segment.t0 + ((segment.t1 - segment.t0) * distData.t);
+          if (globalT <= edgeRecord.endpointSkipT || globalT >= (1 - edgeRecord.endpointSkipT)) {
+            continue;
+          }
+          if (distData.distance < bestDistance) {
+            bestDistance = distData.distance;
+            bestData = {
+              ...distData,
+              segment
+            };
+          }
+        }
+        if (!bestData || !Number.isFinite(bestDistance)) continue;
+        if (bestDistance >= clearanceRadius) continue;
+        const penetration = clearanceRadius - bestDistance;
+        if (penetration <= 0) continue;
+        conflictCount += 1;
+        totalPenetration += penetration;
+        let normalX = center.x - bestData.closestX;
+        let normalY = center.y - bestData.closestY;
+        const normalLen = Math.hypot(normalX, normalY);
+        if (normalLen > 1e-6) {
+          normalX /= normalLen;
+          normalY /= normalLen;
+        } else {
+          const segDx = bestData.segDx;
+          const segDy = bestData.segDy;
+          const segLen = Math.hypot(segDx, segDy) || 1;
+          normalX = -segDy / segLen;
+          normalY = segDx / segLen;
+        }
+        weightedNormalX += normalX * penetration;
+        weightedNormalY += normalY * penetration;
+        if (penetration > strongestPenetration) {
+          strongestPenetration = penetration;
+        }
+      }
+      const weightedNormalLen = Math.hypot(weightedNormalX, weightedNormalY);
+      return {
+        totalPenetration,
+        strongestPenetration,
+        conflictCount,
+        normalX: weightedNormalLen > 1e-6 ? weightedNormalX / weightedNormalLen : 0,
+        normalY: weightedNormalLen > 1e-6 ? weightedNormalY / weightedNormalLen : 0
+      };
+    }
+
+    function getNodeNodeOverlapPenaltyForCandidate(candidateEntry, candidateX, candidateY, allEntries) {
+      let overlapPenalty = 0;
+      const candidateRadius = getLayoutEdgeClearanceRadius(candidateEntry);
+      for (const otherEntry of allEntries) {
+        if (!otherEntry || otherEntry.id === candidateEntry.id) continue;
+        const otherPos = otherEntry.node?.graphPos;
+        if (!Number.isFinite(otherPos?.x) || !Number.isFinite(otherPos?.y)) continue;
+        const otherRadius = getLayoutEdgeClearanceRadius(otherEntry);
+        const minDistance = candidateRadius + otherRadius + LAYOUT_EDGE_CLEARANCE_NODE_NODE_PAD_PX;
+        const actualDistance = Math.hypot(candidateX - otherPos.x, candidateY - otherPos.y);
+        if (actualDistance < minDistance) {
+          overlapPenalty += (minDistance - actualDistance);
+        }
+      }
+      return overlapPenalty;
+    }
+
+    function buildEdgeClearanceCandidateDirections(normalX, normalY) {
+      const directions = [];
+      const directionKeySet = new Set();
+      const pushDirection = (dx, dy) => {
+        const len = Math.hypot(dx, dy);
+        if (len <= 1e-6) return;
+        const ndx = dx / len;
+        const ndy = dy / len;
+        const key = `${Math.round(ndx * 1000)}:${Math.round(ndy * 1000)}`;
+        if (directionKeySet.has(key)) return;
+        directionKeySet.add(key);
+        directions.push({ dx: ndx, dy: ndy });
+      };
+      pushDirection(normalX, normalY);
+      pushDirection(-normalX, -normalY);
+      [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+        [1, -1]
+      ].forEach(([dx, dy]) => pushDirection(dx, dy));
+      return directions;
+    }
+
+    function buildCollabShellEdgeClearanceConstraint(model) {
+      if (!model || !(model.entryById instanceof Map)) return null;
+      const entryById = model.entryById;
+      const groupByKey = model.groupByKey instanceof Map ? model.groupByKey : new Map();
+      return (nodeId, nextPos) => {
+        const entry = entryById.get(nodeId);
+        if (!entry || !Number.isFinite(nextPos?.x) || !Number.isFinite(nextPos?.y)) {
+          return nextPos;
+        }
+        if (entry.role === "anchor") {
+          return { x: 0, y: 0 };
+        }
+        const targetRadius = Number.isFinite(entry.seedRadius) ? entry.seedRadius : entry.depthRadius;
+        if (!Number.isFinite(targetRadius) || targetRadius <= 0) {
+          return nextPos;
+        }
+        const rawRadius = Math.max(1, Math.hypot(nextPos.x, nextPos.y));
+        const rawAngle = normalizeRadians(Math.atan2(nextPos.y, nextPos.x));
+        const bandThickness = COLLAB_SHELL_BAND_THICKNESS[entry.role] || 72;
+        const radialSlack = (bandThickness / 2) + COLLAB_SHELL_EDGE_CLEARANCE_BAND_TOLERANCE_PX;
+        const clampedRadius = clamp(
+          rawRadius,
+          Math.max(40, targetRadius - radialSlack),
+          targetRadius + radialSlack
+        );
+        let clampedAngle = rawAngle;
+        const group = groupByKey.get(entry.groupKey) || null;
+        if (group && Number.isFinite(group.sectorSpan) && group.sectorSpan < (Math.PI * 2)) {
+          const overflowPad = entry.role === "artifact" ? 0.2 : 0.12;
+          const maxDelta = (group.sectorSpan / 2) + overflowPad + COLLAB_SHELL_EDGE_CLEARANCE_SECTOR_TOLERANCE_RAD;
+          const delta = shortestAngleDelta(group.sectorCenter, rawAngle);
+          clampedAngle = normalizeRadians(group.sectorCenter + clamp(delta, -maxDelta, maxDelta));
+        }
+        return {
+          x: Math.cos(clampedAngle) * clampedRadius,
+          y: Math.sin(clampedAngle) * clampedRadius
+        };
+      };
+    }
+
+    function resolveNodeEdgeOverlapsAfterLayout(options = {}) {
+      const nodesForSim = Array.isArray(options.nodesForSim) ? options.nodesForSim : [];
+      const linksForSim = Array.isArray(options.linksForSim) ? options.linksForSim : [];
+      const modelById = options.modelById instanceof Map ? options.modelById : new Map();
+      if (nodesForSim.length < LAYOUT_EDGE_CLEARANCE_MIN_NODE_COUNT || linksForSim.length < 1) return;
+      const isLockedNodeId = typeof options.isLockedNodeId === "function"
+        ? options.isLockedNodeId
+        : () => false;
+      const constrainNodePosition = typeof options.constrainNodePosition === "function"
+        ? options.constrainNodePosition
+        : null;
+
+      const nodeEntries = nodesForSim
+        .map((simNode) => {
+          const node = modelById.get(simNode.id);
+          if (!node || !Number.isFinite(node.graphPos?.x) || !Number.isFinite(node.graphPos?.y)) {
+            return null;
+          }
+          return {
+            id: simNode.id,
+            node,
+            collisionRadius: simNode.collisionRadius,
+            originX: node.graphPos.x,
+            originY: node.graphPos.y,
+            locked: !!isLockedNodeId(simNode.id, node)
+          };
+        })
+        .filter(Boolean);
+      if (nodeEntries.length < LAYOUT_EDGE_CLEARANCE_MIN_NODE_COUNT) return;
+      const nodeEntryById = new Map(nodeEntries.map((entry) => [entry.id, entry]));
+      const layoutLinks = linksForSim
+        .map((link) => ({
+          source: getLinkEndpointId(link?.source),
+          target: getLinkEndpointId(link?.target)
+        }))
+        .filter((link) => link.source && link.target && link.source !== link.target);
+      if (!layoutLinks.length) return;
+
+      for (let passIndex = 0; passIndex < LAYOUT_EDGE_CLEARANCE_MAX_PASSES; passIndex += 1) {
+        const edgeRecords = buildEdgeClearanceEdgeRecords(layoutLinks, nodeEntryById);
+        if (!edgeRecords.length) break;
+        const conflictEntries = nodeEntries
+          .filter((entry) => !entry.locked)
+          .map((entry) => ({
+            entry,
+            conflict: evaluateNodeEdgePenetrationAtPosition(
+              entry,
+              entry.node.graphPos.x,
+              entry.node.graphPos.y,
+              edgeRecords
+            )
+          }))
+          .filter(({ conflict }) => conflict.totalPenetration > LAYOUT_EDGE_CLEARANCE_MIN_IMPROVEMENT_PX);
+        if (!conflictEntries.length) break;
+        conflictEntries.sort((left, right) => {
+          if (right.conflict.totalPenetration !== left.conflict.totalPenetration) {
+            return right.conflict.totalPenetration - left.conflict.totalPenetration;
+          }
+          const typeDiff = compareNodesStable(left.entry.node, right.entry.node);
+          if (typeDiff !== 0) return typeDiff;
+          return left.entry.id.localeCompare(right.entry.id);
+        });
+
+        let movedAnyNode = false;
+        conflictEntries.forEach(({ entry }) => {
+          const currentX = entry.node.graphPos.x;
+          const currentY = entry.node.graphPos.y;
+          const currentConflict = evaluateNodeEdgePenetrationAtPosition(entry, currentX, currentY, edgeRecords);
+          if (currentConflict.totalPenetration <= LAYOUT_EDGE_CLEARANCE_MIN_IMPROVEMENT_PX) {
+            return;
+          }
+          const currentNodeOverlap = getNodeNodeOverlapPenaltyForCandidate(entry, currentX, currentY, nodeEntries);
+          const candidateDirections = buildEdgeClearanceCandidateDirections(
+            currentConflict.normalX,
+            currentConflict.normalY
+          );
+          let bestCandidate = null;
+
+          LAYOUT_EDGE_CLEARANCE_STEP_LADDER_PX.forEach((step) => {
+            candidateDirections.forEach((direction) => {
+              const rawCandidate = {
+                x: currentX + (direction.dx * step),
+                y: currentY + (direction.dy * step)
+              };
+              const constrainedCandidate = constrainNodePosition
+                ? (constrainNodePosition(entry.id, rawCandidate, entry) || rawCandidate)
+                : rawCandidate;
+              if (
+                !Number.isFinite(constrainedCandidate?.x) ||
+                !Number.isFinite(constrainedCandidate?.y)
+              ) {
+                return;
+              }
+              if (
+                Math.abs(constrainedCandidate.x - currentX) < 0.001 &&
+                Math.abs(constrainedCandidate.y - currentY) < 0.001
+              ) {
+                return;
+              }
+              const displacementFromOrigin = Math.hypot(
+                constrainedCandidate.x - entry.originX,
+                constrainedCandidate.y - entry.originY
+              );
+              if (displacementFromOrigin > LAYOUT_EDGE_CLEARANCE_MAX_DISPLACEMENT_PX) {
+                return;
+              }
+              const candidateNodeOverlap = getNodeNodeOverlapPenaltyForCandidate(
+                entry,
+                constrainedCandidate.x,
+                constrainedCandidate.y,
+                nodeEntries
+              );
+              if (candidateNodeOverlap > (currentNodeOverlap + 0.001)) {
+                return;
+              }
+              const candidateConflict = evaluateNodeEdgePenetrationAtPosition(
+                entry,
+                constrainedCandidate.x,
+                constrainedCandidate.y,
+                edgeRecords
+              );
+              const improvement = currentConflict.totalPenetration - candidateConflict.totalPenetration;
+              if (improvement < LAYOUT_EDGE_CLEARANCE_MIN_IMPROVEMENT_PX) {
+                return;
+              }
+              const candidate = {
+                x: constrainedCandidate.x,
+                y: constrainedCandidate.y,
+                conflict: candidateConflict.totalPenetration,
+                overlap: candidateNodeOverlap,
+                displacementFromOrigin
+              };
+              if (
+                !bestCandidate ||
+                candidate.conflict < bestCandidate.conflict - 0.0001 ||
+                (
+                  Math.abs(candidate.conflict - bestCandidate.conflict) <= 0.0001 &&
+                  (
+                    candidate.overlap < bestCandidate.overlap - 0.0001 ||
+                    (
+                      Math.abs(candidate.overlap - bestCandidate.overlap) <= 0.0001 &&
+                      candidate.displacementFromOrigin < bestCandidate.displacementFromOrigin - 0.0001
+                    )
+                  )
+                )
+              ) {
+                bestCandidate = candidate;
+              }
+            });
+          });
+
+          if (!bestCandidate) return;
+          entry.node.graphPos = {
+            x: bestCandidate.x,
+            y: bestCandidate.y
+          };
+          movedAnyNode = true;
+        });
+        if (!movedAnyNode) break;
+      }
+    }
+
     function normalizeRadians(value) {
       if (!Number.isFinite(value)) return normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
       const tau = Math.PI * 2;
@@ -12803,6 +13298,18 @@ function isInteractiveDragBlockTarget(target) {
           y: Number.isFinite(simNode.y) ? simNode.y : 0
         };
       });
+      const modelById = new Map(
+        model.nodeEntries
+          .filter((entry) => !!entry.node)
+          .map((entry) => [entry.id, entry.node])
+      );
+      resolveNodeEdgeOverlapsAfterLayout({
+        nodesForSim: model.nodesForSim,
+        linksForSim: model.linksForSim,
+        modelById,
+        isLockedNodeId: (nodeId) => model.entryById.get(nodeId)?.role === "anchor",
+        constrainNodePosition: buildCollabShellEdgeClearanceConstraint(model)
+      });
     }
 
     function runD3Layout(visibleNodeIds, options = {}) {
@@ -12845,6 +13352,11 @@ function isInteractiveDragBlockTarget(target) {
           x: Number.isFinite(simNode.x) ? simNode.x : 0,
           y: Number.isFinite(simNode.y) ? simNode.y : 0
         };
+      });
+      resolveNodeEdgeOverlapsAfterLayout({
+        nodesForSim,
+        linksForSim,
+        modelById
       });
     }
 
@@ -12928,6 +13440,11 @@ function isInteractiveDragBlockTarget(target) {
           x: Number.isFinite(simNode.x) ? simNode.x : 0,
           y: Number.isFinite(simNode.y) ? simNode.y : 0
         };
+      });
+      resolveNodeEdgeOverlapsAfterLayout({
+        nodesForSim,
+        linksForSim,
+        modelById
       });
     }
 
