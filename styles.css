@@ -23,9 +23,9 @@
       --edge-chevron-active-width: 2.25px;
       --edge-draft-alpha: 0.72;
       --edge-draft-width: 1.95px;
-      --edge-shadow-filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.18));
-      --edge-shadow-filter-hover: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.24));
-      --edge-shadow-filter-active: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.3));
+      --edge-shadow-filter: none;
+      --edge-shadow-filter-hover: none;
+      --edge-shadow-filter-active: none;
       --ui-glass-strong-bg:
         linear-gradient(
           160deg,
@@ -294,7 +294,9 @@
     .map-create-menu {
       position: fixed;
       display: none;
-      min-width: 156px;
+      width: auto;
+      min-width: 0;
+      max-width: calc(100vw - 16px);
       border: 1px solid rgba(0, 0, 0, 0.12);
       border-radius: 10px;
       background: rgba(255, 255, 255, 0.92);
@@ -565,9 +567,9 @@
       position: absolute;
       left: 0;
       top: 0;
-      width: 20px;
-      height: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.55);
+      width: calc(20px * var(--camera-zoom, 1));
+      height: calc(20px * var(--camera-zoom, 1));
+      border: calc(1px * var(--camera-zoom, 1)) solid rgba(255, 255, 255, 0.55);
       border-radius: 999px;
       background: rgba(255, 255, 255, 0.82);
       -webkit-backdrop-filter: blur(10px) saturate(180%);
@@ -604,7 +606,7 @@
     }
 
     .edge-create-handle-glyph {
-      font-size: 11px;
+      font-size: calc(11px * var(--camera-zoom, 1));
       line-height: 1;
       transform: translateX(0.5px);
       pointer-events: none;
@@ -626,10 +628,10 @@
 
     .edge-action-btn {
       position: absolute;
-      width: 22px;
-      height: 22px;
+      width: calc(22px * var(--camera-zoom, 1));
+      height: calc(22px * var(--camera-zoom, 1));
       border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.62);
+      border: calc(1px * var(--camera-zoom, 1)) solid rgba(255, 255, 255, 0.62);
       background: rgba(255, 255, 255, 0.86);
       -webkit-backdrop-filter: blur(10px) saturate(170%);
       backdrop-filter: blur(10px) saturate(170%);
@@ -640,7 +642,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
+      font-size: calc(12px * var(--camera-zoom, 1));
       line-height: 1;
       padding: 0;
       margin: 0;
@@ -692,7 +694,13 @@
     }
 
     .map-create-menu-item {
-      width: 100%;
+      display: block;
+      appearance: none;
+      -webkit-appearance: none;
+      width: auto;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       border: 1px solid transparent;
       background: transparent;
       border-radius: 8px;
@@ -700,6 +708,9 @@
       text-align: left;
       padding: 7px 9px;
       font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
       cursor: pointer;
       transition: background 120ms ease, border-color 120ms ease;
     }
@@ -728,6 +739,12 @@
       background: transparent;
       border-color: transparent;
       opacity: 0.9;
+    }
+
+    .map-create-menu-separator {
+      height: 1px;
+      margin: 6px 4px;
+      background: rgba(148, 163, 184, 0.35);
     }
 
     .workspace-user-select {
@@ -1235,9 +1252,9 @@
 
     .type-standard,
     .type-protocol {
-      background: #fff7ed;
-      border-color: #ffd8a8;
-      color: #9a4d00;
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #375a7f;
     }
 
     .type-portal {
@@ -1521,6 +1538,7 @@
     }
 
     #edges-layer {
+      --camera-zoom: 1;
       position: absolute;
       top: 0;
       left: 0;
@@ -1545,6 +1563,19 @@
       height: 100%;
       z-index: 3;
       pointer-events: none;
+    }
+
+    .marquee-select-box {
+      position: absolute;
+      z-index: 6;
+      pointer-events: none;
+      border: 1px dashed rgba(30, 64, 175, 0.9);
+      background: rgba(96, 165, 250, 0.18);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+    }
+
+    .marquee-select-box.hidden {
+      display: none;
     }
 
     .lens-card {
@@ -1622,27 +1653,27 @@
       stroke-linecap: round;
       stroke-linejoin: round;
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-core-alpha));
-      stroke-width: var(--edge-core-width);
+      stroke-width: calc(var(--edge-core-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter);
       transition: stroke-width 120ms ease, stroke 120ms ease, filter 120ms ease;
     }
 
     .edge-line--hover {
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-core-hover-alpha));
-      stroke-width: var(--edge-core-hover-width);
+      stroke-width: calc(var(--edge-core-hover-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter-hover);
     }
 
     .edge-line--active,
     .edge-line--selected {
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-core-active-alpha));
-      stroke-width: var(--edge-core-active-width);
+      stroke-width: calc(var(--edge-core-active-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter-active);
     }
 
     .edge-line--draft {
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-draft-alpha));
-      stroke-width: var(--edge-draft-width);
+      stroke-width: calc(var(--edge-draft-width) * var(--camera-zoom));
       stroke-dasharray: 6 5;
       filter: var(--edge-shadow-filter-hover);
       pointer-events: none;
@@ -1654,27 +1685,27 @@
       stroke-linecap: round;
       stroke-linejoin: round;
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-chevron-alpha));
-      stroke-width: var(--edge-chevron-width);
+      stroke-width: calc(var(--edge-chevron-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter);
       transition: stroke-width 120ms ease, stroke 120ms ease, filter 120ms ease;
     }
 
     .edge-chevron--hover {
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-chevron-hover-alpha));
-      stroke-width: var(--edge-chevron-hover-width);
+      stroke-width: calc(var(--edge-chevron-hover-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter-hover);
     }
 
     .edge-chevron--active,
     .edge-chevron--selected {
       stroke: rgba(var(--edge-neutral-rgb), var(--edge-chevron-active-alpha));
-      stroke-width: var(--edge-chevron-active-width);
+      stroke-width: calc(var(--edge-chevron-active-width) * var(--camera-zoom));
       filter: var(--edge-shadow-filter-active);
     }
 
     .edge-chevron--draft {
       stroke: rgba(var(--edge-neutral-rgb), 0.82);
-      stroke-width: 2.05px;
+      stroke-width: calc(2.05px * var(--camera-zoom));
       filter: var(--edge-shadow-filter-hover);
       pointer-events: none;
     }
@@ -1683,39 +1714,68 @@
       fill: none;
       /* Use an almost-transparent stroke so SVG hit-testing remains reliable. */
       stroke: rgba(0, 0, 0, 0.001);
-      stroke-width: 12;
+      stroke-width: calc(12px * var(--camera-zoom));
       stroke-linecap: round;
       stroke-linejoin: round;
       pointer-events: stroke;
     }
 
+    .edge-hit.is-selected {
+      cursor: move;
+    }
+
     .node-card {
+      --camera-zoom: 1;
       --graph-node-text-inset: 14px;
       --node-card-radius: 16px;
       --node-tint-rgb: 100, 116, 139;
       --node-tint-strong: rgba(var(--node-tint-rgb), 0.16);
       --node-tint-mid: rgba(var(--node-tint-rgb), 0.1);
       --node-tint-soft: rgba(var(--node-tint-rgb), 0.05);
-      --node-glass-fill-1: rgba(255, 255, 255, 0.4);
-      --node-glass-fill-2: rgba(255, 255, 255, 0.3);
-      --node-glass-fill-3: rgba(255, 255, 255, 0.24);
-      --node-glass-base: rgba(255, 255, 255, 0.31);
+      --node-glass-fill-1: rgba(255, 255, 255, 0.18);
+      --node-glass-fill-2: rgba(255, 255, 255, 0.1);
+      --node-glass-fill-3: rgba(255, 255, 255, 0.06);
+      --node-glass-base: rgba(205, 224, 255, 0.08);
       --node-glass-border: rgba(255, 255, 255, 0.42);
-      --node-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+      --node-glass-shadow:
+        0 9px 24px rgba(0, 0, 0, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.12);
       --node-glass-shadow-hover:
-        0 12px 36px rgba(0, 0, 0, 0.13),
-        0 2px 8px rgba(0, 0, 0, 0.08);
+        0 10px 28px rgba(0, 0, 0, 0.16),
+        0 0 0 1px rgba(255, 255, 255, 0.22),
+        0 0 0 4px rgba(255, 255, 255, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.08);
       position: absolute;
       width: 172px;
-      min-height: 56px;
+      min-height: calc(56px * var(--camera-zoom));
       border: 1px solid var(--node-glass-border);
       border-radius: var(--node-card-radius);
       background:
         linear-gradient(
-          165deg,
-          var(--node-glass-fill-1) 0%,
-          var(--node-glass-fill-2) 52%,
-          var(--node-glass-fill-3) 100%
+          180deg,
+          rgba(255, 255, 255, 0.12) 0%,
+          rgba(255, 255, 255, 0.08) 34%,
+          rgba(255, 255, 255, 0.05) 68%,
+          rgba(15, 23, 42, 0.025) 100%
+        ),
+        radial-gradient(
+          130% 85% at 32% 8%,
+          rgba(255, 255, 255, 0.22) 0%,
+          rgba(255, 255, 255, 0.1) 28%,
+          rgba(255, 255, 255, 0.03) 52%,
+          rgba(255, 255, 255, 0) 74%
+        ),
+        linear-gradient(
+          90deg,
+          rgba(0, 0, 0, 0) 0%,
+          rgba(0, 0, 0, 0.012) 10%,
+          rgba(0, 0, 0, 0.02) 18%,
+          rgba(0, 0, 0, 0.02) 82%,
+          rgba(0, 0, 0, 0.012) 90%,
+          rgba(0, 0, 0, 0) 100%
         ),
         radial-gradient(
           140% 120% at 12% 8%,
@@ -1725,14 +1785,14 @@
           rgba(var(--node-tint-rgb), 0.01) 100%
         ),
         var(--node-glass-base);
-      backdrop-filter: blur(16px) saturate(180%);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(115%);
+      -webkit-backdrop-filter: blur(16px) saturate(115%);
       padding: var(--graph-node-text-inset);
       cursor: pointer;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      gap: 4px;
+      gap: calc(4px * var(--camera-zoom));
       box-shadow: var(--node-glass-shadow);
       pointer-events: auto;
       overflow: visible;
@@ -1751,20 +1811,24 @@
       border-radius: inherit;
       pointer-events: none;
       background:
-        radial-gradient(
-          110% 90% at 24% 4%,
-          rgba(255, 255, 255, 0.22) 0%,
-          rgba(255, 255, 255, 0) 56%
-        ),
         linear-gradient(
           180deg,
-          rgba(255, 255, 255, 0.24) 0%,
-          rgba(255, 255, 255, 0.1) 42%,
+          rgba(255, 255, 255, 0.2) 0%,
+          rgba(255, 255, 255, 0.12) 10%,
+          rgba(255, 255, 255, 0.04) 22%,
+          rgba(255, 255, 255, 0) 40%
+        ),
+        radial-gradient(
+          120% 140% at 50% 50%,
+          rgba(255, 255, 255, 0) 52%,
+          rgba(255, 255, 255, 0.02) 72%,
+          rgba(255, 255, 255, 0.08) 88%,
           rgba(255, 255, 255, 0.03) 100%
         );
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.45),
-        inset 0 -10px 18px rgba(255, 255, 255, 0.08);
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 -4px 8px rgba(255, 255, 255, 0.02);
+      mix-blend-mode: screen;
       z-index: 0;
     }
 
@@ -1775,6 +1839,17 @@
 
     .node-card.drag-anywhere {
       cursor: grab;
+    }
+
+    .node-card.multi-drag-ready,
+    .node-card.multi-drag-ready.drag-anywhere {
+      cursor: move;
+    }
+
+    .node-card.multi-drag-ready .node-portal-body,
+    .node-card.multi-drag-ready .node-anchor-body,
+    .node-card.multi-drag-ready .node-entity-shape {
+      cursor: move;
     }
 
     .node-card:hover {
@@ -1791,8 +1866,8 @@
     .node-card.location.expanded {
       z-index: 5;
       justify-content: flex-start;
-      gap: 8px;
-      padding: var(--graph-node-text-inset) var(--graph-node-text-inset) 12px;
+      gap: calc(8px * var(--camera-zoom));
+      padding: var(--graph-node-text-inset) var(--graph-node-text-inset) calc(12px * var(--camera-zoom));
       background:
         linear-gradient(
           170deg,
@@ -1854,16 +1929,12 @@
     }
 
     .node-card.entity {
-      --entity-surface-filter:
-        drop-shadow(0 8px 32px rgba(0, 0, 0, 0.1))
-        drop-shadow(0 1px 0 rgba(255, 255, 255, 0.18));
-      --entity-surface-transform: translateY(0);
-      --entity-outline-stroke: rgba(255, 255, 255, 0.42);
-      --entity-outline-width: 1.15px;
-      --entity-focus-stroke: rgba(var(--node-tint-rgb), 0);
-      --entity-focus-width: 2.4px;
-      --entity-focus-opacity: 0;
-      --entity-inner-opacity: 0.62;
+      --entity-shape-size: 80px;
+      --entity-shape-translate-y: 0px;
+      --entity-shape-shadow: var(--node-glass-shadow);
+      --entity-shape-border-color: rgba(255, 255, 255, 0.42);
+      --entity-shape-outline-color: rgba(var(--node-tint-rgb), 0.2);
+      --entity-shape-outline-opacity: 0.2;
       border-color: transparent;
       background: none;
       box-shadow: none;
@@ -1874,6 +1945,7 @@
       justify-content: center;
       text-align: center;
       overflow: visible;
+      isolation: isolate;
     }
 
     .node-card.entity::after {
@@ -1944,14 +2016,29 @@
 
     .node-portal-body {
       position: absolute;
-      border: 1px solid rgba(255, 255, 255, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.22);
       border-radius: 999px;
       background:
-        linear-gradient(
-          165deg,
+        radial-gradient(
+          circle at 40% 36%,
           var(--node-glass-fill-1) 0%,
-          var(--node-glass-fill-2) 52%,
-          var(--node-glass-fill-3) 100%
+          var(--node-glass-fill-2) 22%,
+          rgba(255, 255, 255, 0.07) 48%,
+          rgba(255, 255, 255, 0.05) 68%,
+          rgba(255, 255, 255, 0.04) 100%
+        ),
+        radial-gradient(
+          circle at 50% 50%,
+          rgba(0, 0, 0, 0) 64%,
+          rgba(0, 0, 0, 0.03) 72%,
+          rgba(0, 0, 0, 0.11) 84%,
+          rgba(0, 0, 0, 0.18) 100%
+        ),
+        linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.05) 0%,
+          rgba(255, 255, 255, 0.03) 46%,
+          rgba(15, 23, 42, 0.03) 100%
         ),
         radial-gradient(
           140% 120% at 12% 8%,
@@ -1961,12 +2048,12 @@
           rgba(var(--node-tint-rgb), 0.01) 100%
         ),
         var(--node-glass-base);
-      backdrop-filter: blur(16px) saturate(180%);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(115%);
+      -webkit-backdrop-filter: blur(16px) saturate(115%);
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 8px;
+      padding: calc(8px * var(--camera-zoom));
       box-shadow: var(--node-glass-shadow);
       cursor: grab;
       pointer-events: auto;
@@ -1979,14 +2066,29 @@
 
     .node-anchor-body {
       position: absolute;
-      border: 1px solid rgba(255, 255, 255, 0.46);
+      border: 1px solid rgba(255, 255, 255, 0.22);
       border-radius: 999px;
       background:
+        radial-gradient(
+          circle at 40% 36%,
+          var(--node-glass-fill-1) 0%,
+          var(--node-glass-fill-2) 22%,
+          rgba(255, 255, 255, 0.07) 48%,
+          rgba(255, 255, 255, 0.05) 68%,
+          rgba(255, 255, 255, 0.04) 100%
+        ),
+        radial-gradient(
+          circle at 50% 50%,
+          rgba(0, 0, 0, 0) 64%,
+          rgba(0, 0, 0, 0.03) 72%,
+          rgba(0, 0, 0, 0.11) 84%,
+          rgba(0, 0, 0, 0.18) 100%
+        ),
         linear-gradient(
-          160deg,
-          rgba(255, 255, 255, 0.56) 0%,
-          rgba(245, 249, 255, 0.42) 52%,
-          rgba(236, 243, 255, 0.32) 100%
+          180deg,
+          rgba(255, 255, 255, 0.05) 0%,
+          rgba(255, 255, 255, 0.03) 46%,
+          rgba(15, 23, 42, 0.03) 100%
         ),
         radial-gradient(
           140% 128% at 14% 10%,
@@ -1994,15 +2096,13 @@
           rgba(var(--node-tint-rgb), 0.11) 52%,
           rgba(var(--node-tint-rgb), 0.04) 100%
         ),
-        rgba(255, 255, 255, 0.34);
-      backdrop-filter: blur(18px) saturate(185%);
-      -webkit-backdrop-filter: blur(18px) saturate(185%);
+        var(--node-glass-base);
+      backdrop-filter: blur(16px) saturate(115%);
+      -webkit-backdrop-filter: blur(16px) saturate(115%);
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow:
-        0 14px 34px rgba(15, 23, 42, 0.14),
-        inset 0 1px 0 rgba(255, 255, 255, 0.58);
+      box-shadow: var(--node-glass-shadow);
       cursor: grab;
       pointer-events: auto;
       transition:
@@ -2094,57 +2194,100 @@
       pointer-events: none;
     }
 
-    .node-entity-surface {
+    .node-entity-shape {
       position: absolute;
-      inset: -1px;
-      width: calc(100% + 2px);
-      height: calc(100% + 2px);
-      overflow: visible;
-      filter: var(--entity-surface-filter);
-      transform: var(--entity-surface-transform);
-      transition: filter 140ms ease, transform 140ms ease;
+      left: 50%;
+      top: 50%;
+      width: var(--entity-shape-size);
+      height: var(--entity-shape-size);
+      overflow: hidden;
+      isolation: isolate;
+      pointer-events: auto;
+      cursor: grab;
+      border-radius: calc(14px * var(--camera-zoom));
+      background:
+        linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.12) 0%,
+          rgba(255, 255, 255, 0.08) 34%,
+          rgba(255, 255, 255, 0.05) 68%,
+          rgba(15, 23, 42, 0.025) 100%
+        ),
+        radial-gradient(
+          130% 85% at 32% 8%,
+          rgba(255, 255, 255, 0.22) 0%,
+          rgba(255, 255, 255, 0.1) 28%,
+          rgba(255, 255, 255, 0.03) 52%,
+          rgba(255, 255, 255, 0) 74%
+        ),
+        linear-gradient(
+          90deg,
+          rgba(0, 0, 0, 0) 0%,
+          rgba(0, 0, 0, 0.012) 10%,
+          rgba(0, 0, 0, 0.02) 18%,
+          rgba(0, 0, 0, 0.02) 82%,
+          rgba(0, 0, 0, 0.012) 90%,
+          rgba(0, 0, 0, 0) 100%
+        ),
+        radial-gradient(
+          140% 120% at 12% 8%,
+          var(--node-tint-strong) 0%,
+          var(--node-tint-mid) 42%,
+          var(--node-tint-soft) 74%,
+          rgba(var(--node-tint-rgb), 0.01) 100%
+        ),
+        var(--node-glass-base);
+      border: 1px solid var(--entity-shape-border-color);
+      box-sizing: border-box;
+      box-shadow: var(--entity-shape-shadow);
+      backdrop-filter: blur(16px) saturate(115%);
+      -webkit-backdrop-filter: blur(16px) saturate(115%);
+      transform: translate(-50%, calc(-50% + var(--entity-shape-translate-y))) rotate(45deg);
+      z-index: 0;
+      transition:
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        background 140ms ease,
+        transform 140ms ease;
+    }
+
+    .node-entity-shape::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
       pointer-events: none;
+      box-shadow: inset 0 0 0 1px var(--entity-shape-outline-color);
+      opacity: var(--entity-shape-outline-opacity);
+      transition: opacity 140ms ease, box-shadow 140ms ease;
+      z-index: 1;
     }
 
-    .node-entity-diamond-base {
-      opacity: 1;
-    }
-
-    .node-entity-diamond-tint {
-      fill: rgba(var(--node-tint-rgb), 0.16);
-      opacity: 0.96;
-    }
-
-    .node-entity-diamond-sheen {
-      opacity: 0.94;
-    }
-
-    .node-entity-diamond-highlight {
-      opacity: 0.76;
-    }
-
-    .node-entity-diamond-inner {
-      opacity: var(--entity-inner-opacity);
-      stroke: rgba(255, 255, 255, 0.18);
-      stroke-width: 1;
-      vector-effect: non-scaling-stroke;
-    }
-
-    .node-entity-diamond-outline {
-      fill: none;
-      stroke: var(--entity-outline-stroke);
-      stroke-width: var(--entity-outline-width);
-      vector-effect: non-scaling-stroke;
-    }
-
-    .node-entity-diamond-focus-ring {
-      fill: none;
-      stroke: var(--entity-focus-stroke);
-      stroke-width: var(--entity-focus-width);
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      vector-effect: non-scaling-stroke;
-      opacity: var(--entity-focus-opacity);
+    .node-entity-face {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.2) 0%,
+          rgba(255, 255, 255, 0.12) 10%,
+          rgba(255, 255, 255, 0.04) 22%,
+          rgba(255, 255, 255, 0) 40%
+        ),
+        radial-gradient(
+          120% 140% at 50% 50%,
+          rgba(255, 255, 255, 0) 52%,
+          rgba(255, 255, 255, 0.02) 72%,
+          rgba(255, 255, 255, 0.08) 88%,
+          rgba(255, 255, 255, 0.03) 100%
+        );
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 -4px 8px rgba(255, 255, 255, 0.02);
+      pointer-events: none;
+      z-index: 2;
+      mix-blend-mode: screen;
     }
 
     .node-entity-content {
@@ -2153,26 +2296,25 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 0 calc(var(--graph-node-text-inset) + 10px);
-      clip-path: polygon(
-        50% calc(var(--graph-node-text-inset) + 2px),
-        calc(100% - (var(--graph-node-text-inset) + 6px)) 50%,
-        50% calc(100% - (var(--graph-node-text-inset) + 2px)),
-        calc(var(--graph-node-text-inset) + 6px) 50%
-      );
+      padding: 0 var(--graph-node-text-inset);
       pointer-events: none;
+      transform: rotate(-45deg);
+      z-index: 3;
     }
 
     .node-entity-label {
+      display: block;
+      width: 100%;
       max-width: 100%;
-      color: #0f172a;
-      font-size: 12px;
-      font-weight: 700;
-      line-height: 1.18;
+      color: #1f2937;
+      font-size: calc(12px * var(--camera-zoom));
+      font-weight: 600;
+      line-height: 1.2;
       text-align: center;
-      text-wrap: balance;
-      overflow-wrap: anywhere;
-      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+      white-space: nowrap;
+      text-wrap: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .node-card.portal.dragging .node-portal-body {
@@ -2185,8 +2327,19 @@
       transform: none;
     }
 
-    .node-card.entity.dragging .node-entity-surface {
-      transform: none;
+    .node-card.entity.dragging {
+      --entity-shape-translate-y: 0px;
+    }
+
+    .node-card.entity.dragging .node-entity-shape {
+      cursor: grabbing;
+    }
+
+    .node-card.multi-drag-ready.dragging,
+    .node-card.multi-drag-ready.dragging .node-portal-body,
+    .node-card.multi-drag-ready.dragging .node-anchor-body,
+    .node-card.multi-drag-ready.dragging .node-entity-shape {
+      cursor: grabbing;
     }
 
     .node-card.portal:not(.dragging):not(.selected):not(.node-card-edge-hover):not(.edge-create-source):not(.edge-create-target) .node-portal-body:hover {
@@ -2203,36 +2356,20 @@
     }
 
     .node-card.entity:not(.dragging):not(.selected):not(.node-card-edge-hover):not(.edge-create-source):not(.edge-create-target):hover {
-      --entity-surface-filter:
-        drop-shadow(0 12px 36px rgba(0, 0, 0, 0.13))
-        drop-shadow(0 2px 8px rgba(0, 0, 0, 0.08));
-      --entity-surface-transform: translateY(-1px);
-    }
-
-    .node-card.entity:not(.dragging):not(.selected):not(.node-card-edge-hover):not(.edge-create-source):not(.edge-create-target):hover .node-entity-diamond-highlight {
-      opacity: 0.82;
+      --entity-shape-translate-y: -1px;
+      --entity-shape-shadow: var(--node-glass-shadow-hover);
+      --entity-shape-border-color: rgba(255, 255, 255, 0.48);
+      --entity-shape-outline-color: rgba(var(--node-tint-rgb), 0.24);
+      --entity-shape-outline-opacity: 0.46;
     }
 
     .node-card.portal.selected .node-portal-body {
-      background:
-        linear-gradient(
-          160deg,
-          rgba(255, 255, 255, 0.56) 0%,
-          rgba(245, 249, 255, 0.4) 56%,
-          rgba(236, 243, 255, 0.32) 100%
-        ),
-        radial-gradient(
-          140% 128% at 12% 10%,
-          rgba(var(--node-tint-rgb), 0.2) 0%,
-          rgba(var(--node-tint-rgb), 0.12) 48%,
-          rgba(var(--node-tint-rgb), 0.06) 100%
-        ),
-        rgba(255, 255, 255, 0.36);
-      border-color: rgba(255, 255, 255, 0.56);
+      border-color: rgba(255, 255, 255, 0.46);
       box-shadow:
-        0 0 0 1px rgba(var(--node-tint-rgb), 0.42),
-        0 12px 32px rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.56);
+        0 0 0 1px rgba(var(--node-tint-rgb), 0.24),
+        0 10px 28px rgba(0, 0, 0, 0.14),
+        0 0 0 4px rgba(var(--node-tint-rgb), 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
 
     .node-card.anchor.selected .node-anchor-body {
@@ -2245,29 +2382,21 @@
     }
 
     .node-card.entity.selected {
-      --entity-surface-filter:
-        drop-shadow(0 12px 32px rgba(0, 0, 0, 0.16))
-        drop-shadow(0 1px 0 rgba(255, 255, 255, 0.2));
-      --entity-outline-stroke: rgba(255, 255, 255, 0.56);
-      --entity-focus-stroke: rgba(var(--node-tint-rgb), 0.42);
-      --entity-focus-width: 2.6px;
-      --entity-focus-opacity: 1;
-      --entity-inner-opacity: 0.78;
-    }
-
-    .node-card.entity.selected .node-entity-diamond-tint {
-      fill: rgba(var(--node-tint-rgb), 0.2);
-    }
-
-    .node-card.entity.selected .node-entity-diamond-highlight {
-      opacity: 0.9;
+      --entity-shape-translate-y: -1px;
+      --entity-shape-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.08);
+      --entity-shape-border-color: rgba(var(--node-tint-rgb), 0.4);
+      --entity-shape-outline-color: rgba(var(--node-tint-rgb), 0.4);
+      --entity-shape-outline-opacity: 0;
     }
 
     .node-card.portal.node-card-edge-hover .node-portal-body {
       box-shadow:
-        0 0 0 1px rgba(var(--node-tint-rgb), 0.28),
-        0 10px 30px rgba(0, 0, 0, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.46);
+        0 0 0 1px rgba(var(--node-tint-rgb), 0.2),
+        0 9px 24px rgba(0, 0, 0, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.44);
     }
 
     .node-card.anchor.node-card-edge-hover .node-anchor-body {
@@ -2279,12 +2408,14 @@
     }
 
     .node-card.entity.node-card-edge-hover {
-      --entity-surface-filter:
-        drop-shadow(0 10px 30px rgba(0, 0, 0, 0.12))
-        drop-shadow(0 1px 0 rgba(255, 255, 255, 0.16));
-      --entity-focus-stroke: rgba(var(--node-tint-rgb), 0.28);
-      --entity-focus-width: 2.2px;
-      --entity-focus-opacity: 1;
+      --entity-shape-translate-y: -1px;
+      --entity-shape-shadow:
+        0 0 0 1px rgba(var(--node-tint-rgb), 0.28),
+        0 10px 30px rgba(0, 0, 0, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.46);
+      --entity-shape-border-color: rgba(var(--node-tint-rgb), 0.3);
+      --entity-shape-outline-color: rgba(var(--node-tint-rgb), 0.28);
+      --entity-shape-outline-opacity: 0.72;
     }
 
     .node-card.portal.edge-create-source .node-portal-body {
@@ -2304,12 +2435,15 @@
     }
 
     .node-card.entity.edge-create-source {
-      --entity-surface-filter:
-        drop-shadow(0 10px 28px rgba(15, 23, 42, 0.12))
-        drop-shadow(0 1px 0 rgba(255, 255, 255, 0.18));
-      --entity-focus-stroke: rgba(30, 64, 175, 0.34);
-      --entity-focus-width: 5px;
-      --entity-focus-opacity: 1;
+      --entity-shape-translate-y: -1px;
+      --entity-shape-shadow:
+        0 0 0 1px rgba(30, 64, 175, 0.34),
+        0 0 0 4px rgba(30, 64, 175, 0.12),
+        0 10px 28px rgba(15, 23, 42, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      --entity-shape-border-color: rgba(30, 64, 175, 0.34);
+      --entity-shape-outline-color: rgba(30, 64, 175, 0.34);
+      --entity-shape-outline-opacity: 0.96;
     }
 
     .node-card.portal.edge-create-target .node-portal-body {
@@ -2329,21 +2463,41 @@
     }
 
     .node-card.entity.edge-create-target {
-      --entity-surface-filter:
-        drop-shadow(0 10px 28px rgba(15, 23, 42, 0.12))
-        drop-shadow(0 1px 0 rgba(255, 255, 255, 0.18));
-      --entity-focus-stroke: rgba(5, 150, 105, 0.34);
-      --entity-focus-width: 5px;
-      --entity-focus-opacity: 1;
+      --entity-shape-translate-y: -1px;
+      --entity-shape-shadow:
+        0 0 0 1px rgba(5, 150, 105, 0.34),
+        0 0 0 4px rgba(5, 150, 105, 0.1),
+        0 10px 28px rgba(15, 23, 42, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      --entity-shape-border-color: rgba(5, 150, 105, 0.34);
+      --entity-shape-outline-color: rgba(5, 150, 105, 0.34);
+      --entity-shape-outline-opacity: 0.94;
     }
 
     .node-card.selected {
       background:
         linear-gradient(
-          160deg,
-          rgba(255, 255, 255, 0.56) 0%,
-          rgba(245, 249, 255, 0.4) 56%,
-          rgba(236, 243, 255, 0.32) 100%
+          180deg,
+          rgba(255, 255, 255, 0.16) 0%,
+          rgba(255, 255, 255, 0.1) 34%,
+          rgba(255, 255, 255, 0.07) 68%,
+          rgba(15, 23, 42, 0.03) 100%
+        ),
+        radial-gradient(
+          130% 85% at 32% 8%,
+          rgba(255, 255, 255, 0.24) 0%,
+          rgba(255, 255, 255, 0.12) 28%,
+          rgba(255, 255, 255, 0.04) 52%,
+          rgba(255, 255, 255, 0) 74%
+        ),
+        linear-gradient(
+          90deg,
+          rgba(0, 0, 0, 0) 0%,
+          rgba(0, 0, 0, 0.014) 10%,
+          rgba(0, 0, 0, 0.024) 18%,
+          rgba(0, 0, 0, 0.024) 82%,
+          rgba(0, 0, 0, 0.014) 90%,
+          rgba(0, 0, 0, 0) 100%
         ),
         radial-gradient(
           140% 128% at 12% 10%,
@@ -2351,12 +2505,13 @@
           rgba(var(--node-tint-rgb), 0.12) 48%,
           rgba(var(--node-tint-rgb), 0.06) 100%
         ),
-        rgba(255, 255, 255, 0.36);
+        var(--node-glass-base);
       border-color: rgba(255, 255, 255, 0.56);
       box-shadow:
         0 0 0 1px rgba(var(--node-tint-rgb), 0.42),
         0 12px 32px rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.56);
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.08);
     }
 
     .node-card-edge-hover {
@@ -2386,10 +2541,26 @@
       .node-card {
         background:
           linear-gradient(
-            165deg,
-            rgba(255, 255, 255, 0.8) 0%,
-            rgba(247, 250, 255, 0.72) 52%,
-            rgba(240, 246, 255, 0.62) 100%
+            180deg,
+            rgba(255, 255, 255, 0.86) 0%,
+            rgba(247, 250, 255, 0.8) 34%,
+            rgba(240, 246, 255, 0.74) 68%,
+            rgba(232, 240, 250, 0.72) 100%
+          ),
+          radial-gradient(
+            130% 85% at 32% 8%,
+            rgba(255, 255, 255, 0.16) 0%,
+            rgba(255, 255, 255, 0.06) 30%,
+            rgba(255, 255, 255, 0) 72%
+          ),
+          linear-gradient(
+            90deg,
+            rgba(0, 0, 0, 0) 0%,
+            rgba(0, 0, 0, 0.012) 12%,
+            rgba(0, 0, 0, 0.018) 20%,
+            rgba(0, 0, 0, 0.018) 80%,
+            rgba(0, 0, 0, 0.012) 88%,
+            rgba(0, 0, 0, 0) 100%
           ),
           radial-gradient(
             135% 120% at 12% 10%,
@@ -2403,9 +2574,26 @@
       .node-card.selected {
         background:
           linear-gradient(
-            160deg,
-            rgba(245, 250, 255, 0.82) 0%,
-            rgba(232, 243, 255, 0.72) 100%
+            180deg,
+            rgba(245, 250, 255, 0.9) 0%,
+            rgba(232, 243, 255, 0.82) 34%,
+            rgba(226, 238, 252, 0.76) 68%,
+            rgba(221, 234, 248, 0.74) 100%
+          ),
+          radial-gradient(
+            130% 85% at 32% 8%,
+            rgba(255, 255, 255, 0.18) 0%,
+            rgba(255, 255, 255, 0.07) 30%,
+            rgba(255, 255, 255, 0) 72%
+          ),
+          linear-gradient(
+            90deg,
+            rgba(0, 0, 0, 0) 0%,
+            rgba(0, 0, 0, 0.012) 12%,
+            rgba(0, 0, 0, 0.02) 20%,
+            rgba(0, 0, 0, 0.02) 80%,
+            rgba(0, 0, 0, 0.012) 88%,
+            rgba(0, 0, 0, 0) 100%
           ),
           radial-gradient(
             140% 128% at 12% 10%,
@@ -2421,7 +2609,7 @@
     .node-card.process,
     .node-card.experiment { --node-tint-rgb: 47, 93, 168; }
     .node-card.standard,
-    .node-card.protocol { --node-tint-rgb: 154, 77, 0; }
+    .node-card.protocol { --node-tint-rgb: 76, 110, 138; }
     .node-card.project { --node-tint-rgb: 124, 58, 237; }
     .node-card.sample { --node-tint-rgb: 15, 118, 110; }
     .node-card.dataset { --node-tint-rgb: 21, 128, 61; }
@@ -2446,9 +2634,75 @@
       box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.34);
     }
 
+    .handover-portal-badge {
+      position: absolute;
+      top: calc(-0.32 * var(--node-card-radius));
+      right: calc(-0.32 * var(--node-card-radius));
+      width: calc(18px * var(--camera-zoom));
+      height: calc(18px * var(--camera-zoom));
+      border-radius: 999px;
+      border: 1px solid rgba(15, 118, 110, 0.78);
+      background:
+        radial-gradient(circle at 35% 34%, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.26) 34%, rgba(255, 255, 255, 0.06) 62%, rgba(255, 255, 255, 0.01) 100%),
+        linear-gradient(160deg, rgba(20, 184, 166, 0.9) 0%, rgba(14, 116, 144, 0.9) 100%);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.48),
+        0 4px 8px rgba(15, 23, 42, 0.24);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 4;
+      transition:
+        transform 120ms ease,
+        box-shadow 120ms ease,
+        filter 120ms ease;
+    }
+
+    .handover-portal-badge:hover {
+      transform: translateY(-1px) scale(1.04);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.56),
+        0 6px 10px rgba(15, 23, 42, 0.26);
+      filter: saturate(1.06);
+    }
+
+    .handover-portal-badge:focus-visible {
+      outline: 2px solid rgba(45, 212, 191, 0.85);
+      outline-offset: 1px;
+    }
+
+    .handover-portal-badge-glyph {
+      position: relative;
+      width: calc(11px * var(--camera-zoom));
+      height: calc(11px * var(--camera-zoom));
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .handover-portal-badge-ring {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 999px;
+      border: 1.5px solid rgba(240, 253, 250, 0.96);
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.16);
+    }
+
+    .handover-portal-badge-core {
+      width: 36%;
+      height: 36%;
+      border-radius: 999px;
+      background: rgba(240, 253, 250, 0.98);
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.22);
+    }
+
     .node-card-label {
       color: #1f2937;
-      font-size: 12px;
+      font-size: calc(12px * var(--camera-zoom));
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
@@ -2459,9 +2713,9 @@
       width: 100%;
       min-width: 0;
       border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 2px 6px;
-      font-size: 12px;
+      border-radius: calc(6px * var(--camera-zoom));
+      padding: calc(2px * var(--camera-zoom)) calc(6px * var(--camera-zoom));
+      font-size: calc(12px * var(--camera-zoom));
       font-weight: 600;
       color: #0f172a;
       background: #ffffff;
@@ -2478,7 +2732,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: calc(6px * var(--camera-zoom));
       min-width: 0;
     }
 
@@ -2499,7 +2753,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: calc(6px * var(--camera-zoom));
       min-width: 0;
     }
 
@@ -2507,7 +2761,7 @@
       position: relative;
       flex: none;
       width: 100%;
-      border-radius: 8px;
+      border-radius: calc(8px * var(--camera-zoom));
       background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(241, 245, 249, 0.7)),
         repeating-linear-gradient(
@@ -2525,19 +2779,19 @@
           transparent 16px
         );
       overflow: hidden;
-      min-height: 110px;
+      min-height: calc(110px * var(--camera-zoom));
     }
 
     .node-child-loc {
       position: absolute;
       border: 1px solid #aec3dd;
-      border-radius: 6px;
+      border-radius: calc(6px * var(--camera-zoom));
       background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
       color: #1f2937;
-      font-size: 10px;
+      font-size: calc(10px * var(--camera-zoom));
       font-weight: 600;
       line-height: 1.2;
-      padding: 2px 4px;
+      padding: calc(2px * var(--camera-zoom)) calc(4px * var(--camera-zoom));
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -2545,7 +2799,7 @@
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      padding-right: 18px;
+      padding-right: calc(18px * var(--camera-zoom));
     }
 
     .node-child-loc:hover {
@@ -2564,17 +2818,17 @@
       top: 50%;
       transform: translate(-50%, -50%);
       color: #64748b;
-      font-size: 11px;
+      font-size: calc(11px * var(--camera-zoom));
       white-space: nowrap;
       pointer-events: none;
     }
 
     .node-resize-handle {
       position: absolute;
-      right: 6px;
-      bottom: 6px;
-      width: 12px;
-      height: 12px;
+      right: calc(6px * var(--camera-zoom));
+      bottom: calc(6px * var(--camera-zoom));
+      width: calc(12px * var(--camera-zoom));
+      height: calc(12px * var(--camera-zoom));
       border: none;
       background:
         linear-gradient(135deg, transparent 0 46%, #8fa6c4 46% 58%, transparent 58% 100%);
@@ -2624,8 +2878,8 @@
       border: 1px solid #d6dbe6;
       background: #f8fafc;
       border-radius: 999px;
-      padding: 1px 7px;
-      font-size: 9px;
+      padding: calc(1px * var(--camera-zoom)) calc(7px * var(--camera-zoom));
+      font-size: calc(9px * var(--camera-zoom));
       font-weight: 700;
       line-height: 1.4;
       text-transform: capitalize;
@@ -2647,14 +2901,18 @@
       cursor: pointer;
       appearance: none;
       font-family: inherit;
-      padding: 1px 18px 1px 7px;
+      padding:
+        calc(1px * var(--camera-zoom))
+        calc(18px * var(--camera-zoom))
+        calc(1px * var(--camera-zoom))
+        calc(7px * var(--camera-zoom));
       background-image:
         linear-gradient(45deg, transparent 50%, currentColor 50%),
         linear-gradient(135deg, currentColor 50%, transparent 50%);
       background-position:
-        calc(100% - 10px) calc(50% - 1px),
-        calc(100% - 6px) calc(50% - 1px);
-      background-size: 4px 4px;
+        calc(100% - calc(10px * var(--camera-zoom))) calc(50% - calc(1px * var(--camera-zoom))),
+        calc(100% - calc(6px * var(--camera-zoom))) calc(50% - calc(1px * var(--camera-zoom)));
+      background-size: calc(4px * var(--camera-zoom)) calc(4px * var(--camera-zoom));
       background-repeat: no-repeat;
     }
 
@@ -2705,27 +2963,27 @@
       background: #edf2f9;
       border-radius: 999px;
       color: #44566f;
-      font-size: 9px;
+      font-size: calc(9px * var(--camera-zoom));
       font-weight: 700;
       letter-spacing: 0.2px;
-      padding: 1px 7px;
+      padding: calc(1px * var(--camera-zoom)) calc(7px * var(--camera-zoom));
       line-height: 1.4;
       flex-shrink: 0;
     }
 
     .node-card-owner {
       color: #6b7b92;
-      font-size: 10px;
+      font-size: calc(10px * var(--camera-zoom));
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .node-portal-glyph {
-      width: 40px;
-      height: 40px;
+      width: calc(40px * var(--camera-zoom));
+      height: calc(40px * var(--camera-zoom));
       border-radius: 999px;
-      border: 1.6px solid rgba(255, 255, 255, 0.46);
+      border: calc(1.6px * var(--camera-zoom)) solid rgba(255, 255, 255, 0.46);
       position: relative;
       display: grid;
       place-items: center;
@@ -2744,9 +3002,9 @@
       white-space: nowrap;
       overflow: visible;
       color: #115e59;
-      font-size: 11px;
+      font-size: calc(11px * var(--camera-zoom));
       font-weight: 600;
-      line-height: 14px;
+      line-height: calc(14px * var(--camera-zoom));
       letter-spacing: 0.01em;
       text-align: center;
       text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -2760,22 +3018,22 @@
 
     .node-portal-glyph-ring {
       position: absolute;
-      inset: 7px;
+      inset: calc(7px * var(--camera-zoom));
       border-radius: 999px;
-      border: 1.4px solid rgba(15, 118, 110, 0.68);
+      border: calc(1.4px * var(--camera-zoom)) solid rgba(15, 118, 110, 0.68);
     }
 
     .node-portal-glyph-core {
-      width: 8px;
-      height: 8px;
+      width: calc(8px * var(--camera-zoom));
+      height: calc(8px * var(--camera-zoom));
       border-radius: 999px;
       background: #0f766e;
-      box-shadow: 0 0 0 2px rgba(236, 253, 245, 0.92);
+      box-shadow: 0 0 0 calc(2px * var(--camera-zoom)) rgba(236, 253, 245, 0.92);
     }
 
     .node-anchor-glyph {
-      width: 52px;
-      height: 52px;
+      width: calc(52px * var(--camera-zoom));
+      height: calc(52px * var(--camera-zoom));
       color: #0f172a;
       opacity: 0.92;
       filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.52));
@@ -2867,7 +3125,7 @@
     .graph-node.process,
     .graph-node.experiment { stroke: #2f5da8; }
     .graph-node.standard,
-    .graph-node.protocol { stroke: #9a4d00; }
+    .graph-node.protocol { stroke: #4c6e8a; }
     .graph-node.portal { stroke: #0f766e; }
 
     .graph-label {
@@ -3929,8 +4187,9 @@
       position: absolute;
       top: calc(100% + 8px);
       right: 0;
-      width: 320px;
-      max-height: 320px;
+      width: min(320px, calc(100vw - 24px));
+      max-width: calc(100vw - 24px);
+      max-height: calc(100vh - 72px);
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -3955,9 +4214,53 @@
       cursor: pointer;
     }
 
+    .notif-item:last-child {
+      margin-bottom: 0;
+    }
+
     .notif-item:hover {
       background: #eef5ff;
       border-color: #c8daf7;
+    }
+
+    .notif-item.is-unread {
+      border-color: #bfd6fa;
+      background: #edf5ff;
+      box-shadow: 0 1px 0 rgba(148, 163, 184, 0.18);
+    }
+
+    .notif-item.is-unread .notif-title {
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .notif-item.is-read {
+      border-color: #e2e8f0;
+      background: #f8fafc;
+    }
+
+    .notif-item.is-read .notif-title {
+      color: #334155;
+      font-weight: 550;
+    }
+
+    .notif-item.is-read .notif-sub {
+      color: #8593a6;
+    }
+
+    .notif-section-label {
+      margin: 4px 2px 6px;
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+    }
+
+    .notif-empty-note {
+      margin: 4px 2px 8px;
+      font-size: 0.78rem;
+      color: #64748b;
     }
 
     .notif-title {
@@ -3973,9 +4276,3 @@
       font-size: 0.76rem;
     }
 
-    @media (max-width: 1180px) {
-      .notifications-panel {
-        left: 0;
-        right: auto;
-      }
-    }

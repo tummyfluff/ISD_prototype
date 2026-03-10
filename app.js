@@ -26,16 +26,13 @@ if (!window.d3 || !window.d3.forceSimulation) {
 }
 
 const CURRENT_USER = "Dr Hannah Lewis";
-const CURRENT_USER_HANDLE = "@Hannah";
-const HANDOVER_OBJECT_ROLES = ["context", "input", "output", "reference"];
+const HANDOVER_OBJECT_ROLES = ["input", "output", "reference"];
 const HANDOVER_OBJECT_ROLE_LABELS = {
-  context: "Context",
   input: "Input",
   output: "Output",
   reference: "Reference"
 };
 const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
-  context: "handover_context",
   input: "handover_input",
   output: "handover_output",
   reference: "handover_reference"
@@ -52,7 +49,7 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
 //   originNodeId?: string,
 //   linkedObjectIds?: string[]
 // }
-// type Comment = { author: string, text: string, timestamp: string, isNew: boolean }
+// type Comment = { id: string, author: string, text: string, timestamp: string, isNew: boolean }
 // type Node = {
 //   id: string,
 //   title: string,
@@ -63,7 +60,7 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
 //   sharedWithIds?: string[],
 //   handoverCollaborators?: Array<{ kind: "user" | "org", refId: string, shareWorkspace: boolean }>,
 //   handoverNodeIds?: string[],
-//   handoverObjects?: Array<{ id: string, role: "context" | "input" | "output" | "reference" }>,
+//   handoverObjects?: Array<{ id: string, role: "input" | "output" | "reference" }>,
 //   kind?: "lab" | "room" | "bench" | "fume" | "freezer" | "sink" | "glovebox" | "shelf" | "generic",
 //   locationId: string | null,
 //   status?: string,
@@ -95,13 +92,11 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const PORTAL_LABEL_LINE_HEIGHT_PX = 14;
     const ANCHOR_NODE_DIAMETER_PX = 138;
     const ENTITY_LABEL_FONT_SIZE_PX = 12;
-    const ENTITY_LABEL_FONT_WEIGHT = 700;
-    const ENTITY_LABEL_LINE_HEIGHT_PX = 14;
-    const ENTITY_DIAMOND_MIN_WIDTH_PX = 168;
-    const ENTITY_DIAMOND_MAX_WIDTH_PX = 240;
-    const ENTITY_DIAMOND_HEIGHT_PX = 112;
-    const ENTITY_DIAMOND_TEXT_WIDTH_RATIO = 0.62;
-    const ENTITY_DIAMOND_TEXT_WIDTH_FUDGE_PX = 12;
+    const ENTITY_LABEL_FONT_WEIGHT = 600;
+    const ENTITY_DIAMOND_MIN_SIZE_PX = 152;
+    const ENTITY_DIAMOND_MAX_SIZE_PX = 280;
+    const ENTITY_DIAMOND_TEXT_WIDTH_FUDGE_PX = 10;
+    const ENTITY_DIAMOND_TEXT_SIDE_PADDING_PX = GRAPH_NODE_TEXT_INSET_PX;
     const PORTAL_GRAPH_POS_SCHEMA_VERSION = 2;
     const LEGACY_PORTAL_GRAPH_POS_Y_OFFSET_PX = 12;
     const COLLAPSED_CARD_W = 172;
@@ -111,7 +106,7 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
       standard: 188,
       handover: 206,
       portal: 92,
-      entity: ENTITY_DIAMOND_MIN_WIDTH_PX,
+      entity: ENTITY_DIAMOND_MIN_SIZE_PX,
       collaboration: 184
     };
     const COLLAPSED_CARD_HEIGHT_BY_TYPE = {
@@ -120,7 +115,7 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
       standard: 64,
       handover: 72,
       portal: 92,
-      entity: ENTITY_DIAMOND_HEIGHT_PX,
+      entity: ENTITY_DIAMOND_MIN_SIZE_PX,
       collaboration: 184
     };
     const EXPANDED_CARD_MIN_W = 320;
@@ -148,6 +143,43 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const HYBRID_LANE_GAP_Y = 28;
     const HYBRID_LANE_MAX_HEIGHT = 900;
     const HYBRID_LANE_WRAP_OFFSET_X = 210;
+    const COLLAB_SHELL_BAND_THICKNESS = Object.freeze({
+      entity: 72,
+      context: 68,
+      handover: 80,
+      artifact: 96,
+      other: 120
+    });
+    const COLLAB_SHELL_START_ANGLE_RAD = -Math.PI / 2;
+    const COLLAB_SHELL_CONTEXT_FAN_STEP_RAD = Math.PI / 42;
+    const COLLAB_SHELL_ARTIFACT_FAN_STEP_RAD = Math.PI / 30;
+    const COLLAB_SHELL_SECTOR_GAP_RAD = Math.PI / 20;
+    const COLLAB_SHELL_MIN_SECTOR_SPAN_RAD = Math.PI / 4.5;
+    const COLLAB_SHELL_RELAX_TICKS = 220;
+    const COLLAB_SHELL_RELAX_LINK_DISTANCE = 156;
+    const COLLAB_SHELL_RELAX_LINK_STRENGTH = 0.2;
+    const COLLAB_SHELL_RELAX_CHARGE_STRENGTH = -130;
+    const COLLAB_SHELL_GROUP_HANDOVER_COHESION_STRENGTH = 0.2;
+    const COLLAB_SHELL_GROUP_NODE_COHESION_STRENGTH = 0.05;
+    const COLLAB_SHELL_LAYER_ARC_GAP_PX = 26;
+    const COLLAB_SHELL_LAYER_RADIAL_GAP_PX = 22;
+    const COLLAB_SHELL_LAYER_RADIUS_STEP_PX = 10;
+    const COLLAB_SHELL_DEOVERLAP_PAIR_PAD_PX = 10;
+    const COLLAB_SHELL_RADIAL_OFFSET_LIMIT_PX = 12;
+    const COLLAB_SHELL_RADIAL_STRENGTH = Object.freeze({
+      entity: 0.2,
+      context: 0.22,
+      handover: 0.22,
+      artifact: 0.18,
+      other: 0.16
+    });
+    const COLLAB_SHELL_TANGENTIAL_STRENGTH = Object.freeze({
+      entity: 0.2,
+      context: 0.2,
+      handover: 0.18,
+      artifact: 0.12,
+      other: 0.08
+    });
     const MARKER_OFFSETS = [
       [0, 0],
       [10, 0],
@@ -173,6 +205,15 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const HANDOVER_PROJECTION_META_KEY = "handoverProjection";
     const HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY = "handoverProjectionNodeIds";
     const HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY = "handoverProjectionEdgeIds";
+    const COLLAB_AUTO_CHAIN_META_KEY = "collabAutoChain";
+    const COLLAB_AUTO_CHAIN_SCHEMA_VERSION = 2;
+    const COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY = "helperNodeIds";
+    const NOTIFICATION_STATE_BY_USER_META_KEY = "notificationStateByUserId";
+    const WORKSPACE_VIEWPORT_BY_USER_META_KEY = "viewportByUserId";
+    const WORKSPACE_RUNTIME_NODE_POSITIONS_META_KEY = "runtimeNodePositions";
+    const WORKSPACE_VIEWPORT_PERSIST_DEBOUNCE_MS = 320;
+    const GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_X = 36;
+    const GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_Y = 26;
 
     function extractEntityArray(data, key) {
       if (!data || typeof data !== "object") return [];
@@ -252,6 +293,7 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     let persistStatusBannerEl = null;
     let appliedWorkspaceId = null;
     let hasAppliedWorkspace = false;
+    let pendingWorkspaceApplyAutoFit = "if-missing";
     let workspaceMenuOpen = false;
     let userMenuOpen = false;
     let isCreatingWorkspace = false;
@@ -261,12 +303,25 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
   let createNodeMenuOpen = false;
   let createNodeMenuMode = "create";
   let createNodeMenuNodeId = null;
+  let createNodeMenuEdgeId = null;
+  let createNodeMenuSelectionContext = null;
   let createNodeMenuClientX = 0;
   let createNodeMenuClientY = 0;
   let createNodeMenuWorldX = 0;
   let createNodeMenuWorldY = 0;
+  let graphClipboardState = {
+    hasData: false,
+    sourceWorkspaceId: null,
+    sourceCentroid: { x: 0, y: 0 },
+    pasteSequence: 0,
+    nodeRefs: [],
+    nodeSnapshots: [],
+    edgeDescriptors: [],
+    copiedAt: 0
+  };
   let newNodeInlineEditId = null;
-  let suppressNextWorkspaceAutoFit = false;
+  let viewportPersistTimerId = null;
+  let viewportPersistDirty = false;
   let portalLinkModalState = {
     open: false,
     nodeId: null,
@@ -423,6 +478,7 @@ const {
       allNodesRuntime = Array.from(store.nodesById.values())
         .map((node) => {
           const normalizedType = normalizeNodeType(node.type);
+          const normalizedCommentsResult = normalizeCommentRecords(node.comments, node.id);
           const runtimeNode = {
             ...node,
             type: normalizedType,
@@ -446,9 +502,12 @@ const {
               ? node.summary
               : defaultNodeSummary,
             tasks: Array.isArray(node.tasks) ? node.tasks.map((task) => normalizeTaskRecord(task)) : [],
-            comments: Array.isArray(node.comments) ? node.comments.map((comment) => ({ ...comment })) : [],
+            comments: normalizedCommentsResult.comments,
             locationId: Object.prototype.hasOwnProperty.call(node, "locationId") ? node.locationId : null
           };
+          if (normalizedCommentsResult.changed) {
+            migratedNodeData = true;
+          }
           if (normalizedType === "entity") {
             runtimeNode.entityKind = normalizeEntityKind(node.entityKind);
             runtimeNode.entityRefId = typeof node.entityRefId === "string" && node.entityRefId ? node.entityRefId : null;
@@ -489,15 +548,11 @@ const {
       if (migrateHandoverProjectionModel()) {
         migratedNodeData = true;
       }
-      allNodesRuntime.forEach((node) => {
-        if (node.type === "handover" && applyDefaultContextObjectToHandover(node)) {
-          migratedNodeData = true;
-        }
-      });
       if (refreshAllHandoverDerivedState()) {
         migratedNodeData = true;
       }
-      if (seededOrgRecords || seededUserRecords || migratedNodeData) {
+      const migratedNotificationData = pruneNotificationStateByUser();
+      if (seededOrgRecords || seededUserRecords || migratedNodeData || migratedNotificationData) {
         syncUsersRuntimeAndStore();
         syncNodeRuntimeAndStore();
         syncEdgeRuntimeAndStore();
@@ -518,6 +573,7 @@ const {
       currentWorkspaceKind = normalizeWorkspaceKind(initialWorkspaceOptions[0]?.kind);
       appliedWorkspaceId = null;
       hasAppliedWorkspace = false;
+      pendingWorkspaceApplyAutoFit = "if-missing";
       workspaceMenuOpen = false;
       userMenuOpen = false;
       resetWorkspaceCreateState();
@@ -706,16 +762,382 @@ function attachLinkedNodeAccessors() {
 
 const state = {
       selectedNodeId: "exp-culture-check-b",
+      selectedNodeIds: new Set(["exp-culture-check-b"]),
+      selectedEdgeIds: new Set(),
       listMode: "by-location",
       expandedLocationIds: new Set(["loc-lab-a", "loc-freezer-1"]),
       expandedCanvasLocationId: null,
       expandedDragRootId: null,
       expandedDragOverrides: new Map(),
       focusLocationId: null,
-      seenTaskIds: new Set(),
       notificationsOpen: false,
       openLenses: new Map()
     };
+
+function ensureGraphSelectionState() {
+  if (!(state.selectedNodeIds instanceof Set)) {
+    state.selectedNodeIds = new Set(Array.isArray(state.selectedNodeIds) ? state.selectedNodeIds : []);
+  }
+  if (!(state.selectedEdgeIds instanceof Set)) {
+    state.selectedEdgeIds = new Set(Array.isArray(state.selectedEdgeIds) ? state.selectedEdgeIds : []);
+  }
+}
+
+function isMultiSelectModifier(event) {
+  return !!event && (event.ctrlKey || event.metaKey);
+}
+
+function clearGraphSelection(options = {}) {
+  ensureGraphSelectionState();
+  const hadSelection = state.selectedNodeId !== null || state.selectedNodeIds.size > 0 || state.selectedEdgeIds.size > 0;
+  if (!hadSelection) return false;
+  if (options.resetDetails !== false && state.selectedNodeId !== null) {
+    resetDetailsEditState();
+  }
+  state.selectedNodeId = null;
+  state.selectedNodeIds = new Set();
+  state.selectedEdgeIds = new Set();
+  if (options.render) {
+    renderNodeLists();
+    renderCanvas();
+    renderDetailsPane();
+  }
+  return true;
+}
+
+function getDeterministicSelectionNodeId(nodeIds) {
+  const candidateNodes = [...nodeIds]
+    .map((nodeId) => getNodeById(nodeId))
+    .filter((node) => !!node && isSelectableNode(node));
+  if (!candidateNodes.length) return null;
+  candidateNodes.sort((a, b) => {
+    const stableDiff = compareNodesStable(a, b);
+    if (stableDiff !== 0) return stableDiff;
+    return a.id.localeCompare(b.id);
+  });
+  return candidateNodes[0].id;
+}
+
+function selectSingleNode(nodeId, options = {}) {
+  ensureGraphSelectionState();
+  const node = getNodeById(nodeId);
+  if (!node || !isSelectableNode(node)) {
+    const fallbackNodeId = getFirstSelectableNodeId(nodes);
+    state.selectedNodeId = fallbackNodeId;
+    state.selectedNodeIds = fallbackNodeId ? new Set([fallbackNodeId]) : new Set();
+    state.selectedEdgeIds = new Set();
+    if (options.resetDetails !== false) {
+      resetDetailsEditState();
+    }
+    return state.selectedNodeId ? getNodeById(state.selectedNodeId) : null;
+  }
+  if (state.selectedNodeId !== node.id && options.resetDetails !== false) {
+    resetDetailsEditState();
+  }
+  state.selectedNodeId = node.id;
+  state.selectedNodeIds = new Set([node.id]);
+  state.selectedEdgeIds = new Set();
+  return node;
+}
+
+function toggleNodeSelection(nodeId, options = {}) {
+  ensureGraphSelectionState();
+  const node = getNodeById(nodeId);
+  if (!node || !isSelectableNode(node)) return false;
+  const selection = new Set(state.selectedNodeIds);
+  if (selection.has(nodeId)) {
+    selection.delete(nodeId);
+    state.selectedNodeIds = selection;
+    if (state.selectedNodeId === nodeId) {
+      const fallbackId = getDeterministicSelectionNodeId(selection);
+      if (fallbackId !== state.selectedNodeId && options.resetDetails !== false) {
+        resetDetailsEditState();
+      }
+      state.selectedNodeId = fallbackId;
+    }
+    return true;
+  }
+  selection.add(nodeId);
+  state.selectedNodeIds = selection;
+  if (state.selectedNodeId !== nodeId && options.resetDetails !== false) {
+    resetDetailsEditState();
+  }
+  state.selectedNodeId = nodeId;
+  return true;
+}
+
+function toggleEdgeSelection(edgeId) {
+  ensureGraphSelectionState();
+  if (!edgeId || !edgeById.has(edgeId)) return false;
+  const selection = new Set(state.selectedEdgeIds);
+  if (selection.has(edgeId)) {
+    selection.delete(edgeId);
+  } else {
+    selection.add(edgeId);
+  }
+  state.selectedEdgeIds = selection;
+  return true;
+}
+
+function selectSingleEdge(edgeId, options = {}) {
+  ensureGraphSelectionState();
+  if (!edgeId || !edgeById.has(edgeId)) {
+    state.selectedEdgeIds = new Set();
+    if (options.preserveNodes !== true) {
+      state.selectedNodeIds = new Set();
+      if (state.selectedNodeId !== null) {
+        resetDetailsEditState();
+      }
+      state.selectedNodeId = null;
+    }
+    return false;
+  }
+  state.selectedEdgeIds = new Set([edgeId]);
+  if (options.preserveNodes !== true) {
+    state.selectedNodeIds = new Set();
+    if (state.selectedNodeId !== null) {
+      resetDetailsEditState();
+    }
+    state.selectedNodeId = null;
+  }
+  return true;
+}
+
+function addNodesToSelection(nodeIds, options = {}) {
+  ensureGraphSelectionState();
+  const sortedIds = [...new Set(Array.isArray(nodeIds) ? nodeIds : [])]
+    .map((nodeId) => getNodeById(nodeId))
+    .filter((node) => !!node && isSelectableNode(node))
+    .sort((a, b) => {
+      const stableDiff = compareNodesStable(a, b);
+      if (stableDiff !== 0) return stableDiff;
+      return a.id.localeCompare(b.id);
+    })
+    .map((node) => node.id);
+  if (!sortedIds.length) return false;
+  const selection = new Set(state.selectedNodeIds);
+  let changed = false;
+  sortedIds.forEach((nodeId) => {
+    if (selection.has(nodeId)) return;
+    selection.add(nodeId);
+    changed = true;
+  });
+  state.selectedNodeIds = selection;
+  const promotedNodeId = sortedIds[sortedIds.length - 1];
+  if (promotedNodeId && state.selectedNodeId !== promotedNodeId && options.resetDetails !== false) {
+    resetDetailsEditState();
+  }
+  if (promotedNodeId) {
+    state.selectedNodeId = promotedNodeId;
+  }
+  return changed;
+}
+
+function addEdgesToSelection(edgeIds) {
+  ensureGraphSelectionState();
+  const uniqueIds = [...new Set(Array.isArray(edgeIds) ? edgeIds : [])]
+    .filter((edgeId) => edgeById.has(edgeId));
+  if (!uniqueIds.length) return false;
+  const selection = new Set(state.selectedEdgeIds);
+  let changed = false;
+  uniqueIds.forEach((edgeId) => {
+    if (selection.has(edgeId)) return;
+    selection.add(edgeId);
+    changed = true;
+  });
+  state.selectedEdgeIds = selection;
+  return changed;
+}
+
+function pruneSelectionState() {
+  ensureGraphSelectionState();
+  const visibleNodeIds = getVisibleNodeIdsForCurrentView();
+  const prunedNodeIds = new Set(
+    [...state.selectedNodeIds].filter((nodeId) => {
+      if (!visibleNodeIds.has(nodeId)) return false;
+      const node = getNodeById(nodeId);
+      return !!node && isSelectableNode(node);
+    })
+  );
+  const prunedEdgeIds = new Set(
+    [...state.selectedEdgeIds].filter((edgeId) => {
+      const edge = edgeById.get(edgeId);
+      if (!edge) return false;
+      return visibleNodeIds.has(edge.sourceId) && visibleNodeIds.has(edge.targetId);
+    })
+  );
+  state.selectedNodeIds = prunedNodeIds;
+  state.selectedEdgeIds = prunedEdgeIds;
+
+  if (state.selectedNodeId && prunedNodeIds.has(state.selectedNodeId)) {
+    return;
+  }
+  const fallbackId = getDeterministicSelectionNodeId(prunedNodeIds);
+  if (state.selectedNodeId !== fallbackId) {
+    resetDetailsEditState();
+  }
+  state.selectedNodeId = fallbackId;
+}
+
+function ensureStoreMetaRecord(create = false) {
+  if (!store || typeof store !== "object") return null;
+  if (store.meta && typeof store.meta === "object") {
+    return store.meta;
+  }
+  if (!create) return null;
+  store.meta = {};
+  return store.meta;
+}
+
+function normalizeNotificationStateRecord(record) {
+  const seenTaskIds = [...new Set(
+    (Array.isArray(record?.seenTaskIds) ? record.seenTaskIds : [])
+      .filter((taskId) => typeof taskId === "string" && taskId)
+  )];
+  const seenCommentIds = [...new Set(
+    (Array.isArray(record?.seenCommentIds) ? record.seenCommentIds : [])
+      .filter((commentId) => typeof commentId === "string" && commentId)
+  )];
+  return { seenTaskIds, seenCommentIds };
+}
+
+function getNotificationStateByUserMap(create = false) {
+  const storeMeta = ensureStoreMetaRecord(create);
+  if (!storeMeta) return null;
+  const notificationStateByUserId = storeMeta[NOTIFICATION_STATE_BY_USER_META_KEY];
+  if (notificationStateByUserId && typeof notificationStateByUserId === "object" && !Array.isArray(notificationStateByUserId)) {
+    return notificationStateByUserId;
+  }
+  if (!create) return null;
+  storeMeta[NOTIFICATION_STATE_BY_USER_META_KEY] = {};
+  return storeMeta[NOTIFICATION_STATE_BY_USER_META_KEY];
+}
+
+function getNotificationStateForUser(userId = currentUserId, create = false) {
+  if (!userId) return null;
+  const stateByUserId = getNotificationStateByUserMap(create);
+  if (!stateByUserId) return null;
+  const existingRecord = stateByUserId[userId];
+  if (!existingRecord && !create) return null;
+  const normalizedRecord = normalizeNotificationStateRecord(existingRecord);
+  const matchesNormalizedRecord = !!existingRecord &&
+    Array.isArray(existingRecord.seenTaskIds) &&
+    Array.isArray(existingRecord.seenCommentIds) &&
+    existingRecord.seenTaskIds.length === normalizedRecord.seenTaskIds.length &&
+    existingRecord.seenCommentIds.length === normalizedRecord.seenCommentIds.length &&
+    existingRecord.seenTaskIds.every((taskId, index) => taskId === normalizedRecord.seenTaskIds[index]) &&
+    existingRecord.seenCommentIds.every((commentId, index) => commentId === normalizedRecord.seenCommentIds[index]);
+  if (!matchesNormalizedRecord) {
+    stateByUserId[userId] = normalizedRecord;
+  }
+  return stateByUserId[userId];
+}
+
+function hasCurrentUserSeenTask(taskId) {
+  if (typeof taskId !== "string" || !taskId) return false;
+  const notificationState = getNotificationStateForUser(currentUserId, false);
+  return !!notificationState && notificationState.seenTaskIds.includes(taskId);
+}
+
+function markCurrentUserTaskSeen(taskId) {
+  if (typeof taskId !== "string" || !taskId || !currentUserId) return false;
+  const notificationState = getNotificationStateForUser(currentUserId, true);
+  if (!notificationState || notificationState.seenTaskIds.includes(taskId)) return false;
+  notificationState.seenTaskIds.push(taskId);
+  return true;
+}
+
+function clearTaskSeenForAllUsers(taskId) {
+  if (typeof taskId !== "string" || !taskId) return false;
+  const stateByUserId = getNotificationStateByUserMap(false);
+  if (!stateByUserId) return false;
+  let changed = false;
+  Object.keys(stateByUserId).forEach((userId) => {
+    const notificationState = getNotificationStateForUser(userId, true);
+    if (!notificationState) return;
+    const nextTaskIds = notificationState.seenTaskIds.filter((candidateTaskId) => candidateTaskId !== taskId);
+    if (nextTaskIds.length === notificationState.seenTaskIds.length) return;
+    notificationState.seenTaskIds = nextTaskIds;
+    changed = true;
+  });
+  return changed;
+}
+
+function hasCurrentUserSeenComment(commentId) {
+  if (typeof commentId !== "string" || !commentId) return false;
+  const notificationState = getNotificationStateForUser(currentUserId, false);
+  return !!notificationState && notificationState.seenCommentIds.includes(commentId);
+}
+
+function markCurrentUserCommentSeen(commentId) {
+  if (typeof commentId !== "string" || !commentId || !currentUserId) return false;
+  const notificationState = getNotificationStateForUser(currentUserId, true);
+  if (!notificationState || notificationState.seenCommentIds.includes(commentId)) return false;
+  notificationState.seenCommentIds.push(commentId);
+  return true;
+}
+
+function clearCommentSeenForAllUsers(commentId) {
+  if (typeof commentId !== "string" || !commentId) return false;
+  const stateByUserId = getNotificationStateByUserMap(false);
+  if (!stateByUserId) return false;
+  let changed = false;
+  Object.keys(stateByUserId).forEach((userId) => {
+    const notificationState = getNotificationStateForUser(userId, true);
+    if (!notificationState) return;
+    const nextCommentIds = notificationState.seenCommentIds.filter((candidateCommentId) => candidateCommentId !== commentId);
+    if (nextCommentIds.length === notificationState.seenCommentIds.length) return;
+    notificationState.seenCommentIds = nextCommentIds;
+    changed = true;
+  });
+  return changed;
+}
+
+function pruneNotificationStateByUser() {
+  const stateByUserId = getNotificationStateByUserMap(false);
+  if (!stateByUserId) return false;
+  const validTaskIds = new Set();
+  const validCommentIds = new Set();
+  allNodesRuntime.forEach((node) => {
+    (Array.isArray(node?.tasks) ? node.tasks : []).forEach((task) => {
+      if (typeof task?.id === "string" && task.id) {
+        validTaskIds.add(task.id);
+      }
+    });
+    (Array.isArray(node?.comments) ? node.comments : []).forEach((comment) => {
+      if (typeof comment?.id === "string" && comment.id) {
+        validCommentIds.add(comment.id);
+      }
+    });
+  });
+  let changed = false;
+  Object.keys(stateByUserId).forEach((userId) => {
+    const notificationState = getNotificationStateForUser(userId, true);
+    if (!notificationState) return;
+    const nextTaskIds = notificationState.seenTaskIds.filter((taskId) => validTaskIds.has(taskId));
+    const nextCommentIds = notificationState.seenCommentIds.filter((commentId) => validCommentIds.has(commentId));
+    if (nextTaskIds.length !== notificationState.seenTaskIds.length) {
+      notificationState.seenTaskIds = nextTaskIds;
+      changed = true;
+    }
+    if (nextCommentIds.length !== notificationState.seenCommentIds.length) {
+      notificationState.seenCommentIds = nextCommentIds;
+      changed = true;
+    }
+    if (!notificationState.seenTaskIds.length && !notificationState.seenCommentIds.length) {
+      delete stateByUserId[userId];
+      changed = true;
+    }
+  });
+  if (!Object.keys(stateByUserId).length) {
+    const storeMeta = ensureStoreMetaRecord(false);
+    if (storeMeta && Object.prototype.hasOwnProperty.call(storeMeta, NOTIFICATION_STATE_BY_USER_META_KEY)) {
+      delete storeMeta[NOTIFICATION_STATE_BY_USER_META_KEY];
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 function getHandoverCollaboratorSignature(kind, refId) {
   const normalizedKind = normalizeEntityKind(kind);
@@ -843,19 +1265,7 @@ function normalizeHandoverFieldsForNode(node) {
       seenObjectIds.add(handoverObject.id);
       return true;
     });
-  let seenContextObject = false;
-  const normalizedHandoverObjects = nextHandoverObjects.map((handoverObject) => {
-    if (handoverObject.role !== "context") return handoverObject;
-    if (!seenContextObject) {
-      seenContextObject = true;
-      return handoverObject;
-    }
-    changed = true;
-    return {
-      ...handoverObject,
-      role: "reference"
-    };
-  });
+  const normalizedHandoverObjects = nextHandoverObjects;
   if (JSON.stringify(Array.isArray(node.handoverObjects) ? node.handoverObjects : []) !== JSON.stringify(normalizedHandoverObjects)) {
     node.handoverObjects = normalizedHandoverObjects;
     changed = true;
@@ -865,6 +1275,18 @@ function normalizeHandoverFieldsForNode(node) {
   }
   if (normalizeHandoverCollaboratorsForNode(node)) {
     changed = true;
+  }
+  {
+    const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+    const nextCollaborators = currentCollaborators.map((collaborator) => {
+      if (normalizeEntityKind(collaborator?.kind) !== "org" || !collaborator?.shareWorkspace) return collaborator;
+      changed = true;
+      return {
+        ...collaborator,
+        shareWorkspace: false
+      };
+    });
+    node.handoverCollaborators = nextCollaborators;
   }
   if (isCollabWorkspaceOnlyHandover(node)) {
     const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
@@ -906,66 +1328,11 @@ function getAnchorNodeDisplayLabel(node) {
 }
 
 function isValidHandoverObjectNodeForRole(node, role = "reference") {
-  const normalizedRole = normalizeHandoverObjectRole(role);
-  if (normalizedRole === "context") {
-    return !!node && isSelectableNode(node) && node.type !== "collaboration";
-  }
   return !!node && isSelectableNode(node) && node.type !== "portal" && node.type !== "entity" && node.type !== "collaboration";
 }
 
-function getDefaultContextObjectIdForHandover(node) {
-  if (!node || node.type !== "handover") return null;
-  const sourceWorkspaceId = getSourceWorkspaceIdForHandover(node);
-  if (!sourceWorkspaceId) return null;
-  const sourceWorkspace = workspaceById.get(sourceWorkspaceId) || null;
-  if (!sourceWorkspace || normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") return null;
-  const anchorId = typeof sourceWorkspace.homeNodeId === "string" && sourceWorkspace.homeNodeId ? sourceWorkspace.homeNodeId : null;
-  if (!anchorId || anchorId === node.id) return null;
-  const anchorNode = getAnyNodeById(anchorId);
-  return isValidHandoverObjectNodeForRole(anchorNode, "context") ? anchorId : null;
-}
-
-function applyDefaultContextObjectToHandover(node) {
-  if (!node || node.type !== "handover") return false;
-  const currentObjects = getHandoverObjects(node);
-  if (currentObjects.some((handoverObject) => handoverObject.role === "context")) {
-    return false;
-  }
-  const defaultContextId = getDefaultContextObjectIdForHandover(node);
-  if (!defaultContextId) return false;
-  if (currentObjects.some((handoverObject) => handoverObject.id === defaultContextId)) {
-    node.handoverObjects = currentObjects.map((handoverObject) => ({
-      ...handoverObject,
-      role: handoverObject.id === defaultContextId ? "context" : handoverObject.role
-    }));
-    return true;
-  }
-  node.handoverObjects = [
-    {
-      id: defaultContextId,
-      role: "context"
-    },
-    ...currentObjects
-  ];
-  return true;
-}
-
-function getCurrentHandoverContextObject(node) {
-  if (!node || node.type !== "handover") return null;
-  return getHandoverObjects(node).find((handoverObject) => handoverObject.role === "context") || null;
-}
-
-function getCurrentHandoverContextNode(node) {
-  const contextObject = getCurrentHandoverContextObject(node);
-  return contextObject ? getAnyNodeById(contextObject.id) || null : null;
-}
-
-function getNodeDetailsHeaderContextNode(node) {
+function getNodeContextNode(node) {
   if (!node) return null;
-  if (node.type === "handover") {
-    const explicitContextNode = getCurrentHandoverContextNode(node);
-    if (explicitContextNode) return explicitContextNode;
-  }
   const sourceWorkspace = getCanonicalSourceWorkspaceForNode(node);
   if (!sourceWorkspace) return null;
   const anchorId = typeof sourceWorkspace.homeNodeId === "string" && sourceWorkspace.homeNodeId
@@ -973,6 +1340,19 @@ function getNodeDetailsHeaderContextNode(node) {
     : null;
   if (!anchorId || anchorId === node.id) return null;
   return getAnyNodeById(anchorId) || null;
+}
+
+function getHandoverGraphContextNode(node) {
+  if (!node || node.type !== "handover") return null;
+  const sourceWorkspaceId = getSourceWorkspaceIdForHandover(node);
+  if (!sourceWorkspaceId) return null;
+  const sourceWorkspace = workspaceById.get(sourceWorkspaceId) || null;
+  if (!sourceWorkspace || normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") return null;
+  return getNodeContextNode(node);
+}
+
+function getNodeDetailsHeaderContextNode(node) {
+  return getNodeContextNode(node);
 }
 
 function getNodeDetailsHeaderContextLabel(node) {
@@ -990,13 +1370,20 @@ function getNodeOwnerShortLabel(node) {
   return ownerRecord?.name || node.owner || node.ownerId || "";
 }
 
+function getHandoverContextDisplayLabel(node) {
+  if (!node || node.type !== "handover") return "";
+  const contextNode = getHandoverGraphContextNode(node);
+  if (!contextNode) return "";
+  return getNodeDisplayTitle(contextNode, { fallback: getNodeTitleFallback(contextNode) });
+}
+
 function getHandoverObjectEdgeKind(role) {
   return HANDOVER_OBJECT_EDGE_KIND_BY_ROLE[normalizeHandoverObjectRole(role)] || HANDOVER_OBJECT_EDGE_KIND_BY_ROLE.reference;
 }
 
 function getDefaultHandoverObjectEdgeDirection(role) {
   const normalizedRole = normalizeHandoverObjectRole(role);
-  if (normalizedRole === "input" || normalizedRole === "context") {
+  if (normalizedRole === "input") {
     return "object_to_handover";
   }
   return "handover_to_object";
@@ -1145,7 +1532,6 @@ function getHandoverObjects(node) {
 
 function getHandoverObjectsByRole(node) {
   const groupedObjects = {
-    context: [],
     input: [],
     output: [],
     reference: []
@@ -1191,18 +1577,10 @@ function addHandoverObject(nodeId, objectId, role = "reference") {
   const currentObjects = getHandoverObjects(node);
   const hasExistingObject = currentObjects.some((handoverObject) => handoverObject.id === objectId);
   if (hasExistingObject) {
-    return normalizedRole === "context"
-      ? setHandoverObjectRole(nodeId, objectId, normalizedRole)
-      : false;
+    return false;
   }
-  const nextObjects = normalizedRole === "context"
-    ? currentObjects.map((handoverObject) => ({
-        ...handoverObject,
-        role: handoverObject.role === "context" ? "reference" : handoverObject.role
-      }))
-    : [...currentObjects];
   node.handoverObjects = [
-    ...nextObjects,
+    ...currentObjects,
     {
       id: objectId,
       role: normalizedRole
@@ -1210,7 +1588,7 @@ function addHandoverObject(nodeId, objectId, role = "reference") {
   ];
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -1224,7 +1602,7 @@ function removeHandoverObject(nodeId, objectId) {
   node.handoverObjects = nextObjects;
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -1235,13 +1613,6 @@ function setHandoverObjectRole(nodeId, objectId, role) {
   const normalizedRole = normalizeHandoverObjectRole(role);
   let changed = false;
   node.handoverObjects = getHandoverObjects(node).map((handoverObject) => {
-    if (normalizedRole === "context" && handoverObject.role === "context" && handoverObject.id !== objectId) {
-      changed = true;
-      return {
-        ...handoverObject,
-        role: "reference"
-      };
-    }
     if (handoverObject.id !== objectId) return handoverObject;
     if (handoverObject.role === normalizedRole) return handoverObject;
     changed = true;
@@ -1253,7 +1624,7 @@ function setHandoverObjectRole(nodeId, objectId, role) {
   if (!changed) return false;
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -1264,47 +1635,27 @@ function addHandoverObjectIds(nodeId, nextNodeIds, role = "reference") {
   const normalizedRole = normalizeHandoverObjectRole(role);
   const currentObjects = getHandoverObjects(node);
   const existingIds = new Set(currentObjects.map((handoverObject) => handoverObject.id));
-  const nextObjects = normalizedRole === "context"
-    ? currentObjects.map((handoverObject) => ({
-        ...handoverObject,
-        role: handoverObject.role === "context" ? "reference" : handoverObject.role
-      }))
-    : [...currentObjects];
+  const nextObjects = [...currentObjects];
   let changed = false;
-  let hasAssignedContext = false;
   (Array.isArray(nextNodeIds) ? nextNodeIds : []).forEach((candidateNodeId) => {
     if (typeof candidateNodeId !== "string" || !candidateNodeId || candidateNodeId === node.id || existingIds.has(candidateNodeId)) {
       return;
     }
     const candidateNode = getAnyNodeById(candidateNodeId);
-    const nextRole = normalizedRole === "context"
-      ? (hasAssignedContext ? "reference" : "context")
-      : normalizedRole;
+    const nextRole = normalizedRole;
     if (!isValidHandoverObjectNodeForRole(candidateNode, nextRole)) return;
     existingIds.add(candidateNodeId);
     nextObjects.push({
       id: candidateNodeId,
       role: nextRole
     });
-    if (nextRole === "context") {
-      hasAssignedContext = true;
-    }
     changed = true;
   });
   if (!changed) return false;
-  if (normalizedRole === "context") {
-    node.handoverObjects = nextObjects.map((handoverObject) => ({
-      ...handoverObject,
-      role: handoverObject.role === "context" && handoverObject.id !== nextObjects.find((candidate) => candidate.role === "context")?.id
-        ? "reference"
-        : handoverObject.role
-    }));
-  } else {
-    node.handoverObjects = nextObjects;
-  }
+  node.handoverObjects = nextObjects;
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -1320,14 +1671,8 @@ function addHandoverObjectIdEntry(node, candidateNodeId, role = "reference") {
   }
   const currentObjects = getHandoverObjects(node);
   if (currentObjects.some((handoverObject) => handoverObject.id === candidateNodeId)) return false;
-  const nextObjects = normalizedRole === "context"
-    ? currentObjects.map((handoverObject) => ({
-        ...handoverObject,
-        role: handoverObject.role === "context" ? "reference" : handoverObject.role
-      }))
-    : [...currentObjects];
   node.handoverObjects = [
-    ...nextObjects,
+    ...currentObjects,
     {
       id: candidateNodeId,
       role: normalizedRole
@@ -1387,6 +1732,77 @@ function generateTaskId() {
 
 function generateTaskGroupId() {
   return `task-group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateCommentId() {
+  return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function hashCommentIdentitySeed(seed) {
+  const value = String(seed || "");
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function buildDeterministicCommentId(nodeId, comment, index = 0) {
+  const author = typeof comment?.author === "string" ? comment.author.trim() : "";
+  const text = typeof comment?.text === "string" ? comment.text.trim() : "";
+  const timestamp = typeof comment?.timestamp === "string" ? comment.timestamp.trim() : "";
+  const seed = `${nodeId || ""}|${timestamp}|${author}|${text}|${index}`;
+  const hashedSeed = hashCommentIdentitySeed(seed).toString(36);
+  return `comment-${hashedSeed}`;
+}
+
+function normalizeCommentRecord(comment, options = {}) {
+  const preferredId = typeof options.preferredId === "string" && options.preferredId
+    ? options.preferredId
+    : null;
+  const nextId = typeof comment?.id === "string" && comment.id
+    ? comment.id
+    : (preferredId || generateCommentId());
+  return {
+    id: nextId,
+    author: typeof comment?.author === "string" ? comment.author : "",
+    text: typeof comment?.text === "string" ? comment.text : "",
+    timestamp: typeof comment?.timestamp === "string" && comment.timestamp
+      ? comment.timestamp
+      : new Date().toISOString(),
+    isNew: comment?.isNew !== false
+  };
+}
+
+function normalizeCommentRecords(comments, nodeId = "") {
+  const sourceComments = Array.isArray(comments) ? comments : [];
+  const takenCommentIds = new Set();
+  let changed = !Array.isArray(comments);
+  const normalizedComments = sourceComments.map((comment, index) => {
+    const rawId = typeof comment?.id === "string" && comment.id ? comment.id : "";
+    let preferredId = rawId || buildDeterministicCommentId(nodeId, comment, index);
+    while (takenCommentIds.has(preferredId)) {
+      preferredId = `${preferredId}-${index.toString(36)}`;
+    }
+    const normalizedComment = normalizeCommentRecord(comment, { preferredId });
+    takenCommentIds.add(normalizedComment.id);
+    if (
+      !rawId ||
+      normalizedComment.id !== rawId ||
+      normalizedComment.author !== (typeof comment?.author === "string" ? comment.author : "") ||
+      normalizedComment.text !== (typeof comment?.text === "string" ? comment.text : "") ||
+      normalizedComment.timestamp !== (typeof comment?.timestamp === "string" && comment.timestamp ? comment.timestamp : "") ||
+      normalizedComment.isNew !== (comment?.isNew !== false)
+    ) {
+      changed = true;
+    }
+    return normalizedComment;
+  });
+  return {
+    comments: normalizedComments,
+    changed
+  };
 }
 
 function normalizeTaskRecord(task) {
@@ -1475,13 +1891,7 @@ function normalizeTaskLinkedObjectIds(handoverNode, linkedObjectIds) {
 
 function syncSeenStateForTask(task) {
   if (!task?.id) return;
-  if (!task.done && isTaskAssignedToCurrentUser(task.assignedTo)) {
-    state.seenTaskIds.delete(task.id);
-    return;
-  }
-  if (task.done || !isTaskAssignedToCurrentUser(task.assignedTo)) {
-    state.seenTaskIds.delete(task.id);
-  }
+  clearTaskSeenForAllUsers(task.id);
 }
 
 function removeTaskCopiesByGroupId(taskGroupId) {
@@ -1502,7 +1912,7 @@ function removeTaskCopiesByGroupId(taskGroupId) {
       const removedTasks = node.tasks.splice(taskIndex, 1);
       removedTasks.forEach((task) => {
         if (task?.id) {
-          state.seenTaskIds.delete(task.id);
+          clearTaskSeenForAllUsers(task.id);
         }
       });
     });
@@ -1533,7 +1943,7 @@ function applyGroupedTaskUpdate(originHandoverNode, taskGroupId, payload, linked
       const removedTasks = node.tasks.splice(taskIndex, 1);
       removedTasks.forEach((task) => {
         if (task?.id) {
-          state.seenTaskIds.delete(task.id);
+          clearTaskSeenForAllUsers(task.id);
         }
       });
     });
@@ -1678,7 +2088,7 @@ function deleteTaskById(nodeId, taskId) {
   const removedTasks = taskRecord.node.tasks.splice(taskRecord.taskIndex, 1);
   removedTasks.forEach((task) => {
     if (task?.id) {
-      state.seenTaskIds.delete(task.id);
+      clearTaskSeenForAllUsers(task.id);
     }
   });
   return removedTasks.length > 0;
@@ -1869,23 +2279,14 @@ function measureEntityLabelWidth(label) {
 function getEntityDiamondSize(node) {
   const label = node?.label || getEntityLabelFallback(node) || "Entity";
   const measuredTextWidth = measureEntityLabelWidth(label) + ENTITY_DIAMOND_TEXT_WIDTH_FUDGE_PX;
-  const width = clamp(
-    Math.ceil(measuredTextWidth / ENTITY_DIAMOND_TEXT_WIDTH_RATIO),
-    ENTITY_DIAMOND_MIN_WIDTH_PX,
-    ENTITY_DIAMOND_MAX_WIDTH_PX
-  );
-  const availableTextWidth = Math.max(
-    1,
-    Math.floor((width * ENTITY_DIAMOND_TEXT_WIDTH_RATIO) - GRAPH_NODE_TEXT_INSET_PX)
-  );
-  const estimatedLineCount = clamp(
-    Math.ceil(measuredTextWidth / availableTextWidth),
-    1,
-    3
+  const size = clamp(
+    Math.ceil(measuredTextWidth + (ENTITY_DIAMOND_TEXT_SIDE_PADDING_PX * 2)),
+    ENTITY_DIAMOND_MIN_SIZE_PX,
+    ENTITY_DIAMOND_MAX_SIZE_PX
   );
   return {
-    width,
-    height: ENTITY_DIAMOND_HEIGHT_PX + ((estimatedLineCount - 1) * Math.round(ENTITY_LABEL_LINE_HEIGHT_PX * 0.9))
+    width: size,
+    height: size
   };
 }
 
@@ -2139,7 +2540,7 @@ function setHandoverStatusById(nodeId, nextStatus, options = {}) {
   node.status = normalizedStatus;
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   if (options.persist !== false) {
     persistStoreToLocalStorage();
   }
@@ -2163,7 +2564,7 @@ function addHandoverCollaborator(nodeId, kind, refId) {
   syncCollabWorkspaceGraphForCollaborator(node, normalizedCollaborator);
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -2194,7 +2595,40 @@ function removeHandoverCollaborator(nodeId, kind, refId) {
   removeCollabWorkspaceGraphForCollaborator(node, { kind, refId });
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
+  persistStoreToLocalStorage();
+  return true;
+}
+
+function appendSystemCommentToNode(node, text) {
+  if (!node || typeof text !== "string" || !text.trim()) return false;
+  if (!Array.isArray(node.comments)) {
+    node.comments = [];
+  }
+  node.comments.push(normalizeCommentRecord({
+    id: generateCommentId(),
+    author: "System",
+    text: text.trim(),
+    timestamp: new Date().toISOString(),
+    isNew: true
+  }));
+  return true;
+}
+
+function removeCurrentUserFromHandover(nodeId) {
+  const node = getAnyNodeById(nodeId) || getNodeById(nodeId);
+  if (!node || node.type !== "handover" || !currentUserId) return false;
+  if (isNodeOwnedByCurrentUser(node)) return false;
+  const directUserEntry = getDirectUserCollaboratorEntryForNode(node, currentUserId);
+  if (!directUserEntry) return false;
+  if (!removeHandoverCollaboratorEntry(node, "user", currentUserId)) return false;
+  const actorLabel = String(getCurrentUserName() || currentUserId || "A collaborator").trim();
+  appendSystemCommentToNode(node, `${actorLabel} removed themselves as collaborator.`);
+  removeCollabWorkspaceGraphForCollaborator(node, directUserEntry);
+  refreshAllHandoverDerivedState();
+  syncNodeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
   persistStoreToLocalStorage();
   return true;
 }
@@ -2214,6 +2648,7 @@ function removeHandoverCollaboratorEntry(node, kind, refId) {
 function toggleHandoverCollaboratorShare(nodeId, kind, refId) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "handover" || !isNodeOwnedByCurrentUser(node)) return false;
+  if (normalizeEntityKind(kind) !== "user") return false;
   if (isCollabWorkspaceOnlyHandover(node)) return false;
   const collaboratorSignature = getHandoverCollaboratorSignature(kind, refId);
   const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
@@ -2231,7 +2666,7 @@ function toggleHandoverCollaboratorShare(nodeId, kind, refId) {
   if (!changed) return false;
   refreshAllHandoverDerivedState();
   syncNodeRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve" });
   persistStoreToLocalStorage();
   return true;
 }
@@ -2261,6 +2696,245 @@ function ensureWorkspaceMetaRecord(workspaceRecord) {
   return workspaceRecord.meta;
 }
 
+function normalizeWorkspaceApplyAutoFitPolicy(value) {
+  if (value === true || value === "always") return "always";
+  if (value === "if-missing") return "if-missing";
+  return "preserve";
+}
+
+function mergeWorkspaceApplyAutoFitPolicy(currentPolicy, nextPolicy) {
+  const rank = {
+    preserve: 0,
+    "if-missing": 1,
+    always: 2
+  };
+  const current = normalizeWorkspaceApplyAutoFitPolicy(currentPolicy);
+  const next = normalizeWorkspaceApplyAutoFitPolicy(nextPolicy);
+  return (rank[next] > rank[current]) ? next : current;
+}
+
+function invalidateActiveWorkspaceView(options = {}) {
+  const normalizedPolicy = normalizeWorkspaceApplyAutoFitPolicy(options.autoFit);
+  hasAppliedWorkspace = false;
+  pendingWorkspaceApplyAutoFit = mergeWorkspaceApplyAutoFitPolicy(
+    pendingWorkspaceApplyAutoFit,
+    normalizedPolicy
+  );
+  if (options.clearAppliedWorkspaceId) {
+    appliedWorkspaceId = null;
+  }
+}
+
+function consumePendingWorkspaceApplyAutoFit() {
+  const nextPolicy = normalizeWorkspaceApplyAutoFitPolicy(pendingWorkspaceApplyAutoFit);
+  pendingWorkspaceApplyAutoFit = "preserve";
+  return nextPolicy;
+}
+
+function normalizeWorkspaceViewportRecord(record) {
+  if (!record || typeof record !== "object") return null;
+  const panX = Number(record.panX);
+  const panY = Number(record.panY);
+  const zoom = Number(record.zoom);
+  if (!Number.isFinite(panX) || !Number.isFinite(panY) || !Number.isFinite(zoom) || zoom <= 0) {
+    return null;
+  }
+  return { panX, panY, zoom };
+}
+
+function getWorkspaceViewportRecordForUser(workspaceRecord, userId = currentUserId) {
+  if (!workspaceRecord || !userId) return null;
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  const byUserId = workspaceMeta[WORKSPACE_VIEWPORT_BY_USER_META_KEY];
+  if (!byUserId || typeof byUserId !== "object") return null;
+  return normalizeWorkspaceViewportRecord(byUserId[userId]);
+}
+
+function setWorkspaceViewportRecordForUser(workspaceRecord, viewportRecord, userId = currentUserId) {
+  if (!workspaceRecord || !userId) return false;
+  const normalizedRecord = normalizeWorkspaceViewportRecord(viewportRecord);
+  if (!normalizedRecord) return false;
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  if (!workspaceMeta[WORKSPACE_VIEWPORT_BY_USER_META_KEY] || typeof workspaceMeta[WORKSPACE_VIEWPORT_BY_USER_META_KEY] !== "object") {
+    workspaceMeta[WORKSPACE_VIEWPORT_BY_USER_META_KEY] = {};
+  }
+  const byUserId = workspaceMeta[WORKSPACE_VIEWPORT_BY_USER_META_KEY];
+  const currentRecord = normalizeWorkspaceViewportRecord(byUserId[userId]);
+  if (
+    currentRecord &&
+    Math.abs(currentRecord.panX - normalizedRecord.panX) < 0.01 &&
+    Math.abs(currentRecord.panY - normalizedRecord.panY) < 0.01 &&
+    Math.abs(currentRecord.zoom - normalizedRecord.zoom) < 0.0001
+  ) {
+    return false;
+  }
+  byUserId[userId] = normalizedRecord;
+  return true;
+}
+
+function scheduleViewportPersist() {
+  viewportPersistDirty = true;
+  if (viewportPersistTimerId !== null) {
+    window.clearTimeout(viewportPersistTimerId);
+  }
+  viewportPersistTimerId = window.setTimeout(() => {
+    viewportPersistTimerId = null;
+    if (!viewportPersistDirty) return;
+    viewportPersistDirty = false;
+    syncWorkspaceRuntimeAndStore();
+    persistStoreToLocalStorage();
+  }, WORKSPACE_VIEWPORT_PERSIST_DEBOUNCE_MS);
+}
+
+function setViewportForWorkspaceUser(workspaceRecord, viewportRecord, options = {}) {
+  if (!workspaceRecord) return false;
+  const updated = setWorkspaceViewportRecordForUser(workspaceRecord, viewportRecord, options.userId || currentUserId);
+  if (!updated) return false;
+  if (options.persist !== false) {
+    scheduleViewportPersist();
+  }
+  return true;
+}
+
+function rememberCurrentWorkspaceViewport(options = {}) {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  if (!workspaceRecord || !currentUserId || !camera) return false;
+  return setViewportForWorkspaceUser(workspaceRecord, {
+    panX: camera.panX,
+    panY: camera.panY,
+    zoom: camera.zoom
+  }, options);
+}
+
+function rememberViewportForWorkspaceById(workspaceId, options = {}) {
+  if (!workspaceId || !currentUserId || !camera) return false;
+  const workspaceRecord = workspaceById.get(workspaceId) || null;
+  if (!workspaceRecord) return false;
+  return setViewportForWorkspaceUser(workspaceRecord, {
+    panX: camera.panX,
+    panY: camera.panY,
+    zoom: camera.zoom
+  }, options);
+}
+
+function getWorkspaceRuntimeNodePositionsRecord(workspaceRecord, create = false) {
+  if (!workspaceRecord) return null;
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  const currentValue = workspaceMeta[WORKSPACE_RUNTIME_NODE_POSITIONS_META_KEY];
+  if (currentValue && typeof currentValue === "object") return currentValue;
+  if (!create) return null;
+  workspaceMeta[WORKSPACE_RUNTIME_NODE_POSITIONS_META_KEY] = {};
+  return workspaceMeta[WORKSPACE_RUNTIME_NODE_POSITIONS_META_KEY];
+}
+
+function normalizeWorkspaceNodePosRecord(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function getWorkspaceNodePos(workspaceId, nodeId, options = {}) {
+  if (!workspaceId || !nodeId) return null;
+  const workspaceRecord = workspaceById.get(workspaceId) || null;
+  if (!workspaceRecord) return null;
+  const runtimeRecord = getWorkspaceRuntimeNodePositionsRecord(workspaceRecord, false);
+  const runtimePos = normalizeWorkspaceNodePosRecord(runtimeRecord?.[nodeId]);
+  if (runtimePos) return runtimePos;
+  if (options.allowLegacyFallback === false) return null;
+  const fallbackNode = getGlobalNodeById(nodeId) || getNodeById(nodeId);
+  if (!hasFiniteGraphPosRecord(fallbackNode)) return null;
+  return {
+    x: fallbackNode.graphPos.x,
+    y: fallbackNode.graphPos.y
+  };
+}
+
+function setWorkspaceNodePos(workspaceId, nodeId, pos) {
+  if (!workspaceId || !nodeId) return false;
+  const workspaceRecord = workspaceById.get(workspaceId) || null;
+  if (!workspaceRecord) return false;
+  const normalizedPos = normalizeWorkspaceNodePosRecord(pos);
+  if (!normalizedPos) return false;
+  const runtimeRecord = getWorkspaceRuntimeNodePositionsRecord(workspaceRecord, true);
+  if (!runtimeRecord) return false;
+  const existingPos = normalizeWorkspaceNodePosRecord(runtimeRecord[nodeId]);
+  if (
+    existingPos &&
+    Math.abs(existingPos.x - normalizedPos.x) < 0.01 &&
+    Math.abs(existingPos.y - normalizedPos.y) < 0.01
+  ) {
+    return false;
+  }
+  runtimeRecord[nodeId] = {
+    x: normalizedPos.x,
+    y: normalizedPos.y
+  };
+  return true;
+}
+
+function applyWorkspaceNodePositions(workspaceRecord, options = {}) {
+  if (!workspaceRecord) return false;
+  const sourceNodeIds = Array.isArray(options.nodeIds)
+    ? options.nodeIds
+    : (options.nodeIds instanceof Set ? [...options.nodeIds] : (Array.isArray(workspaceRecord.nodeIds) ? workspaceRecord.nodeIds : []));
+  let applied = false;
+  sourceNodeIds.forEach((nodeId) => {
+    if (!nodeId) return;
+    const node = getGlobalNodeById(nodeId) || getNodeById(nodeId);
+    if (!node) return;
+    const workspacePos = getWorkspaceNodePos(workspaceRecord.id, nodeId, {
+      allowLegacyFallback: options.allowLegacyFallback !== false
+    });
+    if (!workspacePos) return;
+    if (
+      hasFiniteGraphPosRecord(node) &&
+      Math.abs(node.graphPos.x - workspacePos.x) < 0.01 &&
+      Math.abs(node.graphPos.y - workspacePos.y) < 0.01
+    ) {
+      return;
+    }
+    node.graphPos = { x: workspacePos.x, y: workspacePos.y };
+    applied = true;
+  });
+  return applied;
+}
+
+function persistWorkspaceNodePositions(workspaceRecord, nodeIds, options = {}) {
+  if (!workspaceRecord || !workspaceRecord.id) return false;
+  const normalizedNodeIds = [...new Set(
+    (Array.isArray(nodeIds)
+      ? nodeIds
+      : (nodeIds instanceof Set ? [...nodeIds] : Array.isArray(workspaceRecord.nodeIds) ? workspaceRecord.nodeIds : [])
+    ).filter((nodeId) => typeof nodeId === "string" && nodeId)
+  )];
+  if (!normalizedNodeIds.length) return false;
+  let changed = false;
+  normalizedNodeIds.forEach((nodeId) => {
+    const node = getGlobalNodeById(nodeId) || getNodeById(nodeId);
+    if (!hasFiniteGraphPosRecord(node)) return;
+    if (setWorkspaceNodePos(workspaceRecord.id, nodeId, node.graphPos)) {
+      changed = true;
+    }
+  });
+  if (!changed) return false;
+  if (options.syncWorkspace !== false) {
+    syncWorkspaceRuntimeAndStore();
+  }
+  if (options.persist === true) {
+    persistStoreToLocalStorage();
+  }
+  return true;
+}
+
+function setWorkspaceRuntimeNodePositions(workspaceRecord, nodeIds) {
+  return persistWorkspaceNodePositions(workspaceRecord, nodeIds, {
+    syncWorkspace: false,
+    persist: false
+  });
+}
+
 function getProjectionTrackedNodeIds(workspaceRecord) {
   const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
   return Array.isArray(workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY])
@@ -2287,6 +2961,87 @@ function setProjectionTrackedEdgeIds(workspaceRecord, nextEdgeIds) {
   workspaceMeta[HANDOVER_PROJECTION_WORKSPACE_EDGE_IDS_KEY] = [...new Set(
     (Array.isArray(nextEdgeIds) ? nextEdgeIds : []).filter((edgeId) => typeof edgeId === "string" && edgeId)
   )];
+}
+
+function getCollabAutoChainMetaRecord(workspaceRecord, create = false) {
+  if (!workspaceRecord) return null;
+  const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+  const currentValue = workspaceMeta[COLLAB_AUTO_CHAIN_META_KEY];
+  if (!currentValue || typeof currentValue !== "object") {
+    if (!create) return null;
+    workspaceMeta[COLLAB_AUTO_CHAIN_META_KEY] = {
+      version: COLLAB_AUTO_CHAIN_SCHEMA_VERSION,
+      edgeSignatures: [],
+      [COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY]: []
+    };
+    return workspaceMeta[COLLAB_AUTO_CHAIN_META_KEY];
+  }
+  if (create) {
+    if (!Array.isArray(currentValue.edgeSignatures)) {
+      currentValue.edgeSignatures = [];
+    }
+    if (!Array.isArray(currentValue[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY])) {
+      currentValue[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY] = [];
+    }
+    if (currentValue.version !== COLLAB_AUTO_CHAIN_SCHEMA_VERSION) {
+      currentValue.version = COLLAB_AUTO_CHAIN_SCHEMA_VERSION;
+    }
+  }
+  return currentValue;
+}
+
+function getCollabAutoChainEdgeSignatureSet(workspaceRecord) {
+  const record = getCollabAutoChainMetaRecord(workspaceRecord, false);
+  const signatures = Array.isArray(record?.edgeSignatures) ? record.edgeSignatures : [];
+  return new Set(signatures.filter((signature) => typeof signature === "string" && signature));
+}
+
+function setCollabAutoChainEdgeSignatures(workspaceRecord, nextSignatures) {
+  const record = getCollabAutoChainMetaRecord(workspaceRecord, true);
+  if (!record) return false;
+  const normalized = [...new Set(
+    (Array.isArray(nextSignatures) ? nextSignatures : [])
+      .filter((signature) => typeof signature === "string" && signature)
+  )].sort((left, right) => left.localeCompare(right));
+  const previous = Array.isArray(record.edgeSignatures)
+    ? [...record.edgeSignatures]
+      .filter((signature) => typeof signature === "string" && signature)
+      .sort((left, right) => left.localeCompare(right))
+    : [];
+  const changed = JSON.stringify(previous) !== JSON.stringify(normalized) ||
+    record.version !== COLLAB_AUTO_CHAIN_SCHEMA_VERSION;
+  if (!changed) return false;
+  record.version = COLLAB_AUTO_CHAIN_SCHEMA_VERSION;
+  record.edgeSignatures = normalized;
+  return true;
+}
+
+function getCollabAutoChainHelperNodeIdSet(workspaceRecord) {
+  const record = getCollabAutoChainMetaRecord(workspaceRecord, false);
+  const helperNodeIds = Array.isArray(record?.[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY])
+    ? record[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY]
+    : [];
+  return new Set(helperNodeIds.filter((nodeId) => typeof nodeId === "string" && nodeId));
+}
+
+function setCollabAutoChainHelperNodeIds(workspaceRecord, nextNodeIds) {
+  const record = getCollabAutoChainMetaRecord(workspaceRecord, true);
+  if (!record) return false;
+  const normalized = [...new Set(
+    (Array.isArray(nextNodeIds) ? nextNodeIds : [])
+      .filter((nodeId) => typeof nodeId === "string" && nodeId)
+  )].sort((left, right) => left.localeCompare(right));
+  const previous = Array.isArray(record[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY])
+    ? [...record[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY]]
+      .filter((nodeId) => typeof nodeId === "string" && nodeId)
+      .sort((left, right) => left.localeCompare(right))
+    : [];
+  const changed = JSON.stringify(previous) !== JSON.stringify(normalized) ||
+    record.version !== COLLAB_AUTO_CHAIN_SCHEMA_VERSION;
+  if (!changed) return false;
+  record.version = COLLAB_AUTO_CHAIN_SCHEMA_VERSION;
+  record[COLLAB_AUTO_CHAIN_HELPER_NODE_IDS_KEY] = normalized;
+  return true;
 }
 
 function clearProjectionMeta(value) {
@@ -2318,6 +3073,35 @@ function getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, create = fa
     handoverView[handoverId] = {};
   }
   return handoverView[handoverId];
+}
+
+function isProjectedHandoverHiddenInWorkspace(workspaceRecord, handoverId) {
+  const handoverViewRecord = getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, false);
+  return !!handoverViewRecord?.hiddenProjected;
+}
+
+function setProjectedHandoverHiddenInWorkspace(workspaceRecord, handoverId, hidden = true) {
+  if (!workspaceRecord || !handoverId) return false;
+  const handoverViewRecord = getWorkspaceHandoverViewRecord(workspaceRecord, handoverId, true);
+  if (!handoverViewRecord) return false;
+  if (hidden) {
+    if (handoverViewRecord.hiddenProjected) return false;
+    handoverViewRecord.hiddenProjected = true;
+    return true;
+  }
+  if (!handoverViewRecord.hiddenProjected) return false;
+  delete handoverViewRecord.hiddenProjected;
+  if (!Object.keys(handoverViewRecord).length) {
+    const handoverView = getWorkspaceHandoverViewMap(workspaceRecord, false);
+    if (handoverView) {
+      delete handoverView[handoverId];
+      if (!Object.keys(handoverView).length) {
+        const workspaceMeta = ensureWorkspaceMetaRecord(workspaceRecord);
+        delete workspaceMeta.handoverView;
+      }
+    }
+  }
+  return true;
 }
 
 function getProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId) {
@@ -2381,84 +3165,21 @@ function isWorkspaceProtectedNode(workspaceRecord, node) {
   return true;
 }
 
-function backfillDefaultContextsForWorkspace(workspaceRecord) {
-  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
-  let changed = false;
-  allNodesRuntime.forEach((node) => {
-    if (!node || node.type !== "handover") return;
-    if (getSourceWorkspaceIdForHandover(node) !== workspaceRecord.id) return;
-    if (applyDefaultContextObjectToHandover(node)) {
-      changed = true;
-    }
-  });
-  return changed;
+function isProjectedHandoverNodeInWorkspace(workspaceRecord, node) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab" || !node || node.type !== "handover") {
+    return false;
+  }
+  const projectionMeta = getCurrentProjectionNodeMeta(node.id);
+  return !!projectionMeta?.roles?.includes("projected-handover");
 }
 
-function syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId = null) {
-  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab") return false;
-  const nextAnchorId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId
-    ? workspaceRecord.homeNodeId
-    : null;
-  let changed = false;
-  allNodesRuntime.forEach((node) => {
-    if (!node || node.type !== "handover") return;
-    if (getSourceWorkspaceIdForHandover(node) !== workspaceRecord.id) return;
-    const currentContext = getCurrentHandoverContextObject(node);
-    if (currentContext && currentContext.id !== previousAnchorId) {
-      return;
-    }
-    const currentObjects = getHandoverObjects(node);
-    const nextAnchorNode = nextAnchorId ? getAnyNodeById(nextAnchorId) : null;
-    const nextContextId = nextAnchorId && nextAnchorId !== node.id && isValidHandoverObjectNodeForRole(nextAnchorNode, "context")
-      ? nextAnchorId
-      : null;
-    if (!nextContextId) {
-      if (!currentContext) return;
-      node.handoverObjects = currentObjects.filter((handoverObject) => handoverObject.role !== "context");
-      if (previousAnchorId && removeWorkspaceEdgeLink(workspaceRecord, previousAnchorId, node.id)) {
-        changed = true;
-      }
-      changed = true;
-      return;
-    }
-    if (currentContext?.id === nextContextId) {
-      return;
-    }
-    let foundNextContext = false;
-    const nextObjects = currentObjects.map((handoverObject) => {
-      if (handoverObject.id === nextContextId) {
-        foundNextContext = true;
-        if (handoverObject.role === "context") return handoverObject;
-        changed = true;
-        return {
-          ...handoverObject,
-          role: "context"
-        };
-      }
-      if (handoverObject.role !== "context") return handoverObject;
-      changed = true;
-      return {
-        ...handoverObject,
-        role: "reference"
-      };
-    });
-    node.handoverObjects = foundNextContext
-      ? nextObjects
-      : [
-          {
-            id: nextContextId,
-            role: "context"
-          },
-          ...nextObjects
-        ];
-    if (previousAnchorId && previousAnchorId !== nextContextId && removeWorkspaceEdgeLink(workspaceRecord, previousAnchorId, node.id)) {
-      changed = true;
-    }
-    if (!foundNextContext) {
-      changed = true;
-    }
-  });
-  return changed;
+function hideProjectedHandoverInWorkspace(workspaceRecord, handoverId) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab" || !handoverId) return false;
+  if (!setProjectedHandoverHiddenInWorkspace(workspaceRecord, handoverId, true)) return false;
+  syncWorkspaceRuntimeAndStore();
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
+  persistStoreToLocalStorage();
+  return true;
 }
 
 function setCurrentWorkspaceAnchorNode(nodeId) {
@@ -2471,13 +3192,12 @@ function setCurrentWorkspaceAnchorNode(nodeId) {
     ? workspaceRecord.homeNodeId
     : null;
   workspaceRecord.homeNodeId = node.id;
-  const changedNodes = syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId) || backfillDefaultContextsForWorkspace(workspaceRecord);
-  if (changedNodes) {
+  const anchorChanged = previousAnchorId !== node.id;
+  if (anchorChanged) {
     refreshAllHandoverDerivedState();
-    syncNodeRuntimeAndStore();
   }
   syncWorkspaceRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
   persistStoreToLocalStorage();
   return true;
 }
@@ -2485,15 +3205,10 @@ function setCurrentWorkspaceAnchorNode(nodeId) {
 function clearCurrentWorkspaceAnchorNode() {
   const workspaceRecord = getCurrentWorkspaceRecord();
   if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) === "collab" || !workspaceRecord.homeNodeId) return false;
-  const previousAnchorId = workspaceRecord.homeNodeId;
   workspaceRecord.homeNodeId = null;
-  const changedNodes = syncAnchorContextsForWorkspace(workspaceRecord, previousAnchorId);
-  if (changedNodes) {
-    refreshAllHandoverDerivedState();
-    syncNodeRuntimeAndStore();
-  }
+  refreshAllHandoverDerivedState();
   syncWorkspaceRuntimeAndStore();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
   persistStoreToLocalStorage();
   return true;
 }
@@ -2713,8 +3428,7 @@ function migrateHandoverProjectionModel() {
 
 function markWorkspaceDirtyIfActive(workspaceRecord) {
   if (!workspaceRecord || workspaceRecord.id !== currentWorkspaceId) return;
-  appliedWorkspaceId = null;
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
 }
 
 function isValidHandoverObjectNode(node) {
@@ -2753,12 +3467,149 @@ function getEntityNodeByRefInWorkspace(workspaceRecord, entityKind, refId) {
     .find((node) => node && node.type === "entity" && node.entityKind === entityKind && node.entityRefId === refId) || null;
 }
 
+function hasFiniteGraphPosRecord(node) {
+  return !!node &&
+    !!node.graphPos &&
+    Number.isFinite(node.graphPos.x) &&
+    Number.isFinite(node.graphPos.y);
+}
+
+function getNodePlacementCollisionRadius(node) {
+  if (!node) return 72;
+  const radius = getNodeOccupiedCollisionRadius(node, null);
+  if (Number.isFinite(radius) && radius > 0) return radius;
+  const occupiedSize = getNodeOccupiedSize(node, null);
+  const fallback = 0.5 * Math.max(occupiedSize.width || 0, occupiedSize.height || 0);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 72;
+}
+
+function buildNodeIdSeed(nodeId) {
+  let seed = 0;
+  const text = String(nodeId || "");
+  for (let i = 0; i < text.length; i += 1) {
+    seed = (seed * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return seed;
+}
+
+function resolveNonOverlappingGraphPos(basePos, collisionRadius, occupiedEntries, nodeIdForSeed = "") {
+  const baseX = Number.isFinite(basePos?.x) ? basePos.x : 0;
+  const baseY = Number.isFinite(basePos?.y) ? basePos.y : 0;
+  const nextRadius = Number.isFinite(collisionRadius) && collisionRadius > 0 ? collisionRadius : 72;
+  const spacing = Math.max(22, Math.round(nextRadius * 0.28));
+  const requiredGap = (entryRadius) => Math.max(24, nextRadius + entryRadius + spacing);
+  const isFree = (candidateX, candidateY) => occupiedEntries.every((entry) => {
+    const minDist = requiredGap(entry.radius);
+    const dx = candidateX - entry.x;
+    const dy = candidateY - entry.y;
+    return ((dx * dx) + (dy * dy)) >= (minDist * minDist);
+  });
+
+  if (isFree(baseX, baseY)) {
+    return { x: baseX, y: baseY };
+  }
+
+  const seed = buildNodeIdSeed(nodeIdForSeed);
+  const angleOffset = (seed % 360) * (Math.PI / 180);
+  const ringStep = Math.max(72, Math.round(nextRadius * 0.8));
+  const maxRingCount = 14;
+  for (let ring = 1; ring <= maxRingCount; ring += 1) {
+    const distance = ring * ringStep;
+    const slotCount = Math.max(10, Math.round((Math.PI * 2 * distance) / Math.max(40, nextRadius * 1.2)));
+    for (let slot = 0; slot < slotCount; slot += 1) {
+      const angle = angleOffset + ((Math.PI * 2 * slot) / slotCount);
+      const candidateX = baseX + (Math.cos(angle) * distance);
+      const candidateY = baseY + (Math.sin(angle) * distance);
+      if (isFree(candidateX, candidateY)) {
+        return { x: candidateX, y: candidateY };
+      }
+    }
+  }
+
+  const fallbackDistance = ringStep * (maxRingCount + 1);
+  return {
+    x: baseX + (Math.cos(angleOffset) * fallbackDistance),
+    y: baseY + (Math.sin(angleOffset) * fallbackDistance)
+  };
+}
+
+function collectWorkspacePositionedEntries(workspaceRecord, options = {}) {
+  const excludedNodeIds = options.excludedNodeIds instanceof Set
+    ? options.excludedNodeIds
+    : new Set(Array.isArray(options.excludedNodeIds) ? options.excludedNodeIds : []);
+  const scopedNodeIds = Array.isArray(workspaceRecord?.nodeIds) ? workspaceRecord.nodeIds : [];
+  return scopedNodeIds
+    .filter((nodeId) => !excludedNodeIds.has(nodeId))
+    .map((nodeId) => {
+      const node = getGlobalNodeById(nodeId);
+      const pos = getWorkspaceNodePos(workspaceRecord.id, nodeId, { allowLegacyFallback: true });
+      return node && pos
+        ? {
+          id: node.id,
+          x: pos.x,
+          y: pos.y,
+          radius: getNodePlacementCollisionRadius(node)
+        }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+function getWorkspaceAnchorNodeRecord(workspaceRecord) {
+  if (!workspaceRecord) return null;
+  const anchorId = normalizeWorkspaceKind(workspaceRecord.kind) === "collab"
+    ? buildCollaborationAnchorId(workspaceRecord.id)
+    : workspaceRecord.homeNodeId;
+  if (!anchorId) return null;
+  return getGlobalNodeById(anchorId) || getNodeById(anchorId) || null;
+}
+
+function getSuggestedEntityGraphPos(workspaceRecord, handoverNode, entityKind, refId) {
+  const excludedNodeIds = new Set();
+  const occupied = collectWorkspacePositionedEntries(workspaceRecord, { excludedNodeIds });
+  const anchorNode = getWorkspaceAnchorNodeRecord(workspaceRecord);
+  const anchorWorkspacePos = anchorNode ? getWorkspaceNodePos(workspaceRecord.id, anchorNode.id, { allowLegacyFallback: true }) : null;
+  const handoverWorkspacePos = handoverNode ? getWorkspaceNodePos(workspaceRecord.id, handoverNode.id, { allowLegacyFallback: true }) : null;
+  const anchorPos = anchorWorkspacePos || getDefaultCollaborationGraphPos(workspaceRecord);
+  const handoverPos = handoverWorkspacePos || anchorPos;
+  let basePos = {
+    x: (anchorPos.x + handoverPos.x) / 2,
+    y: (anchorPos.y + handoverPos.y) / 2
+  };
+
+  if (entityKind === "user") {
+    const ownerOrgId = userById.get(refId || "")?.orgId || null;
+    const orgNode = ownerOrgId ? getEntityNodeByRefInWorkspace(workspaceRecord, "org", ownerOrgId) : null;
+    const orgPos = orgNode ? getWorkspaceNodePos(workspaceRecord.id, orgNode.id, { allowLegacyFallback: true }) : null;
+    if (orgPos) {
+      basePos = {
+        x: (orgPos.x + handoverPos.x) / 2,
+        y: (orgPos.y + handoverPos.y) / 2
+      };
+    } else {
+      basePos = {
+        x: handoverPos.x + ((handoverPos.x >= anchorPos.x) ? -120 : 120),
+        y: handoverPos.y
+      };
+    }
+  }
+
+  const probeNode = {
+    id: `placement-probe-${entityKind}-${refId}`,
+    type: "entity",
+    entityKind,
+    entityRefId: refId
+  };
+  const radius = getNodePlacementCollisionRadius(probeNode);
+  return resolveNonOverlappingGraphPos(basePos, radius, occupied, probeNode.id);
+}
+
 function createWorkspaceEntityNode(workspaceRecord, handoverNode, entityKind, refId) {
   if (!workspaceRecord || !handoverNode || !entityKind || !refId) return null;
   const existingNode = getEntityNodeByRefInWorkspace(workspaceRecord, entityKind, refId);
   if (existingNode) return existingNode;
   const ownerRecord = handoverNode.ownerId ? userById.get(handoverNode.ownerId) : null;
-  const anchorPos = getDefaultCollaborationGraphPos(workspaceRecord);
+  const suggestedPos = getSuggestedEntityGraphPos(workspaceRecord, handoverNode, entityKind, refId);
   const nodeId = generateNodeId("entity");
   const nextNode = {
     id: nodeId,
@@ -2774,12 +3625,13 @@ function createWorkspaceEntityNode(workspaceRecord, handoverNode, entityKind, re
     entityKind,
     entityRefId: refId,
     graphPos: {
-      x: anchorPos.x + (entityKind === "org" ? 210 : 430),
-      y: anchorPos.y
+      x: suggestedPos.x,
+      y: suggestedPos.y
     }
   };
   allNodesRuntime.push(nextNode);
   ensureWorkspaceNodeMembership(workspaceRecord, nextNode.id);
+  setWorkspaceNodePos(workspaceRecord.id, nextNode.id, nextNode.graphPos);
   syncNodeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
   markWorkspaceDirtyIfActive(workspaceRecord);
@@ -2861,11 +3713,6 @@ function syncProjectWorkspaceGraphForHandover(workspaceRecord, handoverNode) {
     changedWorkspaceData = true;
   }
 
-  const contextObject = getCurrentHandoverContextObject(handoverNode);
-  const contextNode = contextObject ? getAnyNodeById(contextObject.id) : null;
-  const anchorId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId ? workspaceRecord.homeNodeId : null;
-  const effectiveAnchorId = anchorId && anchorId !== handoverNode.id ? anchorId : null;
-
   if (typeof handoverNode.sourceWorkspaceId === "string" && handoverNode.sourceWorkspaceId !== workspaceRecord.id) {
     handoverNode.sourceWorkspaceId = workspaceRecord.id;
     changedNodeData = true;
@@ -2881,120 +3728,256 @@ function syncProjectWorkspaceGraphForHandover(workspaceRecord, handoverNode) {
     }
   });
 
-  if (contextNode) {
-    if (effectiveAnchorId && effectiveAnchorId !== contextNode.id) {
-      if (ensureWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, contextNode.id)) {
-        changedWorkspaceData = true;
-      }
-      if (removeWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, handoverNode.id)) {
-        changedWorkspaceData = true;
-      }
-    }
-    if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) {
+  // Project workspace sync deliberately ignores handover context/anchor chain edges.
+  // Context is derived from origin workspace and only drives edge orchestration in collaboration workspaces.
+
+  const graphContextNode = getHandoverGraphContextNode(handoverNode);
+  getHandoverObjects(handoverNode).forEach((handoverObject) => {
+    const objectNode = getAnyNodeById(handoverObject.id);
+    if (!objectNode) return;
+    if (graphContextNode && objectNode.id === graphContextNode.id) return;
+    const direction = getDefaultHandoverObjectEdgeDirection(handoverObject.role);
+    const sourceId = direction === "object_to_handover" ? objectNode.id : handoverNode.id;
+    const targetId = direction === "object_to_handover" ? handoverNode.id : objectNode.id;
+    if (ensureWorkspaceEdgeLink(workspaceRecord, sourceId, targetId)) {
       changedWorkspaceData = true;
     }
-  } else if (effectiveAnchorId && ensureWorkspaceEdgeLink(workspaceRecord, effectiveAnchorId, handoverNode.id)) {
-    changedWorkspaceData = true;
-  }
-
-  getHandoverObjects(handoverNode)
-    .filter((handoverObject) => handoverObject.role !== "context")
-    .forEach((handoverObject) => {
-      const objectNode = getAnyNodeById(handoverObject.id);
-      if (!objectNode) return;
-      const direction = getDefaultHandoverObjectEdgeDirection(handoverObject.role);
-      const sourceId = direction === "object_to_handover" ? objectNode.id : handoverNode.id;
-      const targetId = direction === "object_to_handover" ? handoverNode.id : objectNode.id;
-      if (ensureWorkspaceEdgeLink(workspaceRecord, sourceId, targetId)) {
-        changedWorkspaceData = true;
-      }
-    });
+  });
 
   return { changedNodeData, changedWorkspaceData };
+}
+
+function getCollabWorkspaceRecordForHandover(handoverNode) {
+  if (!handoverNode || handoverNode.type !== "handover") return null;
+  return workspaces.find((workspace) =>
+    normalizeWorkspaceKind(workspace.kind) === "collab" &&
+    Array.isArray(workspace.nodeIds) &&
+    workspace.nodeIds.includes(handoverNode.id)
+  ) || null;
+}
+
+function getCollabChainEdgeSignature(sourceId, targetId) {
+  return `${sourceId}=>${targetId}`;
+}
+
+function getCollabOnlyHandoversInWorkspace(workspaceRecord) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab" || !Array.isArray(workspaceRecord.nodeIds)) {
+    return [];
+  }
+  return workspaceRecord.nodeIds
+    .map((nodeId) => getAnyNodeById(nodeId))
+    .filter((node) => node?.type === "handover" && isCollabWorkspaceOnlyHandover(node));
+}
+
+function reconcileCollabWorkspaceAutoChains(workspaceRecord) {
+  if (!workspaceRecord || normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") return false;
+  const anchorNode = getGlobalNodeById(buildCollaborationAnchorId(workspaceRecord.id));
+  if (!anchorNode) return false;
+
+  let changed = false;
+  const handoverNodes = getCollabOnlyHandoversInWorkspace(workspaceRecord);
+  const handoverIdSet = new Set(handoverNodes.map((node) => node.id));
+  const previousManagedSignatures = getCollabAutoChainEdgeSignatureSet(workspaceRecord);
+  const previousManagedHelperNodeIds = getCollabAutoChainHelperNodeIdSet(workspaceRecord);
+  if (!previousManagedHelperNodeIds.size && previousManagedSignatures.size) {
+    const workspaceEdgeIds = Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : [];
+    workspaceEdgeIds.forEach((edgeId) => {
+      const edge = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+      if (!edge) return;
+      const signature = getCollabChainEdgeSignature(edge.sourceId, edge.targetId);
+      if (!previousManagedSignatures.has(signature)) return;
+      const sourceNode = getGlobalNodeById(edge.sourceId);
+      const targetNode = getGlobalNodeById(edge.targetId);
+      if (sourceNode?.type === "entity") {
+        previousManagedHelperNodeIds.add(sourceNode.id);
+      }
+      if (targetNode?.type === "entity") {
+        previousManagedHelperNodeIds.add(targetNode.id);
+      }
+    });
+  }
+  const nextManagedSignatures = new Set();
+  const nextManagedHelperNodeIds = new Set();
+  const requiredEdges = new Map();
+  const orgNodeByRefId = new Map();
+  const userNodeByRefId = new Map();
+  const defaultHandoverNode = handoverNodes[0] || null;
+
+  const requireEdge = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const signature = getCollabChainEdgeSignature(sourceId, targetId);
+    requiredEdges.set(signature, { sourceId, targetId });
+    nextManagedSignatures.add(signature);
+  };
+
+  const trackManagedHelperNode = (node, wasExisting = false) => {
+    if (!node || node.type !== "entity") return;
+    if (!wasExisting || previousManagedHelperNodeIds.has(node.id)) {
+      nextManagedHelperNodeIds.add(node.id);
+    }
+  };
+
+  const ensureOrgNode = (orgId, handoverNodeForOwner = defaultHandoverNode) => {
+    if (!orgId || !handoverNodeForOwner) return null;
+    if (orgNodeByRefId.has(orgId)) return orgNodeByRefId.get(orgId);
+    const existingNode = getEntityNodeByRefInWorkspace(workspaceRecord, "org", orgId);
+    const orgNode = existingNode || createWorkspaceEntityNode(workspaceRecord, handoverNodeForOwner, "org", orgId);
+    trackManagedHelperNode(orgNode, !!existingNode);
+    orgNodeByRefId.set(orgId, orgNode || null);
+    return orgNode;
+  };
+
+  const ensureUserNode = (userId, handoverNodeForOwner = defaultHandoverNode) => {
+    if (!userId || !handoverNodeForOwner) return null;
+    if (userNodeByRefId.has(userId)) return userNodeByRefId.get(userId);
+    const existingNode = getEntityNodeByRefInWorkspace(workspaceRecord, "user", userId);
+    const userNode = existingNode || createWorkspaceEntityNode(workspaceRecord, handoverNodeForOwner, "user", userId);
+    trackManagedHelperNode(userNode, !!existingNode);
+    userNodeByRefId.set(userId, userNode || null);
+    return userNode;
+  };
+
+  handoverNodes.forEach((handoverNode) => {
+    const contextNode = getHandoverGraphContextNode(handoverNode);
+    if (contextNode && contextNode.id !== handoverNode.id) {
+      const hasContextMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(contextNode.id);
+      ensureWorkspaceNodeMembership(workspaceRecord, contextNode.id);
+      if (!hasContextMembership) {
+        changed = true;
+      }
+    }
+
+    const normalizedCollaborators = (Array.isArray(handoverNode.handoverCollaborators) ? handoverNode.handoverCollaborators : [])
+      .map((rawCollaborator) => normalizeHandoverCollaboratorEntry(rawCollaborator))
+      .filter((collaborator) => !!collaborator);
+
+    normalizedCollaborators.forEach((collaborator) => {
+      if (collaborator.kind === "org") {
+        const orgNode = ensureOrgNode(collaborator.refId, handoverNode);
+        if (!orgNode) return;
+        requireEdge(anchorNode.id, orgNode.id);
+        requireEdge(orgNode.id, handoverNode.id);
+        return;
+      }
+      if (collaborator.kind !== "user") return;
+      const userRecord = userById.get(collaborator.refId) || null;
+      const userNode = ensureUserNode(collaborator.refId, handoverNode);
+      if (!userNode) return;
+      requireEdge(userNode.id, handoverNode.id);
+      if (userRecord?.orgId) {
+        const orgNode = ensureOrgNode(userRecord.orgId, handoverNode);
+        if (orgNode) {
+          requireEdge(anchorNode.id, orgNode.id);
+          requireEdge(orgNode.id, userNode.id);
+          return;
+        }
+      }
+      requireEdge(anchorNode.id, userNode.id);
+    });
+  });
+
+  requiredEdges.forEach(({ sourceId, targetId }) => {
+    if (ensureWorkspaceEdgeLink(workspaceRecord, sourceId, targetId)) {
+      changed = true;
+    }
+  });
+
+  const snapshotEdges = Array.isArray(workspaceRecord.edgeIds)
+    ? workspaceRecord.edgeIds
+      .map((edgeId) => getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId))
+      .filter((edge) => !!edge)
+    : [];
+
+  const isLegacyBadManagedPattern = (edge) => {
+    if (!edge) return false;
+    const sourceNode = getGlobalNodeById(edge.sourceId);
+    const targetNode = getGlobalNodeById(edge.targetId);
+    if (!sourceNode || !targetNode) return false;
+    if (sourceNode.type === "entity" && edge.targetId === anchorNode.id) {
+      return true;
+    }
+    if (edge.sourceId === anchorNode.id && handoverIdSet.has(edge.targetId)) {
+      return true;
+    }
+    return false;
+  };
+
+  snapshotEdges.forEach((edge) => {
+    const signature = getCollabChainEdgeSignature(edge.sourceId, edge.targetId);
+    const isManagedCandidate = previousManagedSignatures.has(signature) || isLegacyBadManagedPattern(edge);
+    if (!isManagedCandidate) return;
+    if (requiredEdges.has(signature)) return;
+    if (removeWorkspaceEdgeLink(workspaceRecord, edge.sourceId, edge.targetId)) {
+      changed = true;
+    }
+  });
+
+  const staleManagedHelperNodeIds = [...previousManagedHelperNodeIds].filter((nodeId) => !nextManagedHelperNodeIds.has(nodeId));
+  staleManagedHelperNodeIds.forEach((nodeId) => {
+    if (!Array.isArray(workspaceRecord.nodeIds) || !workspaceRecord.nodeIds.includes(nodeId)) return;
+    const helperNode = getGlobalNodeById(nodeId);
+    if (!helperNode || helperNode.type !== "entity") return;
+    const connectedEdges = getWorkspaceConnectedAuthoredEdges(workspaceRecord, nodeId);
+    const hasManualConnectedEdge = connectedEdges.some((edge) => {
+      const signature = getCollabChainEdgeSignature(edge.sourceId, edge.targetId);
+      return !nextManagedSignatures.has(signature) && !previousManagedSignatures.has(signature);
+    });
+    if (hasManualConnectedEdge) return;
+    connectedEdges.forEach((edge) => {
+      if (removeWorkspaceEdgeLink(workspaceRecord, edge.sourceId, edge.targetId)) {
+        changed = true;
+      }
+    });
+    workspaceRecord.nodeIds = workspaceRecord.nodeIds.filter((candidateNodeId) => candidateNodeId !== nodeId);
+    const hasRemainingMembership = workspaces.some((workspace) =>
+      Array.isArray(workspace.nodeIds) && workspace.nodeIds.includes(nodeId)
+    );
+    if (!hasRemainingMembership) {
+      allNodesRuntime = allNodesRuntime.filter((node) => node.id !== nodeId);
+      allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.sourceId !== nodeId && edge.targetId !== nodeId);
+    }
+    changed = true;
+  });
+
+  if (setCollabAutoChainEdgeSignatures(workspaceRecord, [...nextManagedSignatures])) {
+    changed = true;
+  }
+  if (setCollabAutoChainHelperNodeIds(workspaceRecord, [...nextManagedHelperNodeIds])) {
+    changed = true;
+  }
+  if (changed) {
+    syncNodeRuntimeAndStore();
+    syncEdgeRuntimeAndStore();
+    syncWorkspaceRuntimeAndStore();
+  }
+  return changed;
 }
 
 function removeCollabWorkspaceGraphForCollaborator(handoverNode, collaborator) {
   if (!handoverNode || handoverNode.type !== "handover" || !collaborator || !isCollabWorkspaceOnlyHandover(handoverNode)) {
     return false;
   }
-  const workspaceRecord = workspaces.find((workspace) =>
-    normalizeWorkspaceKind(workspace.kind) === "collab" &&
-    Array.isArray(workspace.nodeIds) &&
-    workspace.nodeIds.includes(handoverNode.id)
-  ) || null;
+  const workspaceRecord = getCollabWorkspaceRecordForHandover(handoverNode);
   if (!workspaceRecord) return false;
-  if (collaborator.kind === "org") {
-    const orgNode = getEntityNodeByRefInWorkspace(workspaceRecord, "org", collaborator.refId);
-    return !!orgNode && removeWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id);
-  }
-  const userNode = getEntityNodeByRefInWorkspace(workspaceRecord, "user", collaborator.refId);
-  return !!userNode && removeWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id);
+  return reconcileCollabWorkspaceAutoChains(workspaceRecord);
 }
 
 function syncCollabWorkspaceGraphForCollaborator(handoverNode, collaborator) {
-  if (!handoverNode || handoverNode.type !== "handover" || !collaborator) return false;
-  const workspaceRecord = workspaces.find((workspace) =>
-    normalizeWorkspaceKind(workspace.kind) === "collab" &&
-    Array.isArray(workspace.nodeIds) &&
-    workspace.nodeIds.includes(handoverNode.id)
-  ) || null;
+  if (!handoverNode || handoverNode.type !== "handover" || !collaborator || !isCollabWorkspaceOnlyHandover(handoverNode)) {
+    return false;
+  }
+  const normalizedCollaborator = normalizeHandoverCollaboratorEntry(collaborator);
+  if (!normalizedCollaborator) return false;
+  const workspaceRecord = getCollabWorkspaceRecordForHandover(handoverNode);
   if (!workspaceRecord) return false;
-  const anchorNode = getCurrentCollaborationAnchorNode() || getGlobalNodeById(buildCollaborationAnchorId(workspaceRecord.id));
-  if (!anchorNode) return false;
-  const contextNode = getCurrentHandoverContextNode(handoverNode);
-  let changed = false;
-  if (collaborator.kind === "org") {
-    const orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", collaborator.refId);
-    if (orgNode) {
-      if (ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) changed = true;
-      if (contextNode && contextNode.id !== orgNode.id) {
-        const hadContextMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(contextNode.id);
-        ensureWorkspaceNodeMembership(workspaceRecord, contextNode.id);
-        if (!hadContextMembership) changed = true;
-        if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, contextNode.id)) changed = true;
-        if (removeWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id)) changed = true;
-        if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) changed = true;
-      } else if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, handoverNode.id)) changed = true;
-    }
-    return changed;
-  }
-  const userRecord = userById.get(collaborator.refId);
-  if (!userRecord) return false;
-  let orgNode = null;
-  if (userRecord.orgId) {
-    orgNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "org", userRecord.orgId);
-    if (orgNode && ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, orgNode.id)) changed = true;
-  }
-  const userNode = createWorkspaceEntityNode(workspaceRecord, handoverNode, "user", collaborator.refId);
-  if (!userNode) return changed;
-  if (orgNode) {
-    if (ensureWorkspaceEdgeLink(workspaceRecord, orgNode.id, userNode.id)) changed = true;
-  } else if (ensureWorkspaceEdgeLink(workspaceRecord, anchorNode.id, userNode.id)) {
-    changed = true;
-  }
-  if (contextNode && contextNode.id !== userNode.id) {
-    const hadContextMembership = Array.isArray(workspaceRecord.nodeIds) && workspaceRecord.nodeIds.includes(contextNode.id);
-    ensureWorkspaceNodeMembership(workspaceRecord, contextNode.id);
-    if (!hadContextMembership) changed = true;
-    if (ensureWorkspaceEdgeLink(workspaceRecord, userNode.id, contextNode.id)) changed = true;
-    if (removeWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id)) changed = true;
-    if (ensureWorkspaceEdgeLink(workspaceRecord, contextNode.id, handoverNode.id)) changed = true;
-  } else if (ensureWorkspaceEdgeLink(workspaceRecord, userNode.id, handoverNode.id)) changed = true;
-  return changed;
+  return reconcileCollabWorkspaceAutoChains(workspaceRecord);
 }
 
 function syncCollabWorkspaceGraphForAllCollaborators(handoverNode) {
   if (!isCollabWorkspaceOnlyHandover(handoverNode)) return false;
-  let changed = false;
-  const collaborators = Array.isArray(handoverNode.handoverCollaborators) ? handoverNode.handoverCollaborators : [];
-  collaborators.forEach((rawCollaborator) => {
-    const collaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
-    if (!collaborator) return;
-    if (syncCollabWorkspaceGraphForCollaborator(handoverNode, collaborator)) {
-      changed = true;
-    }
-  });
-  return changed;
+  const workspaceRecord = getCollabWorkspaceRecordForHandover(handoverNode);
+  if (!workspaceRecord) return false;
+  return reconcileCollabWorkspaceAutoChains(workspaceRecord);
 }
 
 function syncHandoverCollaboratorFromLinkedEntity(sourceNodeId, targetNodeId) {
@@ -3039,45 +4022,21 @@ function syncHandoverObjectFromLinkedNode(sourceNodeId, targetNodeId) {
   }
   if (!handoverNode || !objectNode) return false;
   let changed = false;
-  let nextRole = "reference";
-  const linkedProjectWorkspace = currentWorkspaceKind === "collab"
-    ? getUniqueNonCollabWorkspaceForNode(objectNode.id)
-    : null;
-  if (
-    currentWorkspaceKind === "collab" &&
-    linkedProjectWorkspace &&
-    isValidHandoverObjectNodeForRole(objectNode, "context")
-  ) {
-    nextRole = "context";
-  }
+  const nextRole = "reference";
   const existingObject = getHandoverObjects(handoverNode).find((handoverObject) => handoverObject.id === objectNode.id) || null;
   if (existingObject) {
-    if (existingObject.role !== nextRole && nextRole === "context") {
+    if (existingObject.role !== nextRole) {
       handoverNode.handoverObjects = getHandoverObjects(handoverNode).map((handoverObject) => {
-        if (handoverObject.id === objectNode.id) {
-          return {
-            ...handoverObject,
-            role: "context"
-          };
-        }
-        if (handoverObject.role === "context") {
-          return {
-            ...handoverObject,
-            role: "reference"
-          };
-        }
-        return handoverObject;
+        if (handoverObject.id !== objectNode.id) return handoverObject;
+        return {
+          ...handoverObject,
+          role: nextRole
+        };
       });
       changed = true;
     }
   } else if (addHandoverObjectIdEntry(handoverNode, objectNode.id, nextRole)) {
     changed = true;
-  }
-  if (nextRole === "context" && linkedProjectWorkspace) {
-    if (handoverNode.sourceWorkspaceId !== linkedProjectWorkspace.id) {
-      handoverNode.sourceWorkspaceId = linkedProjectWorkspace.id;
-      changed = true;
-    }
   }
   return changed;
 }
@@ -3142,13 +4101,33 @@ function getExpandedHandoverCollaboratorAccess(node) {
   return accessByUserId;
 }
 
+function getDirectUserHandoverCollaboratorAccess(node) {
+  if (!node || node.type !== "handover") return new Map();
+  const accessByUserId = new Map();
+  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  rawCollaborators.forEach((rawCollaborator) => {
+    const collaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
+    if (!collaborator || collaborator.kind !== "user") return;
+    if (!userById.has(collaborator.refId) || collaborator.refId === node.ownerId || isAdminUserId(collaborator.refId)) return;
+    const currentAccess = accessByUserId.get(collaborator.refId) || { shareWorkspace: false };
+    accessByUserId.set(collaborator.refId, {
+      shareWorkspace: currentAccess.shareWorkspace || !!collaborator.shareWorkspace
+    });
+  });
+  return accessByUserId;
+}
+
+function getDirectUserCollaboratorEntryForNode(node, userId = currentUserId) {
+  if (!node || node.type !== "handover" || !userId) return null;
+  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  return rawCollaborators
+    .map((rawCollaborator) => normalizeHandoverCollaboratorEntry(rawCollaborator))
+    .find((collaborator) => collaborator?.kind === "user" && collaborator.refId === userId) || null;
+}
+
 function createProjectionEntityNode(workspaceRecord, sourceNode, entityKind, entityRefId, artifactRole = entityKind) {
   const entityNodeId = buildProjectionNodeId(workspaceRecord.id, artifactRole, entityRefId);
   const ownerRecord = sourceNode?.ownerId ? userById.get(sourceNode.ownerId) : null;
-  const anchorNode = getAnyNodeById(buildCollaborationAnchorId(workspaceRecord.id));
-  const anchorPos = anchorNode?.graphPos && Number.isFinite(anchorNode.graphPos.x) && Number.isFinite(anchorNode.graphPos.y)
-    ? anchorNode.graphPos
-    : getDefaultCollaborationGraphPos(workspaceRecord);
   const isOrg = entityKind === "org";
   return {
     id: entityNodeId,
@@ -3163,49 +4142,12 @@ function createProjectionEntityNode(workspaceRecord, sourceNode, entityKind, ent
     locationId: null,
     entityKind,
     entityRefId,
-    graphPos: {
-      x: anchorPos.x + (isOrg ? 210 : 430),
-      y: anchorPos.y
-    },
+    graphPos: null,
     meta: {
       [HANDOVER_PROJECTION_META_KEY]: {
         autoManaged: true,
         workspaceOwnerId: workspaceRecord.ownerId || null,
         artifactRole
-      }
-    }
-  };
-}
-
-function createProjectionPortalNode(workspaceRecord, sourceNode, sourceWorkspaceId) {
-  if (!sourceWorkspaceId) return null;
-  const portalNodeId = buildProjectionNodeId(workspaceRecord.id, "portal", sourceWorkspaceId);
-  const ownerRecord = sourceNode?.ownerId ? userById.get(sourceNode.ownerId) : null;
-  const anchorNode = getAnyNodeById(buildCollaborationAnchorId(workspaceRecord.id));
-  const anchorPos = anchorNode?.graphPos && Number.isFinite(anchorNode.graphPos.x) && Number.isFinite(anchorNode.graphPos.y)
-    ? anchorNode.graphPos
-    : getDefaultCollaborationGraphPos(workspaceRecord);
-  return {
-    id: portalNodeId,
-    type: "portal",
-    title: "",
-    label: "",
-    ownerId: sourceNode?.ownerId || workspaceRecord.ownerId || null,
-    owner: ownerRecord?.name || sourceNode?.owner || workspaceRecord.ownerId || "Unknown",
-    summary: "Projected shared workspace portal",
-    tasks: [],
-    comments: [],
-    locationId: null,
-    linkedWorkspaceId: sourceWorkspaceId,
-    graphPos: {
-      x: anchorPos.x + 860,
-      y: anchorPos.y + 30
-    },
-    meta: {
-      [HANDOVER_PROJECTION_META_KEY]: {
-        autoManaged: true,
-        workspaceOwnerId: workspaceRecord.ownerId || null,
-        artifactRole: "shared-portal"
       }
     }
   };
@@ -3290,11 +4232,11 @@ function getCollaborationProjectionSpecs(workspaceRecord) {
   allNodesRuntime
     .filter((node) => node && node.type === "handover")
     .forEach((handoverNode) => {
+      if (isProjectedHandoverHiddenInWorkspace(workspaceRecord, handoverNode.id)) return;
       const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
       const sourceWorkspace = sourceWorkspaceId ? workspaceById.get(sourceWorkspaceId) || null : null;
       if (!sourceWorkspace) return;
-      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
-      if (!collaboratorAccess.size) return;
+      const collaboratorAccess = getDirectUserHandoverCollaboratorAccess(handoverNode);
       if (normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") {
         if (viewerUserId === handoverNode.ownerId) return;
         if (normalizeHandoverStatus(handoverNode.status) === "Draft") return;
@@ -3304,18 +4246,17 @@ function getCollaborationProjectionSpecs(workspaceRecord) {
         projectionSpecs.push({
           handoverNode,
           leadUserId: handoverNode.ownerId,
-          includePortal: false,
           removeCollaborator: removalEntry
         });
         return;
       }
       if (viewerUserId === handoverNode.ownerId) {
+        if (!collaboratorAccess.size) return;
         collaboratorAccess.forEach((_, collaboratorUserId) => {
           const removalEntry = getCollaboratorRemovalEntryForUser(handoverNode, collaboratorUserId);
           projectionSpecs.push({
             handoverNode,
             leadUserId: collaboratorUserId,
-            includePortal: true,
             removeCollaborator: removalEntry
           });
         });
@@ -3328,11 +4269,69 @@ function getCollaborationProjectionSpecs(workspaceRecord) {
       projectionSpecs.push({
         handoverNode,
         leadUserId: handoverNode.ownerId,
-        includePortal: !!accessRecord.shareWorkspace,
         removeCollaborator: removalEntry
       });
     });
   return projectionSpecs;
+}
+
+function getAccessibleWorkspaceIdSetForCurrentUser() {
+  return new Set(getWorkspaceOptionsForCurrentUser().map((workspace) => workspace.id));
+}
+
+function getHandoverPortalBadgeLink(node, workspaceRecord = getCurrentWorkspaceRecord(), viewerUserId = currentUserId, accessibleWorkspaceIds = null) {
+  if (!node || node.type !== "handover") return null;
+  if (!workspaceRecord || !viewerUserId || isAdminUserId(viewerUserId)) return null;
+  const sourceWorkspaceId = getSourceWorkspaceIdForHandover(node);
+  if (!sourceWorkspaceId) return null;
+  const sourceWorkspace = workspaceById.get(sourceWorkspaceId) || null;
+  if (!sourceWorkspace) return null;
+  if (normalizeWorkspaceKind(sourceWorkspace.kind) === "collab") return null;
+
+  const visibleWorkspaceIds = accessibleWorkspaceIds instanceof Set
+    ? accessibleWorkspaceIds
+    : getAccessibleWorkspaceIdSetForCurrentUser();
+  const canOpenWorkspace = (workspaceId) =>
+    typeof workspaceId === "string" &&
+    workspaceId &&
+    workspaceId !== workspaceRecord.id &&
+    visibleWorkspaceIds.has(workspaceId);
+
+  const isOwner = viewerUserId === node.ownerId;
+  const isDraft = normalizeHandoverStatus(node.status) === "Draft";
+  const collaboratorAccess = getDirectUserHandoverCollaboratorAccess(node);
+  const accessRecord = collaboratorAccess.get(viewerUserId) || null;
+  const hasSharedAccess = !!accessRecord?.shareWorkspace;
+
+  if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab") {
+    if (isOwner) {
+      if (!collaboratorAccess.size) return null;
+    } else {
+      if (isDraft || !hasSharedAccess) return null;
+    }
+    if (!canOpenWorkspace(sourceWorkspaceId)) return null;
+    return {
+      targetWorkspaceId: sourceWorkspaceId,
+      targetLabel: sourceWorkspace.name || sourceWorkspace.id,
+      direction: "to-source-workspace"
+    };
+  }
+
+  if (workspaceRecord.id !== sourceWorkspaceId) return null;
+  if (isOwner) {
+    if (!collaboratorAccess.size) return null;
+  } else {
+    if (isDraft || !hasSharedAccess) return null;
+  }
+
+  const viewerCollabWorkspace = getCollaborationWorkspaceRecordForUser(viewerUserId);
+  const targetWorkspaceId = viewerCollabWorkspace?.id || null;
+  if (!canOpenWorkspace(targetWorkspaceId)) return null;
+  return {
+    targetWorkspaceId,
+    targetLabel: viewerCollabWorkspace?.name || targetWorkspaceId,
+    direction: "to-collaboration-workspace"
+  };
 }
 
 function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
@@ -3345,6 +4344,8 @@ function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
   if (!anchorNode) return { overlayEdges };
   const addedNodeIds = new Set();
   const addedEdgeIds = new Set();
+  const addedCollaborationChainEdgePairs = new Set();
+  const chainTailIdBySignature = new Map();
 
   const registerNode = (nodeRecord, metaPatch) => {
     if (!nodeRecord) return;
@@ -3362,6 +4363,26 @@ function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
     addedEdgeIds.add(edgeRecord.id);
   };
 
+  const buildChainSignature = (orgId, userId) => {
+    const parts = [];
+    if (orgId) parts.push(`org:${orgId}`);
+    if (userId) parts.push(`user:${userId}`);
+    return parts.join("|") || "anchor";
+  };
+
+  const registerCollaborationChainEdge = (handoverNode, sourceId, targetId) => {
+    if (!handoverNode || !sourceId || !targetId || sourceId === targetId) return;
+    const pairKey = `${sourceId}->${targetId}`;
+    if (addedCollaborationChainEdgePairs.has(pairKey)) return;
+    const edgeRecord = ensureProjectionEdge(workspaceRecord, handoverNode, sourceId, targetId);
+    if (!edgeRecord) return;
+    registerEdge(edgeRecord, {
+      artifactRole: "collaboration-chain",
+      sourceHandoverId: handoverNode.id
+    });
+    addedCollaborationChainEdgePairs.add(pairKey);
+  };
+
   getCollaborationProjectionSpecs(workspaceRecord).forEach((spec) => {
     const handoverNode = spec.handoverNode;
     registerNode(handoverNode, {
@@ -3375,12 +4396,9 @@ function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
     const leadOrgNode = leadOrgId
       ? createProjectionEntityNode(workspaceRecord, handoverNode, "org", leadOrgId, `linked-org-${leadOrgId}`)
       : null;
-    const portalNode = spec.includePortal
-      ? createProjectionPortalNode(workspaceRecord, handoverNode, getSourceWorkspaceIdForHandover(handoverNode))
-      : null;
-    const contextObject = getCurrentHandoverContextObject(handoverNode);
-    const contextNode = contextObject ? getGlobalNodeById(contextObject.id) : null;
-    let chainTargetId = handoverNode.id;
+    const contextNode = getHandoverGraphContextNode(handoverNode);
+    const chainSignature = buildChainSignature(leadOrgId, spec.leadUserId || "");
+    let chainTargetId = chainTailIdBySignature.get(chainSignature) || anchorId;
 
     if (leadOrgNode) {
       registerNode(leadOrgNode, {
@@ -3389,13 +4407,8 @@ function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
         collaboratorKinds: ["org"],
         collaboratorRefIds: [leadOrgId]
       });
-      registerEdge(
-        ensureProjectionEdge(workspaceRecord, handoverNode, anchorId, leadOrgNode.id),
-        {
-          artifactRole: "collaboration-chain",
-          sourceHandoverId: handoverNode.id
-        }
-      );
+      registerCollaborationChainEdge(handoverNode, anchorId, leadOrgNode.id);
+      chainTargetId = leadOrgNode.id;
     }
 
     if (leadUserNode) {
@@ -3405,79 +4418,36 @@ function buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap) {
         collaboratorKinds: ["user"],
         collaboratorRefIds: [spec.leadUserId]
       });
-      if (leadOrgNode) {
-        registerEdge(
-          ensureProjectionEdge(workspaceRecord, handoverNode, leadOrgNode.id, leadUserNode.id),
-          {
-            artifactRole: "collaboration-chain",
-            sourceHandoverId: handoverNode.id
-          }
-        );
-      } else {
-        registerEdge(
-          ensureProjectionEdge(workspaceRecord, handoverNode, anchorId, leadUserNode.id),
-          {
-            artifactRole: "collaboration-chain",
-            sourceHandoverId: handoverNode.id
-          }
-        );
-      }
+      registerCollaborationChainEdge(
+        handoverNode,
+        leadOrgNode ? leadOrgNode.id : anchorId,
+        leadUserNode.id
+      );
       chainTargetId = leadUserNode.id;
     }
 
-    if (contextNode) {
-      registerNode(contextNode, {
-        roles: ["handover-object", "handover-context"],
-        handoverIds: [handoverNode.id],
-        objectNodeIds: [contextNode.id]
-      });
-      if (!workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, chainTargetId, contextNode.id)) {
-        registerEdge(
-          ensureProjectionEdge(workspaceRecord, handoverNode, chainTargetId, contextNode.id),
-          {
-            artifactRole: "handover-context-chain",
-            sourceHandoverId: handoverNode.id
-          }
-        );
-      }
-      chainTargetId = contextNode.id;
-    }
+    chainTailIdBySignature.set(chainSignature, chainTargetId);
 
     if (!workspaceHasAuthoredEdgeBetweenNodes(workspaceRecord, chainTargetId, handoverNode.id)) {
       registerEdge(
         {
           ...ensureProjectionEdge(workspaceRecord, handoverNode, chainTargetId, handoverNode.id),
-          kind: contextNode ? getHandoverObjectEdgeKind("context") : inferEdgeKindForPair(
+          kind: inferEdgeKindForPair(
             getAnyNodeById(chainTargetId) || getNodeById(chainTargetId),
             handoverNode
           )
         },
         {
-          artifactRole: contextNode ? "handover-context-link" : "handover-collaborator-link",
+          artifactRole: "handover-collaborator-link",
           sourceHandoverId: handoverNode.id,
           collaboratorKind: spec.removeCollaborator?.kind || null,
-          collaboratorRefId: spec.removeCollaborator?.refId || null,
-          role: contextNode ? "context" : null
-        }
-      );
-    }
-
-    if (portalNode) {
-      registerNode(portalNode, {
-        roles: ["projected-portal"],
-        handoverIds: [handoverNode.id]
-      });
-      registerEdge(
-        ensureProjectionEdge(workspaceRecord, handoverNode, handoverNode.id, portalNode.id),
-        {
-          artifactRole: "handover-portal-link",
-          sourceHandoverId: handoverNode.id
+          collaboratorRefId: spec.removeCollaborator?.refId || null
         }
       );
     }
 
     getHandoverObjects(handoverNode).forEach((handoverObject) => {
-      if (handoverObject.role === "context") return;
+      if (contextNode && handoverObject.id === contextNode.id) return;
       const objectNode = getGlobalNodeById(handoverObject.id);
       if (!objectNode) return;
       registerNode(objectNode, {
@@ -3538,10 +4508,15 @@ function refreshAllHandoverDerivedState() {
   });
 
   const requiredCollaborationUserIds = new Set();
+  const collabWorkspaceIdsForAutoChainSync = new Set(
+    workspaces
+      .filter((workspaceRecord) => normalizeWorkspaceKind(workspaceRecord.kind) === "collab")
+      .map((workspaceRecord) => workspaceRecord.id)
+  );
   allNodesRuntime
     .filter((node) => node && node.type === "handover")
     .forEach((handoverNode) => {
-      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
+      const collaboratorAccess = getDirectUserHandoverCollaboratorAccess(handoverNode);
       const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
       const sourceWorkspace = sourceWorkspaceId ? workspaceById.get(sourceWorkspaceId) || null : null;
       const isProjectSource = !!sourceWorkspace && normalizeWorkspaceKind(sourceWorkspace.kind) !== "collab";
@@ -3551,8 +4526,11 @@ function refreshAllHandoverDerivedState() {
           changed = true;
         }
       }
-      if (isCollabWorkspaceOnlyHandover(handoverNode) && syncCollabWorkspaceGraphForAllCollaborators(handoverNode)) {
-        changed = true;
+      if (isCollabWorkspaceOnlyHandover(handoverNode)) {
+        const collabWorkspaceRecord = getCollabWorkspaceRecordForHandover(handoverNode);
+        if (collabWorkspaceRecord?.id) {
+          collabWorkspaceIdsForAutoChainSync.add(collabWorkspaceRecord.id);
+        }
       }
       if (collaboratorAccess.size && isProjectSource && handoverNode.ownerId && userById.has(handoverNode.ownerId) && !isAdminUserId(handoverNode.ownerId)) {
         requiredCollaborationUserIds.add(handoverNode.ownerId);
@@ -3565,6 +4543,14 @@ function refreshAllHandoverDerivedState() {
         });
       }
     });
+
+  collabWorkspaceIdsForAutoChainSync.forEach((workspaceId) => {
+    const workspaceRecord = workspaceById.get(workspaceId) || null;
+    if (!workspaceRecord) return;
+    if (reconcileCollabWorkspaceAutoChains(workspaceRecord)) {
+      changed = true;
+    }
+  });
 
   requiredCollaborationUserIds.forEach((userId) => {
     const existingWorkspace = getCollaborationWorkspaceRecordForUser(userId);
@@ -3588,7 +4574,7 @@ function getSharedWorkspaceOptionsForUser(userId) {
   allNodesRuntime
     .filter((node) => node && node.type === "handover" && normalizeHandoverStatus(node.status) !== "Draft")
     .forEach((handoverNode) => {
-      const collaboratorAccess = getExpandedHandoverCollaboratorAccess(handoverNode);
+      const collaboratorAccess = getDirectUserHandoverCollaboratorAccess(handoverNode);
       const accessRecord = collaboratorAccess.get(userId);
       if (!accessRecord?.shareWorkspace) return;
       const sourceWorkspaceId = getSourceWorkspaceIdForHandover(handoverNode);
@@ -3653,18 +4639,6 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
     nextNode.handoverCollaborators = [];
     nextNode.handoverObjects = [];
     nextNode.sourceWorkspaceId = currentWorkspaceId || null;
-    if (normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") {
-      const defaultContextId = typeof workspaceRecord.homeNodeId === "string" && workspaceRecord.homeNodeId && workspaceRecord.homeNodeId !== nodeId
-        ? workspaceRecord.homeNodeId
-        : null;
-      const defaultContextNode = defaultContextId ? getAnyNodeById(defaultContextId) : null;
-      if (defaultContextId && isValidHandoverObjectNodeForRole(defaultContextNode, "context")) {
-        nextNode.handoverObjects.push({
-          id: defaultContextId,
-          role: "context"
-        });
-      }
-    }
   }
   if (normalizedType === "portal") {
     nextNode.linkedWorkspaceId = null;
@@ -3681,15 +4655,21 @@ function createNodeAtWorldPosition(type, worldX, worldY) {
   if (!workspaceRecord.nodeIds.includes(nodeId)) {
     workspaceRecord.nodeIds.push(nodeId);
   }
+  setWorkspaceNodePos(workspaceRecord.id, nodeId, nextNode.graphPos);
 
   syncWorkspaceRuntimeAndStore();
   syncNodeRuntimeAndStore();
   persistStoreToLocalStorage();
 
-  suppressNextWorkspaceAutoFit = true;
   newNodeInlineEditId = (normalizedType === "portal" || normalizedType === "entity") ? null : nodeId;
-  state.selectedNodeId = isSelectableNode(nextNode) ? nodeId : null;
-  hasAppliedWorkspace = false;
+  if (isSelectableNode(nextNode)) {
+    selectSingleNode(nodeId, { resetDetails: false });
+  } else {
+    state.selectedNodeId = null;
+    state.selectedNodeIds = new Set();
+    state.selectedEdgeIds = new Set();
+  }
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
   renderAll();
   return getNodeById(nodeId);
 }
@@ -3709,13 +4689,24 @@ function getNodeIdFromTarget(target) {
   return nodeById.has(nodeId) ? nodeId : null;
 }
 
+function getEdgeIdFromTarget(target) {
+  if (!(target instanceof Element)) return null;
+  const hitPath = target.closest(".edge-hit");
+  if (!hitPath) return null;
+  const edgeId = hitPath.dataset.edgeId || "";
+  return edgeId && edgeById.has(edgeId) ? edgeId : null;
+}
+
 function closeCreateNodeMenu() {
   createNodeMenuOpen = false;
   createNodeMenuMode = "create";
   createNodeMenuNodeId = null;
+  createNodeMenuEdgeId = null;
+  createNodeMenuSelectionContext = null;
   if (!createNodeMenuEl) return;
   createNodeMenuEl.classList.remove("is-open");
   createNodeMenuEl.setAttribute("aria-hidden", "true");
+  createNodeMenuEl.style.width = "";
   createNodeMenuEl.innerHTML = "";
 }
 
@@ -3776,7 +4767,7 @@ function clearEdgeActionHideTimer() {
   }
 }
 
-function updateEdgeActionMenuVisual() {
+    function updateEdgeActionMenuVisual() {
   if (!edgeActionMenuEl || !edgeActionReverseBtnEl || !edgeActionDeleteBtnEl) return;
   if (!edgeActionMenuState.visible || !edgeActionMenuState.edgeId) {
     edgeActionMenuEl.classList.remove("is-visible");
@@ -3792,12 +4783,15 @@ function updateEdgeActionMenuVisual() {
   const len = Math.sqrt((nx * nx) + (ny * ny)) || 1;
   const ux = nx / len;
   const uy = ny / len;
-  const ax = edgeActionMenuState.anchorX;
-  const ay = edgeActionMenuState.anchorY;
-  edgeActionReverseBtnEl.style.left = `${ax - (ux * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
-  edgeActionReverseBtnEl.style.top = `${ay - (uy * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
-  edgeActionDeleteBtnEl.style.left = `${ax + (ux * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
-  edgeActionDeleteBtnEl.style.top = `${ay + (uy * EDGE_ACTION_BUTTON_OFFSET_PX)}px`;
+  const zoom = getCameraZoom();
+  const offsetPx = EDGE_ACTION_BUTTON_OFFSET_PX * zoom;
+  const anchorScreen = worldToScreen(edgeActionMenuState.anchorX, edgeActionMenuState.anchorY);
+  const ax = anchorScreen.screenX;
+  const ay = anchorScreen.screenY;
+  edgeActionReverseBtnEl.style.left = `${ax - (ux * offsetPx)}px`;
+  edgeActionReverseBtnEl.style.top = `${ay - (uy * offsetPx)}px`;
+  edgeActionDeleteBtnEl.style.left = `${ax + (ux * offsetPx)}px`;
+  edgeActionDeleteBtnEl.style.top = `${ay + (uy * offsetPx)}px`;
   edgeActionMenuEl.classList.add("is-visible");
   edgeActionMenuEl.setAttribute("aria-hidden", "false");
 }
@@ -3854,8 +4848,9 @@ function updateEdgeCreateHandleVisual() {
     edgeCreateHandleEl.setAttribute("aria-hidden", "true");
     return;
   }
-  edgeCreateHandleEl.style.left = `${edgeCreateHover.anchorX}px`;
-  edgeCreateHandleEl.style.top = `${edgeCreateHover.anchorY}px`;
+  const anchorScreen = worldToScreen(edgeCreateHover.anchorX, edgeCreateHover.anchorY);
+  edgeCreateHandleEl.style.left = `${anchorScreen.screenX}px`;
+  edgeCreateHandleEl.style.top = `${anchorScreen.screenY}px`;
   edgeCreateHandleEl.style.transform = `translate(-50%, -50%) rotate(${edgeCreateHover.angleDeg}deg)`;
   edgeCreateHandleEl.classList.add("is-visible");
   edgeCreateHandleEl.setAttribute("aria-hidden", "false");
@@ -3959,11 +4954,45 @@ function getWorldPointFromClient(clientX, clientY) {
   const viewportRect = viewportEl.getBoundingClientRect();
   const mx = clientX - viewportRect.left;
   const my = clientY - viewportRect.top;
-  const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+  return screenToWorld(mx, my);
+}
+
+function getViewportPointFromClient(clientX, clientY) {
+  if (!viewportEl) return null;
+  const viewportRect = viewportEl.getBoundingClientRect();
   return {
-    worldX: (mx - camera.panX) / zoom,
-    worldY: (my - camera.panY) / zoom
+    screenX: clientX - viewportRect.left,
+    screenY: clientY - viewportRect.top
   };
+}
+
+function getHandoverPortalBadgeScreenMetrics(node, frame) {
+  if (!node || node.type !== "handover" || !frame) return null;
+  const portalLink = getHandoverPortalBadgeLink(node, getCurrentWorkspaceRecord(), currentUserId);
+  if (!portalLink?.targetWorkspaceId) return null;
+  const zoom = getCameraZoom();
+  const screenFrame = projectRect(frame);
+  const nodeCardRadiusPx = 16 * zoom;
+  const badgeSizePx = HANDOVER_PORTAL_BADGE_SIZE_PX * zoom;
+  const overlapPx = HANDOVER_PORTAL_BADGE_OVERLAP_RADIUS_RATIO * nodeCardRadiusPx;
+  return {
+    centerX: screenFrame.x + screenFrame.w + overlapPx - (badgeSizePx / 2),
+    centerY: screenFrame.y - overlapPx + (badgeSizePx / 2),
+    radius: badgeSizePx / 2,
+    padding: HANDOVER_PORTAL_BADGE_HIT_PADDING_PX * zoom
+  };
+}
+
+function isPointInHandoverPortalBadgeZone(node, frame, clientX, clientY, extraPaddingPx = null) {
+  const badgeMetrics = getHandoverPortalBadgeScreenMetrics(node, frame);
+  if (!badgeMetrics) return false;
+  const viewportPoint = getViewportPointFromClient(clientX, clientY);
+  if (!viewportPoint) return false;
+  const padding = Number.isFinite(extraPaddingPx) ? extraPaddingPx : badgeMetrics.padding;
+  const dx = viewportPoint.screenX - badgeMetrics.centerX;
+  const dy = viewportPoint.screenY - badgeMetrics.centerY;
+  const hitRadius = badgeMetrics.radius + Math.max(0, padding);
+  return ((dx * dx) + (dy * dy)) <= (hitRadius * hitRadius);
 }
 
 function isPointNearNodeBorder(node, frame, worldX, worldY, thresholdPx = EDGE_HANDLE_BORDER_HIT_PX) {
@@ -3986,8 +5015,9 @@ function isPointNearNodeBorder(node, frame, worldX, worldY, thresholdPx = EDGE_H
     const diamondThresholdPx = Number.isFinite(thresholdPx)
       ? Math.min(thresholdPx, EDGE_HANDLE_BORDER_HIT_ENTITY_PX)
       : EDGE_HANDLE_BORDER_HIT_ENTITY_PX;
-    return isPointInsideDiamond(frame, worldX, worldY, diamondThresholdPx)
-      && !isPointInsideDiamond(frame, worldX, worldY, -diamondThresholdPx);
+    const visualDiamondFrame = getEntityVisualDiamondFrame(frame);
+    return isPointInsideDiamond(visualDiamondFrame, worldX, worldY, diamondThresholdPx)
+      && !isPointInsideDiamond(visualDiamondFrame, worldX, worldY, -diamondThresholdPx);
   }
   if (
     worldX < frame.x - thresholdPx ||
@@ -4244,6 +5274,14 @@ function isPointInsideDiamond(frame, worldX, worldY, paddingPx = 0) {
   return normalized <= 1;
 }
 
+function getEntityVisualDiamondFrame(frame) {
+  if (!frame) return { x: 0, y: 0, w: 0, h: 0 };
+  const size = Math.max(1, Math.min(frame.w, frame.h));
+  const x = frame.x + ((frame.w - size) / 2);
+  const y = frame.y + ((frame.h - size) / 2);
+  return { x, y, w: size, h: size };
+}
+
 function getDiamondBorderAnchor(frame, towardX, towardY) {
   if (!frame) return { x: towardX, y: towardY };
   const centerX = frame.x + (frame.w / 2);
@@ -4287,7 +5325,7 @@ function getBorderAnchorFromPointer(node, frame, worldX, worldY) {
     };
   }
   if (isDiamondNodeType(node)) {
-    return getDiamondBorderAnchor(frame, worldX, worldY);
+    return getDiamondBorderAnchor(getEntityVisualDiamondFrame(frame), worldX, worldY);
   }
   const left = frame.x;
   const right = frame.x + frame.w;
@@ -4323,7 +5361,7 @@ function getBorderAnchorToward(node, frame, towardX, towardY) {
     };
   }
   if (isDiamondNodeType(node)) {
-    return getDiamondBorderAnchor(frame, towardX, towardY);
+    return getDiamondBorderAnchor(getEntityVisualDiamondFrame(frame), towardX, towardY);
   }
   return getBorderPointToward(frame, towardX, towardY);
 }
@@ -4337,8 +5375,16 @@ function getAnchorAngleFromCenter(node, frame, anchorX, anchorY) {
 
 function resolveEdgeHoverCandidate(event) {
   if (!(event.target instanceof Element)) return null;
+  if (event.target.closest(".handover-portal-badge")) {
+    return null;
+  }
   if (event.target === edgeCreateHandleEl || event.target.closest("#edgeCreateHandle")) {
     if (edgeCreateHover.visible && edgeCreateHover.nodeId) {
+      const hoverNode = getNodeById(edgeCreateHover.nodeId);
+      const hoverFrame = lastVisibleNodeFrames.get(edgeCreateHover.nodeId);
+      if (isPointInHandoverPortalBadgeZone(hoverNode, hoverFrame, event.clientX, event.clientY)) {
+        return null;
+      }
       return {
         nodeId: edgeCreateHover.nodeId,
         anchorX: edgeCreateHover.anchorX,
@@ -4355,6 +5401,9 @@ function resolveEdgeHoverCandidate(event) {
   const node = getNodeById(nodeId);
   const frame = lastVisibleNodeFrames.get(nodeId);
   if (!node || !frame) return null;
+  if (isPointInHandoverPortalBadgeZone(node, frame, event.clientX, event.clientY)) {
+    return null;
+  }
   const { worldX, worldY } = getWorldPointFromClient(event.clientX, event.clientY);
   if (!isPointNearNodeBorder(node, frame, worldX, worldY, EDGE_HANDLE_BORDER_HIT_PX)) {
     return null;
@@ -4488,17 +5537,18 @@ function countWorkspaceReferencesForEdge(edgeId) {
 }
 
 function createEdgeInCurrentWorkspace(sourceId, targetId) {
+  const noResult = { created: false, requiresWorkspaceReapply: false };
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
-  if (!workspaceRecord) return false;
-  if (!sourceId || !targetId || sourceId === targetId) return false;
-  if (!nodeById.has(sourceId) || !nodeById.has(targetId)) return false;
+  if (!workspaceRecord) return noResult;
+  if (!sourceId || !targetId || sourceId === targetId) return noResult;
+  if (!nodeById.has(sourceId) || !nodeById.has(targetId)) return noResult;
   const sourceNode = nodeById.get(sourceId);
   const targetNode = nodeById.get(targetId);
-  if (!canCreateEdgeInCurrentWorkspace(sourceNode, targetNode)) return false;
-  if (visibleEdgeExistsBetweenNodes(sourceId, targetId)) return false;
+  if (!canCreateEdgeInCurrentWorkspace(sourceNode, targetNode)) return noResult;
+  if (visibleEdgeExistsBetweenNodes(sourceId, targetId)) return noResult;
   const persistedSourceNode = getAnyNodeById(sourceId);
   const persistedTargetNode = getAnyNodeById(targetId);
-  if (!persistedSourceNode || !persistedTargetNode) return false;
+  if (!persistedSourceNode || !persistedTargetNode) return noResult;
   if (!Array.isArray(workspaceRecord.edgeIds)) {
     workspaceRecord.edgeIds = [];
   }
@@ -4517,6 +5567,7 @@ function createEdgeInCurrentWorkspace(sourceId, targetId) {
   syncWorkspaceRuntimeAndStore();
   const collaboratorChanged = syncHandoverCollaboratorFromLinkedEntity(sourceId, targetId);
   const handoverObjectChanged = syncHandoverObjectFromLinkedNode(sourceId, targetId);
+  const requiresWorkspaceReapply = collaboratorChanged || handoverObjectChanged;
   if (collaboratorChanged || handoverObjectChanged) {
     refreshAllHandoverDerivedState();
     syncNodeRuntimeAndStore();
@@ -4524,7 +5575,7 @@ function createEdgeInCurrentWorkspace(sourceId, targetId) {
     syncWorkspaceRuntimeAndStore();
   }
   persistStoreToLocalStorage();
-  return true;
+  return { created: true, requiresWorkspaceReapply };
 }
 
 function syncHandoverStateForDeletedEdge(workspaceRecord, edgeRecord) {
@@ -4757,28 +5808,32 @@ function applyHandoverEffectsForEdgeUnlink(workspaceRecord, edgeRecord, options 
 }
 
 function deleteEdgeFromCurrentWorkspace(edgeId) {
+  const noResult = { deleted: false, requiresWorkspaceReapply: false };
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
-  if (!workspaceRecord || !edgeId) return false;
+  if (!workspaceRecord || !edgeId) return noResult;
   const edgeRecord = edgeById.get(edgeId) || null;
-  if (!edgeRecord) return false;
+  if (!edgeRecord) return noResult;
   const projectionMeta = getCurrentProjectionEdgeMeta(edgeId);
   if (
     projectionMeta &&
     projectionMeta.artifactRole !== "handover-object-link" &&
     projectionMeta.artifactRole !== "handover-collaborator-link"
   ) {
-    return false;
+    return noResult;
   }
   const authoredEdge = projectionMeta ? null : getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
-  if (!projectionMeta && !authoredEdge) return false;
+  if (!projectionMeta && !authoredEdge) return noResult;
 
   const unlinkResult = applyHandoverEffectsForEdgeUnlink(workspaceRecord, edgeRecord, { projectionMeta });
+  const requiresWorkspaceReapply = !!projectionMeta || unlinkResult.changedNodeData || unlinkResult.changedWorkspaceData;
 
   if (!projectionMeta) {
     workspaceRecord.edgeIds = workspaceRecord.edgeIds.filter((id) => id !== edgeId);
     if (countWorkspaceReferencesForEdge(edgeId) === 0) {
       allEdgesRuntime = allEdgesRuntime.filter((edge) => edge.id !== edgeId);
     }
+    edges = edges.filter((edge) => edge.id !== edgeId);
+    rebuildEdgeIndexes();
   }
 
   if (unlinkResult.changedNodeData) {
@@ -4788,44 +5843,43 @@ function deleteEdgeFromCurrentWorkspace(edgeId) {
   syncNodeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
   persistStoreToLocalStorage();
-  hasAppliedWorkspace = false;
-  return true;
+  return { deleted: true, requiresWorkspaceReapply };
 }
 
 function reverseEdgeInCurrentWorkspace(edgeId) {
+  const noResult = { reversed: false, requiresWorkspaceReapply: false };
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
-  if (!workspaceRecord || !edgeId) return false;
+  if (!workspaceRecord || !edgeId) return noResult;
   const visibleEdge = edgeById.get(edgeId) || null;
-  if (!visibleEdge) return false;
+  if (!visibleEdge) return noResult;
   const projectionMeta = getCurrentProjectionEdgeMeta(edgeId);
   if (projectionMeta) {
-    if (projectionMeta.artifactRole !== "handover-object-link") return false;
+    if (projectionMeta.artifactRole !== "handover-object-link") return noResult;
     const handoverId = projectionMeta.sourceHandoverId || null;
     const objectNodeId = projectionMeta.objectNodeId || null;
-    if (!handoverId || !objectNodeId) return false;
+    if (!handoverId || !objectNodeId) return noResult;
     const nextDirection = visibleEdge.sourceId === handoverId
       ? "object_to_handover"
       : "handover_to_object";
     if (!setProjectedObjectEdgeDirection(workspaceRecord, handoverId, objectNodeId, nextDirection)) {
-      return false;
+      return noResult;
     }
     syncWorkspaceRuntimeAndStore();
     persistStoreToLocalStorage();
-    hasAppliedWorkspace = false;
-    return true;
+    return { reversed: true, requiresWorkspaceReapply: true };
   }
   if (!Array.isArray(workspaceRecord.edgeIds) || !workspaceRecord.edgeIds.includes(edgeId)) {
-    return false;
+    return noResult;
   }
   const edgeRecord = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
-  if (!edgeRecord || !edgeRecord.sourceId || !edgeRecord.targetId) return false;
+  if (!edgeRecord || !edgeRecord.sourceId || !edgeRecord.targetId) return noResult;
   const reversedSourceNode = getVisibleNodeRecord(edgeRecord.targetId);
   const reversedTargetNode = getVisibleNodeRecord(edgeRecord.sourceId);
-  if (!canCreateEdgeInCurrentWorkspace(reversedSourceNode, reversedTargetNode)) return false;
+  if (!canCreateEdgeInCurrentWorkspace(reversedSourceNode, reversedTargetNode)) return noResult;
   if (
     visibleEdgeExistsBetweenNodes(edgeRecord.targetId, edgeRecord.sourceId, { excludeEdgeId: edgeRecord.id })
   ) {
-    return false;
+    return noResult;
   }
   const nextSourceId = edgeRecord.targetId;
   const nextTargetId = edgeRecord.sourceId;
@@ -4833,28 +5887,45 @@ function reverseEdgeInCurrentWorkspace(edgeId) {
   edgeRecord.targetId = nextTargetId;
   edgeRecord.kind = inferEdgeKindForPair(reversedSourceNode, reversedTargetNode);
   edgeRecord.workspaceId = workspaceRecord.id;
+  const visibleRuntimeEdge = edges.find((edge) => edge && edge.id === edgeId) || null;
+  if (visibleRuntimeEdge) {
+    visibleRuntimeEdge.sourceId = nextSourceId;
+    visibleRuntimeEdge.targetId = nextTargetId;
+    visibleRuntimeEdge.kind = edgeRecord.kind;
+    visibleRuntimeEdge.workspaceId = workspaceRecord.id;
+  }
+  rebuildEdgeIndexes();
 
   syncEdgeRuntimeAndStore();
   syncWorkspaceRuntimeAndStore();
   persistStoreToLocalStorage();
-  hasAppliedWorkspace = false;
-  return true;
+  return { reversed: true, requiresWorkspaceReapply: false };
 }
 
 function requestEdgeDelete(edgeId) {
   if (!edgeId) return;
-  const deleted = deleteEdgeFromCurrentWorkspace(edgeId);
-  if (!deleted) return;
+  const result = deleteEdgeFromCurrentWorkspace(edgeId);
+  if (!result.deleted) return;
   hideEdgeActionMenu({ clearIntent: true });
-  renderAll();
+  if (result.requiresWorkspaceReapply) {
+    invalidateActiveWorkspaceView({ autoFit: "preserve" });
+    renderAll();
+    return;
+  }
+  renderCanvas();
 }
 
 function requestEdgeReverse(edgeId) {
   if (!edgeId) return;
-  const reversed = reverseEdgeInCurrentWorkspace(edgeId);
-  if (!reversed) return;
+  const result = reverseEdgeInCurrentWorkspace(edgeId);
+  if (!result.reversed) return;
   hideEdgeActionMenu({ clearIntent: true });
-  renderAll();
+  if (result.requiresWorkspaceReapply) {
+    invalidateActiveWorkspaceView({ autoFit: "preserve" });
+    renderAll();
+    return;
+  }
+  renderCanvas();
 }
 
 function updateEdgeDraftFromPointer(event) {
@@ -4892,11 +5963,18 @@ function finalizeEdgeCreateDraft(event) {
     updateEdgeDraftFromPointer(event);
   }
   const { sourceId, targetId } = edgeCreateDraft;
-  const created = !!(sourceId && targetId && createEdgeInCurrentWorkspace(sourceId, targetId));
+  const edgeCreateResult = (sourceId && targetId)
+    ? createEdgeInCurrentWorkspace(sourceId, targetId)
+    : { created: false, requiresWorkspaceReapply: false };
+  const created = !!edgeCreateResult.created;
   cancelEdgeCreateDraft({ clearHover: true, redraw: true });
   if (created) {
-    hasAppliedWorkspace = false;
-    renderAll();
+    if (edgeCreateResult.requiresWorkspaceReapply) {
+      invalidateActiveWorkspaceView({ autoFit: "preserve" });
+      renderAll();
+    } else {
+      renderCanvas();
+    }
   }
   return created;
 }
@@ -4920,10 +5998,20 @@ function syncEdgeRuntimeAndStore() {
 }
 
 function sanitizeAfterNodeDelete() {
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
+  ensureGraphSelectionState();
   if (state.selectedNodeId && !allNodesRuntime.some((node) => node.id === state.selectedNodeId)) {
     state.selectedNodeId = null;
     resetDetailsEditState();
+  }
+  state.selectedNodeIds = new Set(
+    [...state.selectedNodeIds].filter((nodeId) => allNodesRuntime.some((node) => node.id === nodeId))
+  );
+  state.selectedEdgeIds = new Set(
+    [...state.selectedEdgeIds].filter((edgeId) => allEdgesRuntime.some((edge) => edge.id === edgeId))
+  );
+  if (!state.selectedNodeId && state.selectedNodeIds.size) {
+    state.selectedNodeId = getDeterministicSelectionNodeId(state.selectedNodeIds);
   }
   if (newNodeInlineEditId && !allNodesRuntime.some((node) => node.id === newNodeInlineEditId)) {
     newNodeInlineEditId = null;
@@ -4945,8 +6033,7 @@ function refreshActiveCollaborationWorkspace() {
   if (result.reloadWorkspace) {
     applyWorkspaceData(currentWorkspaceId, { sanitizeState: true });
   }
-  appliedWorkspaceId = null;
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
   return !!result.changed || !!result.reloadWorkspace;
 }
 
@@ -5072,14 +6159,32 @@ function deleteNodeGlobally(nodeId) {
   return true;
 }
 
+function shouldDeleteNodeInWorkspaceOnly(workspaceRecord, node) {
+  if (!workspaceRecord || !node) return true;
+  if (node.type === "handover") return true;
+  if (normalizeWorkspaceKind(workspaceRecord.kind) !== "collab") return false;
+  const projectionMeta = getCurrentProjectionNodeMeta(node.id);
+  return !!projectionMeta?.roles?.includes("handover-object");
+}
+
+function deleteNodeFromWorkspaceWithPolicy(workspaceRecord, nodeId) {
+  if (!workspaceRecord || !nodeId) return false;
+  const node = getNodeById(nodeId) || getGlobalNodeById(nodeId) || null;
+  if (!node) return false;
+  if (isProjectedHandoverNodeInWorkspace(workspaceRecord, node)) {
+    return hideProjectedHandoverInWorkspace(workspaceRecord, node.id);
+  }
+  return deleteNodeFromCurrentWorkspace(node.id);
+}
+
 function requestNodeDelete(nodeId) {
-  const node = getNodeById(nodeId);
+  const node = getNodeById(nodeId) || getGlobalNodeById(nodeId);
   if (!node) return;
   const workspaceRecord = workspaceById.get(currentWorkspaceId || "");
-  if (workspaceRecord && isWorkspaceProtectedNode(workspaceRecord, node)) return;
+  if (!workspaceRecord || !canDeleteNodeSelection(workspaceRecord, node)) return;
   const projectionMeta = getCurrentProjectionNodeMeta(nodeId);
   if (currentWorkspaceKind === "collab" && projectionMeta?.roles?.includes("handover-object")) {
-    const deletedProjectedObject = deleteNodeFromCurrentWorkspace(nodeId);
+    const deletedProjectedObject = deleteNodeFromWorkspaceWithPolicy(workspaceRecord, nodeId);
     if (!deletedProjectedObject) return;
     closeCreateNodeMenu();
     renderAll();
@@ -5088,7 +6193,7 @@ function requestNodeDelete(nodeId) {
   const membershipCount = getWorkspaceMembershipCount(nodeId);
   let deleted = false;
 
-  if (membershipCount > 1) {
+  if (membershipCount > 1 && !shouldDeleteNodeInWorkspaceOnly(workspaceRecord, node)) {
     const scope = window.prompt(
       `Delete "${node.label || node.id}" from current workspace only, or globally?\nType "w" for workspace-only or "g" for global delete.`,
       "w"
@@ -5104,17 +6209,656 @@ function requestNodeDelete(nodeId) {
         deleted = deleteNodeGlobally(nodeId);
       }
     } else if (normalizedScope === "w") {
-      deleted = deleteNodeFromCurrentWorkspace(nodeId);
+      deleted = deleteNodeFromWorkspaceWithPolicy(workspaceRecord, nodeId);
     } else {
       return;
     }
   } else {
-    deleted = deleteNodeFromCurrentWorkspace(nodeId);
+    deleted = deleteNodeFromWorkspaceWithPolicy(workspaceRecord, nodeId);
   }
 
   if (!deleted) return;
   closeCreateNodeMenu();
   renderAll();
+}
+
+function hasGraphClipboardData() {
+  return !!graphClipboardState?.hasData &&
+    (Array.isArray(graphClipboardState.nodeRefs) && graphClipboardState.nodeRefs.length > 0 ||
+      Array.isArray(graphClipboardState.edgeDescriptors) && graphClipboardState.edgeDescriptors.length > 0);
+}
+
+function clonePlainData(value) {
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      // Fall through to JSON clone.
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return null;
+  }
+}
+
+function canLinkNodeSelection(workspaceRecord, node) {
+  if (!workspaceRecord || !node) return false;
+  if (!isSelectableNode(node)) return false;
+  if (node.type === "collaboration") return false;
+  if (workspaceRecord.homeNodeId === node.id) return false;
+  if (isAutoManagedProjectionNode(node)) return false;
+  const projectionMeta = getCurrentProjectionNodeMeta(node.id);
+  if (projectionMeta && !projectionMeta.roles.includes("handover-object") && !isProjectedHandoverNodeInWorkspace(workspaceRecord, node)) {
+    return false;
+  }
+  return !!getGlobalNodeById(node.id);
+}
+
+function canCopyNodeSelection(workspaceRecord, node) {
+  if (!workspaceRecord || !node) return false;
+  if (!isSelectableNode(node)) return false;
+  if (node.type === "collaboration") return false;
+  if (workspaceRecord.homeNodeId === node.id) return false;
+  if (isAutoManagedProjectionNode(node)) {
+    return node.type === "handover" || node.type === "entity";
+  }
+  const projectionMeta = getCurrentProjectionNodeMeta(node.id);
+  if (!projectionMeta) return true;
+  if (projectionMeta.roles.includes("handover-object")) return true;
+  return node.type === "handover" || node.type === "entity";
+}
+
+function canDeleteNodeSelection(workspaceRecord, node) {
+  if (!workspaceRecord || !node) return false;
+  if (!isSelectableNode(node)) return false;
+  if (isProjectedHandoverNodeInWorkspace(workspaceRecord, node)) return true;
+  if (isWorkspaceProtectedNode(workspaceRecord, node)) return false;
+  return true;
+}
+
+function canCutNodeSelection(workspaceRecord, node) {
+  return canCopyNodeSelection(workspaceRecord, node) && canDeleteNodeSelection(workspaceRecord, node);
+}
+
+function isEdgeSelectionActionable(workspaceRecord, edge) {
+  if (!workspaceRecord || !edge || !edge.id) return false;
+  const authoredEdge = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edge.id);
+  if (!authoredEdge) return false;
+  if (isAutoManagedProjectionEdge(authoredEdge)) return false;
+  return true;
+}
+
+function getSelectionNodeRecords(workspaceRecord, predicate = null) {
+  ensureGraphSelectionState();
+  const selection = [];
+  const seenIds = new Set();
+  [...state.selectedNodeIds].forEach((nodeId) => {
+    if (seenIds.has(nodeId)) return;
+    seenIds.add(nodeId);
+    const node = getNodeById(nodeId) || getGlobalNodeById(nodeId);
+    if (!node) return;
+    selection.push(node);
+  });
+  selection.sort(compareNodesStable);
+  if (!workspaceRecord) return selection;
+  if (typeof predicate !== "function") return selection;
+  return selection.filter((node) => predicate(workspaceRecord, node));
+}
+
+function getSelectionAuthoredEdges(workspaceRecord, options = {}) {
+  if (!workspaceRecord) return [];
+  ensureGraphSelectionState();
+  const includeInternalNodeEdges = options.includeInternalNodeEdges !== false;
+  const nodeIdSet = options.nodeIdSet instanceof Set
+    ? options.nodeIdSet
+    : new Set(Array.isArray(options.nodeIds) ? options.nodeIds : [...state.selectedNodeIds]);
+  const edgeBySelectionId = new Map();
+  const addEdgeById = (edgeId) => {
+    if (!edgeId || edgeBySelectionId.has(edgeId)) return;
+    const edgeRecord = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+    if (!isEdgeSelectionActionable(workspaceRecord, edgeRecord)) return;
+    edgeBySelectionId.set(edgeRecord.id, edgeRecord);
+  };
+  [...state.selectedEdgeIds].forEach((edgeId) => addEdgeById(edgeId));
+  if (includeInternalNodeEdges && nodeIdSet.size) {
+    const workspaceEdgeIds = Array.isArray(workspaceRecord.edgeIds) ? workspaceRecord.edgeIds : [];
+    workspaceEdgeIds.forEach((edgeId) => {
+      const edgeRecord = getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId);
+      if (!isEdgeSelectionActionable(workspaceRecord, edgeRecord)) return;
+      if (!nodeIdSet.has(edgeRecord.sourceId) || !nodeIdSet.has(edgeRecord.targetId)) return;
+      edgeBySelectionId.set(edgeRecord.id, edgeRecord);
+    });
+  }
+  return [...edgeBySelectionId.values()];
+}
+
+function getSelectionCentroid(nodeRefs) {
+  const positionedRefs = (Array.isArray(nodeRefs) ? nodeRefs : [])
+    .filter((entry) => Number.isFinite(entry?.pos?.x) && Number.isFinite(entry?.pos?.y));
+  if (!positionedRefs.length) {
+    return { x: 0, y: 0 };
+  }
+  const totals = positionedRefs.reduce((acc, entry) => {
+    acc.x += entry.pos.x;
+    acc.y += entry.pos.y;
+    return acc;
+  }, { x: 0, y: 0 });
+  return {
+    x: totals.x / positionedRefs.length,
+    y: totals.y / positionedRefs.length
+  };
+}
+
+function buildClipboardNodeSnapshot(node) {
+  if (!node) return null;
+  const persistable = toPersistableNode(node);
+  const snapshot = clonePlainData(persistable);
+  if (!snapshot || typeof snapshot !== "object") return null;
+  snapshot.id = node.id;
+  return snapshot;
+}
+
+function copySelectionToGraphClipboard(options = {}) {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  if (!workspaceRecord) {
+    return { copied: false, copiedNodeCount: 0, copiedEdgeCount: 0, skippedNodeCount: 0, skippedEdgeCount: 0 };
+  }
+  const nodePredicate = typeof options.nodePredicate === "function"
+    ? options.nodePredicate
+    : canCopyNodeSelection;
+  const selectedNodes = [...new Set(
+    [...state.selectedNodeIds]
+      .map((nodeId) => getNodeById(nodeId) || getGlobalNodeById(nodeId))
+      .filter((node) => !!node)
+  )].sort(compareNodesStable);
+  const skippedNodeCount = selectedNodes.filter((node) => !nodePredicate(workspaceRecord, node)).length;
+  const actionableNodes = selectedNodes.filter((node) => nodePredicate(workspaceRecord, node));
+  const actionableNodeIdSet = new Set(actionableNodes.map((node) => node.id));
+  const copiedEdges = getSelectionAuthoredEdges(workspaceRecord, {
+    includeInternalNodeEdges: true,
+    nodeIdSet: actionableNodeIdSet
+  });
+  const selectedEdgeCount = [...state.selectedEdgeIds].length;
+  const skippedEdgeCount = Math.max(0, selectedEdgeCount - copiedEdges.filter((edgeRecord) =>
+    [...state.selectedEdgeIds].includes(edgeRecord.id)
+  ).length);
+  const nodeRefs = actionableNodes.map((node) => ({
+    id: node.id,
+    pos: getWorkspaceNodePos(workspaceRecord.id, node.id, { allowLegacyFallback: true }),
+    pasteMode: canLinkNodeSelection(workspaceRecord, node) ? "linkable" : "copyOnly"
+  }));
+  const nodeSnapshots = actionableNodes
+    .map((node) => buildClipboardNodeSnapshot(node))
+    .filter(Boolean);
+  const edgeDescriptors = copiedEdges.map((edgeRecord) => ({
+    sourceId: edgeRecord.sourceId,
+    targetId: edgeRecord.targetId,
+    kind: edgeRecord.kind || "link"
+  }));
+  if (!nodeRefs.length && !edgeDescriptors.length) {
+    return {
+      copied: false,
+      copiedNodeCount: 0,
+      copiedEdgeCount: 0,
+      skippedNodeCount,
+      skippedEdgeCount
+    };
+  }
+  graphClipboardState = {
+    hasData: true,
+    sourceWorkspaceId: workspaceRecord.id,
+    sourceCentroid: getSelectionCentroid(nodeRefs),
+    pasteSequence: 0,
+    nodeRefs,
+    nodeSnapshots,
+    edgeDescriptors,
+    copiedAt: Date.now()
+  };
+  return {
+    copied: true,
+    copiedNodeCount: nodeRefs.length,
+    copiedEdgeCount: edgeDescriptors.length,
+    skippedNodeCount,
+    skippedEdgeCount
+  };
+}
+
+function resolveGraphPasteAnchor(anchorWorld = null) {
+  if (Number.isFinite(anchorWorld?.x) && Number.isFinite(anchorWorld?.y)) {
+    return { x: anchorWorld.x, y: anchorWorld.y };
+  }
+  if (!viewportEl) {
+    return { x: 0, y: 0 };
+  }
+  const viewportRect = viewportEl.getBoundingClientRect();
+  const centerWorld = screenToWorld(viewportRect.width / 2, viewportRect.height / 2);
+  return { x: centerWorld.worldX, y: centerWorld.worldY };
+}
+
+function buildCopiedTaskRecord(task, newNodeId) {
+  const normalizedTask = normalizeTaskRecord(task);
+  return {
+    ...normalizedTask,
+    id: generateTaskId(),
+    taskGroupId: normalizedTask.taskGroupId ? generateTaskGroupId() : normalizedTask.taskGroupId,
+    originNodeId: newNodeId
+  };
+}
+
+function buildCopiedCommentRecord(comment) {
+  return normalizeCommentRecord({
+    ...comment,
+    id: generateCommentId(),
+    isNew: false
+  });
+}
+
+function createRuntimeNodeFromClipboardSnapshot(snapshot, newNodeId) {
+  const base = clonePlainData(snapshot) || {};
+  clearProjectionMeta(base);
+  const nodeType = normalizeNodeType(base.type);
+  const ownerRecord = base.ownerId ? userById.get(base.ownerId) : null;
+  const nextNode = {
+    ...base,
+    id: newNodeId,
+    type: nodeType,
+    title: typeof base.title === "string" ? base.title : "",
+    label: typeof base.title === "string" ? base.title : "",
+    ownerId: base.ownerId || currentUserId || null,
+    owner: ownerRecord?.name || (typeof base.owner === "string" && base.owner ? base.owner : (base.ownerId || "Unknown")),
+    summary: typeof base.summary === "string" && base.summary.trim() ? base.summary : "Click to enter node description",
+    tasks: (Array.isArray(base.tasks) ? base.tasks : []).map((task) => buildCopiedTaskRecord(task, newNodeId)),
+    comments: (Array.isArray(base.comments) ? base.comments : []).map((comment) => buildCopiedCommentRecord(comment)),
+    locationId: Object.prototype.hasOwnProperty.call(base, "locationId") ? base.locationId : null,
+    graphPos: null
+  };
+  if (nodeType === "process") {
+    nextNode.status = normalizeProcessStatus(base.status);
+  }
+  if (nodeType === "handover") {
+    nextNode.status = normalizeHandoverStatus(base.status);
+    nextNode.handoverCollaborators = Array.isArray(base.handoverCollaborators)
+      ? base.handoverCollaborators.map((entry) => ({ ...entry }))
+      : [];
+    nextNode.handoverObjects = Array.isArray(base.handoverObjects)
+      ? base.handoverObjects.map((entry) => ({ ...entry }))
+      : [];
+    nextNode.handoverNodeIds = Array.isArray(base.handoverNodeIds)
+      ? base.handoverNodeIds.filter((nodeId) => typeof nodeId === "string" && nodeId)
+      : [];
+  }
+  if (nodeType === "portal") {
+    nextNode.linkedWorkspaceId = typeof base.linkedWorkspaceId === "string" && base.linkedWorkspaceId
+      ? base.linkedWorkspaceId
+      : null;
+  }
+  if (nodeType === "entity") {
+    nextNode.entityKind = normalizeEntityKind(base.entityKind);
+    nextNode.entityRefId = typeof base.entityRefId === "string" && base.entityRefId ? base.entityRefId : null;
+  }
+  return nextNode;
+}
+
+function remapCopiedNodeReferences(node, nodeIdRemap) {
+  if (!node || !(nodeIdRemap instanceof Map) || !nodeIdRemap.size) return;
+  if (typeof node.locationId === "string" && nodeIdRemap.has(node.locationId)) {
+    node.locationId = nodeIdRemap.get(node.locationId);
+  }
+  if (Array.isArray(node.handoverNodeIds)) {
+    node.handoverNodeIds = node.handoverNodeIds.map((nodeId) => nodeIdRemap.get(nodeId) || nodeId);
+  }
+  if (Array.isArray(node.handoverObjects)) {
+    node.handoverObjects = node.handoverObjects.map((handoverObject) => ({
+      ...handoverObject,
+      id: nodeIdRemap.get(handoverObject.id) || handoverObject.id
+    }));
+  }
+  if (Array.isArray(node.tasks)) {
+    node.tasks = node.tasks.map((task) => {
+      const linkedObjectIds = Array.isArray(task.linkedObjectIds)
+        ? task.linkedObjectIds.map((nodeId) => nodeIdRemap.get(nodeId) || nodeId)
+        : [];
+      return {
+        ...task,
+        linkedObjectIds
+      };
+    });
+  }
+}
+
+function getWorkspaceNodeIdSet(workspaceRecord) {
+  return new Set(Array.isArray(workspaceRecord?.nodeIds) ? workspaceRecord.nodeIds : []);
+}
+
+function resolveEdgeEndpointForPaste(originalEndpointId, nodeIdRemap, workspaceNodeIdSet) {
+  if (!originalEndpointId) return null;
+  if (nodeIdRemap.has(originalEndpointId)) {
+    return nodeIdRemap.get(originalEndpointId);
+  }
+  if (workspaceNodeIdSet.has(originalEndpointId)) {
+    return originalEndpointId;
+  }
+  return null;
+}
+
+function pasteGraphClipboard(mode = "link", anchorWorld = null) {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  if (!workspaceRecord || !hasGraphClipboardData()) {
+    return { pasted: false, pastedNodeCount: 0, pastedEdgeCount: 0, droppedEdgeCount: 0, droppedNodeCount: 0 };
+  }
+  const pasteMode = mode === "copy" ? "copy" : "link";
+  const anchor = resolveGraphPasteAnchor(anchorWorld);
+  const sourceCentroid = Number.isFinite(graphClipboardState.sourceCentroid?.x) && Number.isFinite(graphClipboardState.sourceCentroid?.y)
+    ? graphClipboardState.sourceCentroid
+    : { x: 0, y: 0 };
+  const pasteSequence = Number.isFinite(graphClipboardState.pasteSequence)
+    ? graphClipboardState.pasteSequence
+    : 0;
+  const sequenceOffsetX = pasteSequence * GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_X;
+  const sequenceOffsetY = pasteSequence * GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_Y;
+  const nodeRefs = Array.isArray(graphClipboardState.nodeRefs) ? graphClipboardState.nodeRefs : [];
+  const nodeSnapshots = Array.isArray(graphClipboardState.nodeSnapshots) ? graphClipboardState.nodeSnapshots : [];
+  const snapshotById = new Map(nodeSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+  const nodeIdRemap = new Map();
+  const pastedNodeIds = [];
+  const nextNodePositionsById = new Map();
+  let droppedNodeCount = 0;
+
+  nodeRefs.forEach((nodeRef) => {
+    if (!nodeRef?.id) return;
+    const sourcePos = Number.isFinite(nodeRef?.pos?.x) && Number.isFinite(nodeRef?.pos?.y)
+      ? nodeRef.pos
+      : sourceCentroid;
+    const nextPos = {
+      x: anchor.x + (sourcePos.x - sourceCentroid.x) + sequenceOffsetX,
+      y: anchor.y + (sourcePos.y - sourceCentroid.y) + sequenceOffsetY
+    };
+    if (pasteMode === "link") {
+      if (nodeRef.pasteMode === "copyOnly") {
+        droppedNodeCount += 1;
+        return;
+      }
+      const sourceNode = getGlobalNodeById(nodeRef.id);
+      if (!sourceNode || !canLinkNodeSelection(workspaceRecord, sourceNode)) {
+        droppedNodeCount += 1;
+        return;
+      }
+      ensureWorkspaceNodeMembership(workspaceRecord, sourceNode.id);
+      setWorkspaceNodePos(workspaceRecord.id, sourceNode.id, nextPos);
+      nodeIdRemap.set(nodeRef.id, sourceNode.id);
+      pastedNodeIds.push(sourceNode.id);
+      nextNodePositionsById.set(sourceNode.id, nextPos);
+      return;
+    }
+    const snapshot = snapshotById.get(nodeRef.id);
+    if (!snapshot) return;
+    const newNodeId = generateNodeId(snapshot.type || "node");
+    const nextNode = createRuntimeNodeFromClipboardSnapshot(snapshot, newNodeId);
+    nextNode.graphPos = { x: nextPos.x, y: nextPos.y };
+    allNodesRuntime.push(nextNode);
+    ensureWorkspaceNodeMembership(workspaceRecord, newNodeId);
+    setWorkspaceNodePos(workspaceRecord.id, newNodeId, nextPos);
+    nodeIdRemap.set(snapshot.id, newNodeId);
+    pastedNodeIds.push(newNodeId);
+    nextNodePositionsById.set(newNodeId, nextPos);
+  });
+
+  if (pasteMode === "copy" && nodeIdRemap.size) {
+    nodeIdRemap.forEach((newNodeId) => {
+      const newNode = getGlobalNodeById(newNodeId);
+      if (!newNode) return;
+      remapCopiedNodeReferences(newNode, nodeIdRemap);
+    });
+  }
+
+  const workspaceNodeIdSet = getWorkspaceNodeIdSet(workspaceRecord);
+  pastedNodeIds.forEach((nodeId) => workspaceNodeIdSet.add(nodeId));
+  const edgeDescriptors = Array.isArray(graphClipboardState.edgeDescriptors) ? graphClipboardState.edgeDescriptors : [];
+  const createdEdgeIds = [];
+  let droppedEdgeCount = 0;
+  edgeDescriptors.forEach((descriptor) => {
+    const sourceId = resolveEdgeEndpointForPaste(descriptor.sourceId, nodeIdRemap, workspaceNodeIdSet);
+    const targetId = resolveEdgeEndpointForPaste(descriptor.targetId, nodeIdRemap, workspaceNodeIdSet);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      droppedEdgeCount += 1;
+      return;
+    }
+    const sourceNode = getGlobalNodeById(sourceId);
+    const targetNode = getGlobalNodeById(targetId);
+    if (!sourceNode || !targetNode) {
+      droppedEdgeCount += 1;
+      return;
+    }
+    if (!canCreateEdgeInCurrentWorkspace(sourceNode, targetNode)) {
+      droppedEdgeCount += 1;
+      return;
+    }
+    if (workspaceHasEdgeBetweenNodes(workspaceRecord, sourceId, targetId)) {
+      return;
+    }
+    const edgeRecord = {
+      id: generateGlobalEdgeId(sourceId, targetId, workspaceRecord.id),
+      sourceId,
+      targetId,
+      kind: inferEdgeKindForPair(sourceNode, targetNode),
+      workspaceId: workspaceRecord.id
+    };
+    allEdgesRuntime.push(edgeRecord);
+    ensureWorkspaceEdgeMembership(workspaceRecord, edgeRecord.id);
+    createdEdgeIds.push(edgeRecord.id);
+  });
+
+  if (!pastedNodeIds.length && !createdEdgeIds.length) {
+    return { pasted: false, pastedNodeCount: 0, pastedEdgeCount: 0, droppedEdgeCount, droppedNodeCount };
+  }
+
+  const derivedChanged = refreshAllHandoverDerivedState();
+  syncNodeRuntimeAndStore();
+  syncEdgeRuntimeAndStore();
+  syncWorkspaceRuntimeAndStore();
+  if (!derivedChanged && pastedNodeIds.length) {
+    persistWorkspaceNodePositions(workspaceRecord, pastedNodeIds, { syncWorkspace: true, persist: false });
+  }
+  persistStoreToLocalStorage();
+  graphClipboardState.pasteSequence = pasteSequence + 1;
+  invalidateActiveWorkspaceView({ autoFit: "preserve", clearAppliedWorkspaceId: true });
+  ensureGraphSelectionState();
+  state.selectedNodeIds = new Set(pastedNodeIds);
+  state.selectedEdgeIds = new Set(createdEdgeIds);
+  state.selectedNodeId = getDeterministicSelectionNodeId(state.selectedNodeIds);
+  if (!state.selectedNodeId) {
+    resetDetailsEditState();
+  }
+  renderAll();
+  return {
+    pasted: true,
+    pastedNodeCount: pastedNodeIds.length,
+    pastedEdgeCount: createdEdgeIds.length,
+    droppedEdgeCount,
+    droppedNodeCount
+  };
+}
+
+function formatSelectionSkipSummary(result, actionLabel = "Action") {
+  const skippedNodeCount = Number(result?.skippedNodeCount) || 0;
+  const skippedEdgeCount = Number(result?.skippedEdgeCount) || 0;
+  if (!skippedNodeCount && !skippedEdgeCount) return "";
+  const parts = [];
+  if (skippedNodeCount) {
+    parts.push(`${skippedNodeCount} protected/auto-managed node${skippedNodeCount === 1 ? "" : "s"}`);
+  }
+  if (skippedEdgeCount) {
+    parts.push(`${skippedEdgeCount} auto-managed edge${skippedEdgeCount === 1 ? "" : "s"}`);
+  }
+  return `${actionLabel}: skipped ${parts.join(" and ")}.`;
+}
+
+function copyGraphSelectionWithSummary() {
+  const result = copySelectionToGraphClipboard({ nodePredicate: canCopyNodeSelection });
+  const skipSummary = formatSelectionSkipSummary(result, "Copy");
+  if (skipSummary) {
+    window.alert(skipSummary);
+  }
+  return result;
+}
+
+function deleteGraphSelectionBatch() {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  if (!workspaceRecord) {
+    return {
+      deleted: false,
+      deletedNodeCount: 0,
+      deletedEdgeCount: 0,
+      skippedNodeCount: 0,
+      skippedEdgeCount: 0
+    };
+  }
+  ensureGraphSelectionState();
+  const selectedNodeRecords = [...state.selectedNodeIds]
+    .map((nodeId) => getNodeById(nodeId) || getGlobalNodeById(nodeId))
+    .filter(Boolean)
+    .sort(compareNodesStable);
+  const selectedEdgeRecords = [...state.selectedEdgeIds]
+    .map((edgeId) => getWorkspaceAuthoredEdgeRecord(workspaceRecord, edgeId))
+    .filter(Boolean);
+  const actionableNodes = selectedNodeRecords.filter((node) => canDeleteNodeSelection(workspaceRecord, node));
+  const skippedNodeCount = selectedNodeRecords.length - actionableNodes.length;
+  const actionableEdges = selectedEdgeRecords.filter((edge) => isEdgeSelectionActionable(workspaceRecord, edge));
+  const skippedEdgeCount = selectedEdgeRecords.length - actionableEdges.length;
+  if (!actionableNodes.length && !actionableEdges.length) {
+    return {
+      deleted: false,
+      deletedNodeCount: 0,
+      deletedEdgeCount: 0,
+      skippedNodeCount,
+      skippedEdgeCount
+    };
+  }
+
+  const globalDeleteEligibleNodes = actionableNodes.filter((node) =>
+    !shouldDeleteNodeInWorkspaceOnly(workspaceRecord, node)
+  );
+  const globalDeleteEligibleNodeIdSet = new Set(globalDeleteEligibleNodes.map((node) => node.id));
+  const multiMembershipNodeCount = globalDeleteEligibleNodes.filter((node) => getWorkspaceMembershipCount(node.id) > 1).length;
+  let deleteScope = "workspace";
+  if (multiMembershipNodeCount > 0) {
+    const scope = window.prompt(
+      `Delete ${globalDeleteEligibleNodes.length} selected node(s) from current workspace only, or globally?\nType "w" for workspace-only or "g" for global delete.`,
+      "w"
+    );
+    if (!scope) {
+      return {
+        deleted: false,
+        deletedNodeCount: 0,
+        deletedEdgeCount: 0,
+        skippedNodeCount,
+        skippedEdgeCount
+      };
+    }
+    const normalizedScope = scope.trim().toLowerCase();
+    if (normalizedScope === "g") {
+      const confirmedGlobal = window.confirm(`Delete ${globalDeleteEligibleNodes.length} selected node(s) globally from all workspaces?`);
+      if (!confirmedGlobal) {
+        return {
+          deleted: false,
+          deletedNodeCount: 0,
+          deletedEdgeCount: 0,
+          skippedNodeCount,
+          skippedEdgeCount
+        };
+      }
+      deleteScope = "global";
+    } else if (normalizedScope !== "w") {
+      return {
+        deleted: false,
+        deletedNodeCount: 0,
+        deletedEdgeCount: 0,
+        skippedNodeCount,
+        skippedEdgeCount
+      };
+    }
+  }
+
+  let deletedNodeCount = 0;
+  actionableNodes.forEach((node) => {
+    const shouldDeleteGlobally = deleteScope === "global" && globalDeleteEligibleNodeIdSet.has(node.id);
+    const deleted = shouldDeleteGlobally
+      ? deleteNodeGlobally(node.id)
+      : deleteNodeFromWorkspaceWithPolicy(workspaceRecord, node.id);
+    if (deleted) {
+      deletedNodeCount += 1;
+    }
+  });
+
+  const deletedNodeIdSet = new Set(actionableNodes.map((node) => node.id));
+  let deletedEdgeCount = 0;
+  let requiresWorkspaceReapply = false;
+  actionableEdges.forEach((edgeRecord) => {
+    if (deletedNodeIdSet.has(edgeRecord.sourceId) || deletedNodeIdSet.has(edgeRecord.targetId)) {
+      return;
+    }
+    const deleteResult = deleteEdgeFromCurrentWorkspace(edgeRecord.id);
+    if (deleteResult.deleted) {
+      deletedEdgeCount += 1;
+      if (deleteResult.requiresWorkspaceReapply) {
+        requiresWorkspaceReapply = true;
+      }
+    }
+  });
+
+  const deleted = deletedNodeCount > 0 || deletedEdgeCount > 0;
+  if (deleted) {
+    if (requiresWorkspaceReapply) {
+      invalidateActiveWorkspaceView({ autoFit: "preserve" });
+    }
+    hideEdgeActionMenu({ clearIntent: true });
+    closeCreateNodeMenu();
+    renderAll();
+  }
+  return {
+    deleted,
+    deletedNodeCount,
+    deletedEdgeCount,
+    skippedNodeCount,
+    skippedEdgeCount
+  };
+}
+
+function deleteGraphSelectionWithSummary() {
+  const result = deleteGraphSelectionBatch();
+  const skipSummary = formatSelectionSkipSummary(result, "Delete");
+  if (skipSummary) {
+    window.alert(skipSummary);
+  }
+  return result;
+}
+
+function cutGraphSelectionWithSummary() {
+  const copyResult = copySelectionToGraphClipboard({ nodePredicate: canCutNodeSelection });
+  const copySummary = formatSelectionSkipSummary(copyResult, "Cut");
+  if (!copyResult.copied) {
+    if (copySummary) {
+      window.alert(copySummary);
+    }
+    return {
+      cut: false,
+      copied: false,
+      deleted: false
+    };
+  }
+  const deleteResult = deleteGraphSelectionBatch();
+  const deleteSummary = formatSelectionSkipSummary(deleteResult, "Cut");
+  const summaryParts = [copySummary, deleteSummary].filter(Boolean);
+  if (summaryParts.length) {
+    window.alert(summaryParts.join("\n"));
+  }
+  return {
+    cut: deleteResult.deleted,
+    copied: true,
+    deleted: deleteResult.deleted
+  };
 }
 
 function renderPortalLinkModal() {
@@ -5174,7 +6918,7 @@ function renderPortalLinkModal() {
 function openPortalLinkModal(nodeId, options = {}) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "portal") return false;
-  state.selectedNodeId = node.id;
+  selectSingleNode(node.id);
   cancelEdgeCreateInteractions();
   closeCreateNodeMenu();
   workspaceMenuOpen = false;
@@ -5361,7 +7105,7 @@ function renderEntityLinkModal() {
 function openEntityLinkModal(nodeId, options = {}) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "entity") return false;
-  state.selectedNodeId = node.id;
+  selectSingleNode(node.id);
   cancelEdgeCreateInteractions();
   closeCreateNodeMenu();
   workspaceMenuOpen = false;
@@ -6136,6 +7880,36 @@ function renderAdminUserModal() {
   });
 }
 
+function navigateToWorkspaceById(workspaceId, options = {}) {
+  if (typeof workspaceId !== "string" || !workspaceId) return false;
+  const visibleWorkspaceIds = getAccessibleWorkspaceIdSetForCurrentUser();
+  if (!visibleWorkspaceIds.has(workspaceId)) return false;
+  if (workspaceId === currentWorkspaceId) return true;
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  workspaceMenuOpen = false;
+  userMenuOpen = false;
+  resetWorkspaceCreateState();
+  resetWorkspaceRenameState();
+  if (options.closePortalModal === true) {
+    closePortalLinkModal({ keepNode: true });
+  }
+  rememberCurrentWorkspaceViewport({ persist: true });
+  currentWorkspaceId = workspaceId;
+  invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
+  renderAll();
+  return true;
+}
+
+function handleHandoverPortalBadgeClick(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.type !== "handover") return false;
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  const linkRecord = getHandoverPortalBadgeLink(node, workspaceRecord, currentUserId);
+  if (!linkRecord?.targetWorkspaceId) return false;
+  return navigateToWorkspaceById(linkRecord.targetWorkspaceId, { closePortalModal: true });
+}
+
 function handlePortalDoubleClick(nodeId) {
   const node = getNodeById(nodeId);
   if (!node || node.type !== "portal") return;
@@ -6144,53 +7918,227 @@ function handlePortalDoubleClick(nodeId) {
     openPortalLinkModal(node.id, { flow: "dblclick" });
     return;
   }
-  const visibleWorkspaceIds = new Set(getWorkspaceOptionsForCurrentUser().map((workspace) => workspace.id));
-  if (!visibleWorkspaceIds.has(linkedWorkspaceId)) {
+  if (!navigateToWorkspaceById(linkedWorkspaceId, { closePortalModal: true })) {
     openPortalLinkModal(node.id, { flow: "dblclick" });
-    return;
   }
-  if (linkedWorkspaceId === currentWorkspaceId) return;
-  cancelEdgeCreateInteractions();
-  closeCreateNodeMenu();
-  workspaceMenuOpen = false;
-  userMenuOpen = false;
-  resetWorkspaceCreateState();
-  resetWorkspaceRenameState();
-  currentWorkspaceId = linkedWorkspaceId;
-  hasAppliedWorkspace = false;
-  closePortalLinkModal({ keepNode: true });
-  renderAll();
 }
 
 function requestNodeEdit(nodeId) {
   const node = getNodeById(nodeId);
   if (!node) return;
   if (node.type === "portal") {
-    state.selectedNodeId = nodeId;
+    selectSingleNode(nodeId);
     openPortalLinkModal(node.id, { flow: "edit" });
     return;
   }
   if (node.type === "entity") {
-    state.selectedNodeId = nodeId;
+    selectSingleNode(nodeId);
     openEntityLinkModal(node.id, { flow: "edit" });
     return;
   }
   if (node.type === "collaboration") {
     return;
   }
-  state.selectedNodeId = nodeId;
+  selectSingleNode(nodeId);
   newNodeInlineEditId = nodeId;
   closeCreateNodeMenu();
   renderAll();
 }
 
-function openNodeActionMenu(clientX, clientY, nodeId) {
+function appendCreateMenuItem({ label, onClick, danger = false, disabled = false, title = "" }) {
+  if (!createNodeMenuEl) return null;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `map-create-menu-item${danger ? " is-danger" : ""}`;
+  button.textContent = label;
+  button.disabled = !!disabled;
+  if (title) {
+    button.title = title;
+  }
+  if (typeof onClick === "function") {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) return;
+      onClick(event);
+    });
+  }
+  createNodeMenuEl.appendChild(button);
+  return button;
+}
+
+function appendCreateMenuSeparator() {
+  if (!createNodeMenuEl) return;
+  const separator = document.createElement("div");
+  separator.className = "map-create-menu-separator";
+  separator.setAttribute("role", "separator");
+  createNodeMenuEl.appendChild(separator);
+}
+
+function sizeCreateNodeMenuToContent() {
+  if (!createNodeMenuEl) return;
+  const itemEls = [...createNodeMenuEl.querySelectorAll(".map-create-menu-item")];
+  if (!itemEls.length) {
+    createNodeMenuEl.style.width = "";
+    return;
+  }
+
+  const viewportMarginPx = 8;
+  const viewportMaxWidthPx = Math.max(140, Math.floor(window.innerWidth - (viewportMarginPx * 2)));
+  const menuStyle = window.getComputedStyle(createNodeMenuEl);
+  const menuPaddingX = (parseFloat(menuStyle.paddingLeft) || 0) + (parseFloat(menuStyle.paddingRight) || 0);
+  const menuBorderX = (parseFloat(menuStyle.borderLeftWidth) || 0) + (parseFloat(menuStyle.borderRightWidth) || 0);
+
+  createNodeMenuEl.style.width = "auto";
+  let maxItemWidth = 0;
+  itemEls.forEach((itemEl) => {
+    const itemStyle = window.getComputedStyle(itemEl);
+    const marginX = (parseFloat(itemStyle.marginLeft) || 0) + (parseFloat(itemStyle.marginRight) || 0);
+    const measuredWidth = Math.max(itemEl.scrollWidth, itemEl.getBoundingClientRect().width);
+    maxItemWidth = Math.max(maxItemWidth, measuredWidth + marginX);
+  });
+
+  if (maxItemWidth <= 0) {
+    return;
+  }
+  const targetWidth = Math.ceil(maxItemWidth + menuPaddingX + menuBorderX);
+  const clampedWidth = Math.min(viewportMaxWidthPx, targetWidth);
+  createNodeMenuEl.style.width = `${clampedWidth}px`;
+}
+
+function clampOpenCreateNodeMenuToViewport() {
+  if (!createNodeMenuEl || !createNodeMenuOpen) return;
+  const viewportMarginPx = 8;
+  const menuRect = createNodeMenuEl.getBoundingClientRect();
+  const currentLeft = Number.parseFloat(createNodeMenuEl.style.left);
+  const currentTop = Number.parseFloat(createNodeMenuEl.style.top);
+  const anchorLeft = Number.isFinite(currentLeft) ? currentLeft : createNodeMenuClientX;
+  const anchorTop = Number.isFinite(currentTop) ? currentTop : createNodeMenuClientY;
+  const boundedX = Math.min(anchorLeft, window.innerWidth - menuRect.width - viewportMarginPx);
+  const boundedY = Math.min(anchorTop, window.innerHeight - menuRect.height - viewportMarginPx);
+  createNodeMenuEl.style.left = `${Math.max(viewportMarginPx, boundedX)}px`;
+  createNodeMenuEl.style.top = `${Math.max(viewportMarginPx, boundedY)}px`;
+}
+
+function getGraphSelectionActionability(workspaceRecord) {
+  if (!workspaceRecord) {
+    return { canCut: false, canCopy: false, canDelete: false, hasAny: false };
+  }
+  const copiedNodeCount = getSelectionNodeRecords(workspaceRecord, canCopyNodeSelection).length;
+  const cutNodeCount = getSelectionNodeRecords(workspaceRecord, canCutNodeSelection).length;
+  const deleteNodeCount = getSelectionNodeRecords(workspaceRecord, canDeleteNodeSelection).length;
+  const actionableEdgeCount = getSelectionAuthoredEdges(workspaceRecord, {
+    includeInternalNodeEdges: false,
+    nodeIdSet: new Set()
+  }).length;
+  return {
+    canCut: cutNodeCount > 0 || actionableEdgeCount > 0,
+    canCopy: copiedNodeCount > 0 || actionableEdgeCount > 0,
+    canDelete: deleteNodeCount > 0 || actionableEdgeCount > 0,
+    hasAny: copiedNodeCount > 0 || cutNodeCount > 0 || deleteNodeCount > 0 || actionableEdgeCount > 0
+  };
+}
+
+function appendClipboardPasteMenuActions() {
+  const hasClipboardData = hasGraphClipboardData();
+  appendCreateMenuItem({
+    label: "Paste as Link (Default)",
+    disabled: !hasClipboardData,
+    onClick: () => {
+      const result = pasteGraphClipboard("link", {
+        x: createNodeMenuWorldX,
+        y: createNodeMenuWorldY
+      });
+      if (!result.pasted) return;
+      closeCreateNodeMenu();
+    }
+  });
+  appendCreateMenuItem({
+    label: "Paste as Copy",
+    disabled: !hasClipboardData,
+    onClick: () => {
+      const result = pasteGraphClipboard("copy", {
+        x: createNodeMenuWorldX,
+        y: createNodeMenuWorldY
+      });
+      if (!result.pasted) return;
+      closeCreateNodeMenu();
+    }
+  });
+}
+
+function appendSelectionMenuActions(options = {}) {
+  const workspaceRecord = getCurrentWorkspaceRecord();
+  const actionability = getGraphSelectionActionability(workspaceRecord);
+  const includePaste = options.includePaste !== false;
+  const deleteLabel = typeof options.deleteLabel === "string" && options.deleteLabel.trim()
+    ? options.deleteLabel.trim()
+    : "Delete";
+  appendCreateMenuItem({
+    label: "Cut",
+    disabled: !actionability.canCut,
+    onClick: () => {
+      const result = cutGraphSelectionWithSummary();
+      if (result.cut) {
+        closeCreateNodeMenu();
+      }
+    }
+  });
+  appendCreateMenuItem({
+    label: "Copy",
+    disabled: !actionability.canCopy,
+    onClick: () => {
+      const result = copyGraphSelectionWithSummary();
+      if (result.copied) {
+        closeCreateNodeMenu();
+      }
+    }
+  });
+  if (includePaste) {
+    appendClipboardPasteMenuActions();
+  }
+  appendCreateMenuItem({
+    label: deleteLabel,
+    danger: true,
+    disabled: !actionability.canDelete,
+    onClick: () => {
+      const result = deleteGraphSelectionWithSummary();
+      if (result.deleted) {
+        closeCreateNodeMenu();
+      }
+    }
+  });
+}
+
+function openNodeActionMenu(clientX, clientY, nodeId, worldX, worldY) {
   cancelEdgeCreateInteractions();
   createNodeMenuOpen = true;
   createNodeMenuMode = "node";
   createNodeMenuNodeId = nodeId;
+  createNodeMenuEdgeId = null;
+  createNodeMenuSelectionContext = { kind: "node", nodeId, edgeId: null };
   createNodeMenuClientX = clientX;
   createNodeMenuClientY = clientY;
+  createNodeMenuWorldX = Number.isFinite(worldX) ? worldX : createNodeMenuWorldX;
+  createNodeMenuWorldY = Number.isFinite(worldY) ? worldY : createNodeMenuWorldY;
+  renderCreateNodeMenu();
+}
+
+function openSelectionActionMenu(clientX, clientY, worldX, worldY, context = {}) {
+  cancelEdgeCreateInteractions();
+  createNodeMenuOpen = true;
+  createNodeMenuMode = "selection";
+  createNodeMenuNodeId = null;
+  createNodeMenuEdgeId = context.edgeId || null;
+  createNodeMenuSelectionContext = {
+    kind: context.kind || (context.edgeId ? "edge" : "selection"),
+    nodeId: context.nodeId || null,
+    edgeId: context.edgeId || null
+  };
+  createNodeMenuClientX = clientX;
+  createNodeMenuClientY = clientY;
+  createNodeMenuWorldX = Number.isFinite(worldX) ? worldX : createNodeMenuWorldX;
+  createNodeMenuWorldY = Number.isFinite(worldY) ? worldY : createNodeMenuWorldY;
   renderCreateNodeMenu();
 }
 
@@ -6210,90 +8158,75 @@ function renderCreateNodeMenu() {
     }
 
     if (node.type === "collaboration") {
-      const label = document.createElement("button");
-      label.type = "button";
-      label.className = "map-create-menu-item";
-      label.textContent = "Collaboration anchor";
-      label.disabled = true;
-      createNodeMenuEl.appendChild(label);
-    } else {
-      const editButton = document.createElement("button");
-      editButton.type = "button";
-      editButton.className = "map-create-menu-item";
-      editButton.textContent = (node.type === "portal" || node.type === "entity") ? "Edit link" : "Edit";
-      editButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        requestNodeEdit(node.id);
+      appendCreateMenuItem({
+        label: "Collaboration anchor",
+        disabled: true
       });
-      createNodeMenuEl.appendChild(editButton);
+      appendCreateMenuSeparator();
+      appendSelectionMenuActions({ includePaste: true });
+    } else {
+      appendCreateMenuItem({
+        label: (node.type === "portal" || node.type === "entity") ? "Edit link" : "Edit",
+        onClick: () => {
+          requestNodeEdit(node.id);
+        }
+      });
 
       const workspaceRecord = getCurrentWorkspaceRecord();
       const canManageAnchor = !!workspaceRecord && normalizeWorkspaceKind(workspaceRecord.kind) !== "collab" && isSelectableNode(node);
       if (canManageAnchor) {
-        const anchorButton = document.createElement("button");
-        anchorButton.type = "button";
-        anchorButton.className = "map-create-menu-item";
-        anchorButton.textContent = workspaceRecord.homeNodeId === node.id ? "Clear workspace anchor" : "Set as workspace anchor";
-        anchorButton.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const changed = workspaceRecord.homeNodeId === node.id
-            ? clearCurrentWorkspaceAnchorNode()
-            : setCurrentWorkspaceAnchorNode(node.id);
-          if (!changed) return;
-          closeCreateNodeMenu();
-          renderAll();
+        appendCreateMenuItem({
+          label: workspaceRecord.homeNodeId === node.id ? "Clear workspace anchor" : "Set as workspace anchor",
+          onClick: () => {
+            const changed = workspaceRecord.homeNodeId === node.id
+              ? clearCurrentWorkspaceAnchorNode()
+              : setCurrentWorkspaceAnchorNode(node.id);
+            if (!changed) return;
+            closeCreateNodeMenu();
+            renderAll();
+          }
         });
-        createNodeMenuEl.appendChild(anchorButton);
       }
 
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "map-create-menu-item is-danger";
-      deleteButton.textContent = "Delete";
-      if (workspaceRecord && isWorkspaceProtectedNode(workspaceRecord, node)) {
-        deleteButton.disabled = true;
-        deleteButton.title = "Clear or replace the workspace anchor before deleting this node";
-      }
-      deleteButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        requestNodeDelete(node.id);
+      appendCreateMenuSeparator();
+      appendSelectionMenuActions({ includePaste: true });
+    }
+  } else if (createNodeMenuMode === "selection") {
+    if (!getGraphSelectionActionability(getCurrentWorkspaceRecord()).hasAny && !hasGraphClipboardData()) {
+      appendCreateMenuItem({
+        label: "No selection actions",
+        disabled: true
       });
-      createNodeMenuEl.appendChild(deleteButton);
+    } else {
+      appendSelectionMenuActions({ includePaste: true });
     }
   } else {
+    if (hasGraphClipboardData()) {
+      appendClipboardPasteMenuActions();
+      appendCreateMenuSeparator();
+    }
     CREATE_NODE_MENU_ITEMS.forEach((menuItem) => {
-      const itemButton = document.createElement("button");
-      itemButton.type = "button";
-      itemButton.className = "map-create-menu-item";
-      itemButton.textContent = menuItem.label;
-      itemButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const createdNode = createNodeAtWorldPosition(menuItem.type, createNodeMenuWorldX, createNodeMenuWorldY);
-        closeCreateNodeMenu();
-        if (createdNode && createdNode.type === "portal") {
-          openPortalLinkModal(createdNode.id, { flow: "create" });
-        } else if (createdNode && createdNode.type === "entity") {
-          openEntityLinkModal(createdNode.id, { flow: "create" });
+      appendCreateMenuItem({
+        label: menuItem.label,
+        onClick: () => {
+          const createdNode = createNodeAtWorldPosition(menuItem.type, createNodeMenuWorldX, createNodeMenuWorldY);
+          closeCreateNodeMenu();
+          if (createdNode && createdNode.type === "portal") {
+            openPortalLinkModal(createdNode.id, { flow: "create" });
+          } else if (createdNode && createdNode.type === "entity") {
+            openEntityLinkModal(createdNode.id, { flow: "create" });
+          }
         }
       });
-      createNodeMenuEl.appendChild(itemButton);
     });
   }
 
   createNodeMenuEl.classList.add("is-open");
   createNodeMenuEl.setAttribute("aria-hidden", "false");
+  sizeCreateNodeMenuToContent();
   createNodeMenuEl.style.left = `${createNodeMenuClientX}px`;
   createNodeMenuEl.style.top = `${createNodeMenuClientY}px`;
-
-  const menuRect = createNodeMenuEl.getBoundingClientRect();
-  const boundedX = Math.min(createNodeMenuClientX, window.innerWidth - menuRect.width - 8);
-  const boundedY = Math.min(createNodeMenuClientY, window.innerHeight - menuRect.height - 8);
-  createNodeMenuEl.style.left = `${Math.max(8, boundedX)}px`;
-  createNodeMenuEl.style.top = `${Math.max(8, boundedY)}px`;
+  clampOpenCreateNodeMenuToViewport();
 }
 
 function openCreateNodeMenu(clientX, clientY, worldX, worldY) {
@@ -6301,6 +8234,8 @@ function openCreateNodeMenu(clientX, clientY, worldX, worldY) {
   createNodeMenuOpen = true;
   createNodeMenuMode = "create";
   createNodeMenuNodeId = null;
+  createNodeMenuEdgeId = null;
+  createNodeMenuSelectionContext = { kind: "create", nodeId: null, edgeId: null };
   createNodeMenuClientX = clientX;
   createNodeMenuClientY = clientY;
   createNodeMenuWorldX = worldX;
@@ -6487,6 +8422,7 @@ function persistStoreToLocalStorage() {
   let payload = null;
   try {
     refreshAllHandoverDerivedState();
+    pruneNotificationStateByUser();
     payload = buildPersistableDataSnapshot();
   } catch (error) {
     persistErrorMessage = "Failed to build the canonical store snapshot.";
@@ -6529,9 +8465,10 @@ function createWorkspaceForCurrentUser(name) {
   workspaces.push(workspaceRecord);
   syncWorkspaceRuntimeAndStore();
 
+  rememberCurrentWorkspaceViewport({ persist: true });
   currentWorkspaceId = id;
   currentWorkspaceKind = "normal";
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
   persistStoreToLocalStorage();
   return workspaceRecord;
 }
@@ -6562,11 +8499,12 @@ function deleteWorkspace(workspaceId) {
   syncWorkspaceRuntimeAndStore();
 
   if (wasActiveWorkspace) {
+    rememberCurrentWorkspaceViewport({ persist: true });
     setCurrentWorkspaceForCurrentUser();
     if (!currentWorkspaceId) {
       currentWorkspaceKind = "normal";
     }
-    hasAppliedWorkspace = false;
+    invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
   }
 
   persistStoreToLocalStorage();
@@ -6820,8 +8758,9 @@ function finalizePrincipalDeletion(deletedUserIds, deletedOrgIds, deletedWorkspa
   pruneGraphToReferencedWorkspaceItems();
   refreshRuntimeOwnerLabels();
   syncAllRuntimeDataAndPersist();
+  rememberCurrentWorkspaceViewport({ persist: true });
   setCurrentWorkspaceForCurrentUser();
-  hasAppliedWorkspace = false;
+  invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
 }
 
 function deleteUserRecordById(userId) {
@@ -6921,10 +8860,17 @@ function renameOrganisationRecord(orgId, nextName) {
 }
 
 function sanitizeStateForWorkspace() {
+  ensureGraphSelectionState();
+  pruneSelectionState();
   const firstSelectableNodeId = getFirstSelectableNodeId(nodes);
-  if (!state.selectedNodeId || !nodeById.has(state.selectedNodeId)) {
-    state.selectedNodeId = firstSelectableNodeId;
-    resetDetailsEditState();
+  if (!state.selectedNodeId || !nodeById.has(state.selectedNodeId) || !state.selectedNodeIds.has(state.selectedNodeId)) {
+    const fallbackSelectedNodeId = state.selectedNodeIds.size
+      ? getDeterministicSelectionNodeId(state.selectedNodeIds)
+      : firstSelectableNodeId;
+    if (state.selectedNodeId !== fallbackSelectedNodeId) {
+      resetDetailsEditState();
+    }
+    state.selectedNodeId = fallbackSelectedNodeId;
   }
   if (state.selectedNodeId) {
     const selectedNode = getNodeById(state.selectedNodeId);
@@ -6932,6 +8878,9 @@ function sanitizeStateForWorkspace() {
       state.selectedNodeId = firstSelectableNodeId;
       resetDetailsEditState();
     }
+  }
+  if (state.selectedNodeId) {
+    state.selectedNodeIds.add(state.selectedNodeId);
   }
   if (!newNodeInlineEditId || !nodeById.has(newNodeInlineEditId)) {
     newNodeInlineEditId = null;
@@ -6988,6 +8937,15 @@ function sanitizeStateForWorkspace() {
 }
 
 function rebuildVisibleWorkspaceGraph(workspaceRecord) {
+  const previousVisiblePositionsByNodeId = new Map();
+  const canReusePreviousVisiblePositions = !!workspaceRecord && appliedWorkspaceId === workspaceRecord.id;
+  nodeById.forEach((node, nodeId) => {
+    if (!hasFiniteGraphPosRecord(node)) return;
+    previousVisiblePositionsByNodeId.set(nodeId, {
+      x: node.graphPos.x,
+      y: node.graphPos.y
+    });
+  });
   resetCurrentProjectionViewState();
   if (!workspaceRecord) {
     nodes = [];
@@ -7028,6 +8986,20 @@ function rebuildVisibleWorkspaceGraph(workspaceRecord) {
   if (normalizeWorkspaceKind(workspaceRecord.kind) === "collab") {
     overlayEdges = buildCollaborationProjectionOverlay(workspaceRecord, visibleNodeMap).overlayEdges;
   }
+
+  visibleNodeMap.forEach((node, nodeId) => {
+    const workspacePos = getWorkspaceNodePos(workspaceRecord.id, nodeId, { allowLegacyFallback: false });
+    if (workspacePos) {
+      node.graphPos = { x: workspacePos.x, y: workspacePos.y };
+      return;
+    }
+    const previousPos = canReusePreviousVisiblePositions
+      ? previousVisiblePositionsByNodeId.get(nodeId)
+      : null;
+    if (previousPos) {
+      node.graphPos = { x: previousPos.x, y: previousPos.y };
+    }
+  });
 
   nodes = [...visibleNodeMap.values()];
   nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -7070,6 +9042,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const GRID_PATTERN_TRANSFORM = "skewX(-18) rotate(12)";
     const DRAG_CLICK_SUPPRESS_THRESHOLD = 3;
     const RESIZE_CLICK_SUPPRESS_THRESHOLD = 3;
+    const MARQUEE_DRAG_THRESHOLD_PX = 4;
     const EDGE_HANDLE_BORDER_HIT_PX = 14;
     const EDGE_HANDLE_BORDER_HIT_PORTAL_PX = 8;
     const EDGE_HANDLE_BORDER_HIT_ENTITY_PX = 10;
@@ -7079,6 +9052,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const EDGE_ACTION_HIDE_GRACE_MS = 180;
     const EDGE_ACTION_BUTTON_OFFSET_PX = 20;
     const EDGE_CHEVRON_T = 0.5;
+    const HANDOVER_PORTAL_BADGE_SIZE_PX = 18;
+    const HANDOVER_PORTAL_BADGE_OVERLAP_RADIUS_RATIO = 0.32;
+    const HANDOVER_PORTAL_BADGE_HIT_PADDING_PX = 3;
     const RESIZE_HANDLE_SIZE = 12;
     const MIN_EXPANDED_ASPECT = 0.5;
     const MAX_EXPANDED_ASPECT = 3;
@@ -7099,7 +9075,9 @@ function applyWorkspaceData(workspaceId, options = {}) {
     let dragState = {
       isDragging: false,
       nodeId: null,
+      nodeIds: [],
       cardEl: null,
+      startFramesByNodeId: new Map(),
       startClientX: 0,
       startClientY: 0,
       startLeft: 0,
@@ -7115,6 +9093,14 @@ function applyWorkspaceData(workspaceId, options = {}) {
       startClientY: 0,
       startInnerWidth: 0,
       aspect: 1,
+      moved: false
+    };
+    let marqueeSelectionState = {
+      active: false,
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      currentY: 0,
       moved: false
     };
     let edgeCreateHover = {
@@ -7184,6 +9170,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const bgGridPatternEl = document.getElementById("bgGridPattern");
     const worldEl = document.getElementById("world");
     const edgesLayerEl = document.getElementById("edges-layer");
+    const marqueeSelectionBoxEl = document.createElement("div");
+    marqueeSelectionBoxEl.id = "marqueeSelectBox";
+    marqueeSelectionBoxEl.className = "marquee-select-box hidden";
+    if (viewportEl) {
+      viewportEl.appendChild(marqueeSelectionBoxEl);
+    }
     const detailsPaneEl = document.getElementById("detailsPane");
     const byLocationBtn = document.getElementById("byLocationBtn");
     const allNodesBtn = document.getElementById("allNodesBtn");
@@ -7202,6 +9194,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const rightPanelPillEl = document.getElementById("rightPanelPill");
     const forceModeBtnEl = document.getElementById("forceModeBtn");
     const hybridModeBtnEl = document.getElementById("hybridModeBtn");
+    const collabShellModeBtnEl = document.getElementById("collabShellModeBtn");
     const workspaceMenuWrapEl = document.getElementById("workspaceMenu");
     const workspaceMenuBtnEl = document.getElementById("workspaceMenuBtn");
     const workspaceMenuPanelEl = document.getElementById("workspaceMenuPanel");
@@ -7804,6 +9797,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     let lastVisibleNodeIds = new Set();
     let lastVisibleNodeFrames = new Map();
     let lastVisibleNodeBodyFrames = new Map();
+    let lastVisibleEdgeScreenBounds = new Map();
     let lastRenderedCardsById = new Map();
 
     byLocationBtn.addEventListener("click", () => {
@@ -7828,6 +9822,15 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     notificationsPanelEl.addEventListener("click", (event) => {
       event.stopPropagation();
+    });
+
+    window.addEventListener("resize", () => {
+      if (createNodeMenuOpen) {
+        sizeCreateNodeMenuToContent();
+        clampOpenCreateNodeMenuToViewport();
+      }
+      if (!state.notificationsOpen) return;
+      clampNotificationsPanelToViewport();
     });
 
     if (workspaceMenuBtnEl) {
@@ -8065,6 +10068,12 @@ function applyWorkspaceData(workspaceId, options = {}) {
       });
     }
 
+    if (collabShellModeBtnEl) {
+      collabShellModeBtnEl.addEventListener("click", () => {
+        applyLayoutModeFromButton("collab-shell");
+      });
+    }
+
     if (viewportEl) {
       viewportEl.addEventListener("wheel", onViewportWheel, { passive: false });
       viewportEl.addEventListener("mousedown", onViewportMouseDown);
@@ -8075,6 +10084,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     window.addEventListener("blur", () => onWindowMouseUp(null));
     edgeCreateHandleEl.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
+      if (beginMarqueeSelection(event)) return;
       if (!edgeCreateHover.visible || !edgeCreateHover.nodeId) return;
       event.preventDefault();
       event.stopPropagation();
@@ -8111,7 +10121,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
     function renderFrame() {
       renderRafId = null;
       const shouldRenderCamera = pendingCameraRender;
-      const shouldRedrawEdges = pendingEdgeRedraw;
+      const shouldRedrawEdges = pendingEdgeRedraw || shouldRenderCamera;
       pendingCameraRender = false;
       pendingEdgeRedraw = false;
 
@@ -8231,9 +10241,10 @@ function applyWorkspaceData(workspaceId, options = {}) {
             userItemEl.addEventListener("click", (event) => {
               event.preventDefault();
               event.stopPropagation();
+              rememberCurrentWorkspaceViewport({ persist: true });
               currentUserId = user.id;
               setCurrentWorkspaceForCurrentUser();
-              hasAppliedWorkspace = false;
+              invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
               userMenuOpen = false;
               resetWorkspaceCreateState();
               resetWorkspaceRenameState();
@@ -8366,12 +10377,7 @@ function applyWorkspaceData(workspaceId, options = {}) {
             item.addEventListener("click", (event) => {
               event.preventDefault();
               event.stopPropagation();
-              currentWorkspaceId = workspace.id;
-              workspaceMenuOpen = false;
-              userMenuOpen = false;
-              resetWorkspaceCreateState();
-              resetWorkspaceRenameState();
-              renderAll();
+              navigateToWorkspaceById(workspace.id);
             });
             rowEl.appendChild(item);
           }
@@ -8512,10 +10518,196 @@ function applyWorkspaceData(workspaceId, options = {}) {
 
     function applyCameraTransform() {
       if (!worldEl) return;
-      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
-      worldEl.style.transform = `translate(${camera.panX}px, ${camera.panY}px) scale(${zoom})`;
+      const zoom = getCameraZoom();
+      worldEl.style.transform = "none";
       worldEl.style.transformOrigin = "0 0";
+      worldEl.style.setProperty("--camera-zoom", String(zoom));
+      if (edgesLayerEl) {
+        edgesLayerEl.style.setProperty("--camera-zoom", String(zoom));
+      }
+      applyProjectedFramesToVisibleGraph();
+      updateEdgeCreateHandleVisual();
+      updateEdgeActionMenuVisual();
+      if (state.openLenses && state.openLenses.size > 0) {
+        renderLenses();
+      }
       updateViewportGridBackground();
+    }
+
+    function getCameraZoom() {
+      return Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+    }
+
+    function rememberViewportFromCamera(options = {}) {
+      if (!currentWorkspaceId || !currentUserId) return false;
+      return rememberCurrentWorkspaceViewport(options);
+    }
+
+    function applyCameraState(nextState, options = {}) {
+      const resolvedZoom = clamp(Number(nextState?.zoom), ZOOM_MIN, ZOOM_MAX);
+      const resolvedPanX = Number(nextState?.panX);
+      const resolvedPanY = Number(nextState?.panY);
+      if (!Number.isFinite(resolvedZoom) || !Number.isFinite(resolvedPanX) || !Number.isFinite(resolvedPanY)) {
+        return false;
+      }
+      camera.zoom = resolvedZoom;
+      camera.panX = resolvedPanX;
+      camera.panY = resolvedPanY;
+      if (options.rememberViewport !== false) {
+        rememberViewportFromCamera({ persist: options.persistViewport !== false });
+      }
+      requestRender({ edges: options.edges !== false });
+      return true;
+    }
+
+    function restoreRememberedViewportForWorkspace(workspaceRecord) {
+      const rememberedViewport = getWorkspaceViewportRecordForUser(workspaceRecord, currentUserId);
+      if (!rememberedViewport) return false;
+      return applyCameraState(rememberedViewport, { edges: true, rememberViewport: false, persistViewport: false });
+    }
+
+    function screenDeltaToWorld(dxScreen, dyScreen) {
+      const zoom = getCameraZoom();
+      return {
+        dxWorld: dxScreen / zoom,
+        dyWorld: dyScreen / zoom
+      };
+    }
+
+    function screenToWorld(screenX, screenY) {
+      const zoom = getCameraZoom();
+      return {
+        worldX: (screenX - camera.panX) / zoom,
+        worldY: (screenY - camera.panY) / zoom
+      };
+    }
+
+    function worldToScreen(worldX, worldY) {
+      const zoom = getCameraZoom();
+      return {
+        screenX: camera.panX + (worldX * zoom),
+        screenY: camera.panY + (worldY * zoom)
+      };
+    }
+
+    function projectRect(worldFrame) {
+      if (!worldFrame) return { x: 0, y: 0, w: 0, h: 0 };
+      const topLeft = worldToScreen(worldFrame.x, worldFrame.y);
+      const zoom = getCameraZoom();
+      return {
+        x: topLeft.screenX,
+        y: topLeft.screenY,
+        w: worldFrame.w * zoom,
+        h: worldFrame.h * zoom
+      };
+    }
+
+    function applyCardZoomTokens(cardEl, zoom) {
+      if (!cardEl) return;
+      cardEl.style.setProperty("--camera-zoom", String(zoom));
+      cardEl.style.setProperty("--graph-node-text-inset", `${GRAPH_NODE_TEXT_INSET_PX * zoom}px`);
+      cardEl.style.setProperty("--node-card-radius", `${16 * zoom}px`);
+    }
+
+    function applyProjectedFrameToNodeCard(cardEl, node, worldFrame, options = {}) {
+      if (!(cardEl instanceof HTMLElement) || !node || !worldFrame) return;
+      const screenFrame = projectRect(worldFrame);
+      const zoom = getCameraZoom();
+
+      cardEl.style.left = `${screenFrame.x}px`;
+      cardEl.style.top = `${screenFrame.y}px`;
+      cardEl.style.width = `${screenFrame.w}px`;
+      cardEl.style.height = `${screenFrame.h}px`;
+      applyCardZoomTokens(cardEl, zoom);
+
+      if (isWorkspaceAnchorNode(node)) {
+        const anchorBody = cardEl.querySelector(".node-anchor-body");
+        if (anchorBody instanceof HTMLElement) {
+          anchorBody.style.left = "0px";
+          anchorBody.style.top = "0px";
+          anchorBody.style.width = `${screenFrame.w}px`;
+          anchorBody.style.height = `${screenFrame.h}px`;
+        }
+        const hoverLabel = cardEl.querySelector(".node-portal-hover-label");
+        if (hoverLabel instanceof HTMLElement) {
+          hoverLabel.style.left = `${screenFrame.w / 2}px`;
+          hoverLabel.style.top = `${-PORTAL_LABEL_GAP_PX * zoom}px`;
+        }
+      } else if (node.type === "portal") {
+        const expandedLocationId =
+          state.expandedCanvasLocationId && lastVisibleNodeIds.has(state.expandedCanvasLocationId)
+            ? state.expandedCanvasLocationId
+            : null;
+        const bodyWorldFrame = getPortalBodyFrameFromWrapperFrame(node, worldFrame, expandedLocationId);
+        const bodyScreenFrame = projectRect(bodyWorldFrame);
+        const bodyOffsetLeft = bodyScreenFrame.x - screenFrame.x;
+        const bodyOffsetTop = bodyScreenFrame.y - screenFrame.y;
+        const portalBody = cardEl.querySelector(".node-portal-body");
+        if (portalBody instanceof HTMLElement) {
+          portalBody.style.left = `${bodyOffsetLeft}px`;
+          portalBody.style.top = `${bodyOffsetTop}px`;
+          portalBody.style.width = `${bodyScreenFrame.w}px`;
+          portalBody.style.height = `${bodyScreenFrame.h}px`;
+        }
+        const hoverLabel = cardEl.querySelector(".node-portal-hover-label");
+        if (hoverLabel instanceof HTMLElement) {
+          hoverLabel.style.left = `${bodyOffsetLeft + (bodyScreenFrame.w / 2)}px`;
+          hoverLabel.style.top = `${bodyOffsetTop - (PORTAL_LABEL_GAP_PX * zoom)}px`;
+        }
+      } else if (node.type === "entity") {
+        const visualDiamondFrame = getEntityVisualDiamondFrame(screenFrame);
+        const squareSide = Math.max(1, visualDiamondFrame.w / Math.SQRT2);
+        cardEl.style.setProperty("--entity-shape-size", `${squareSide}px`);
+      } else if (node.type === "collaboration") {
+        const collaborationBody = cardEl.querySelector(".node-collaboration-body");
+        if (collaborationBody instanceof HTMLElement) {
+          collaborationBody.style.left = "0px";
+          collaborationBody.style.top = "0px";
+          collaborationBody.style.width = `${screenFrame.w}px`;
+          collaborationBody.style.height = `${screenFrame.h}px`;
+        }
+      }
+
+      if (node.type === "location" && isLocationCardExpanded(node.id)) {
+        const expandedMetrics = getExpandedLocationMetrics(node);
+        const childContainer = cardEl.querySelector(".node-children-container");
+        if (childContainer instanceof HTMLElement) {
+          const innerWidthPx = expandedMetrics.innerWidthPx * zoom;
+          const innerHeightPx = expandedMetrics.innerHeightPx * zoom;
+          childContainer.style.height = `${innerHeightPx}px`;
+          updateChildMarkerSizes(childContainer, innerWidthPx, innerHeightPx);
+        }
+        const resizeHandle = cardEl.querySelector(".node-resize-handle");
+        if (resizeHandle instanceof HTMLElement) {
+          const handleSize = RESIZE_HANDLE_SIZE * zoom;
+          const inset = 6 * zoom;
+          resizeHandle.style.width = `${handleSize}px`;
+          resizeHandle.style.height = `${handleSize}px`;
+          resizeHandle.style.right = `${inset}px`;
+          resizeHandle.style.bottom = `${inset}px`;
+        }
+      }
+
+      if (options.updatePortalCache !== false && node.type === "portal") {
+        const expandedLocationId =
+          state.expandedCanvasLocationId && lastVisibleNodeIds.has(state.expandedCanvasLocationId)
+            ? state.expandedCanvasLocationId
+            : null;
+        lastVisibleNodeBodyFrames.set(
+          node.id,
+          getPortalBodyFrameFromWrapperFrame(node, worldFrame, expandedLocationId)
+        );
+      }
+    }
+
+    function applyProjectedFramesToVisibleGraph() {
+      if (!lastRenderedCardsById || !lastRenderedCardsById.size) return;
+      lastRenderedCardsById.forEach((cardEl, nodeId) => {
+        const node = getNodeById(nodeId);
+        const worldFrame = lastVisibleNodeFrames.get(nodeId);
+        if (!node || !worldFrame) return;
+        applyProjectedFrameToNodeCard(cardEl, node, worldFrame);
+      });
     }
 
     function updateViewportGridBackground() {
@@ -8558,16 +10750,200 @@ function applyWorkspaceData(workspaceId, options = {}) {
       };
     }
 
+    function getClampedViewportPointFromClient(clientX, clientY) {
+      if (!viewportEl) return { x: 0, y: 0 };
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const x = clamp(clientX - viewportRect.left, 0, Math.max(0, viewportRect.width));
+      const y = clamp(clientY - viewportRect.top, 0, Math.max(0, viewportRect.height));
+      return { x, y };
+    }
+
+    function getMarqueeSelectionRect() {
+      const left = Math.min(marqueeSelectionState.startX, marqueeSelectionState.currentX);
+      const top = Math.min(marqueeSelectionState.startY, marqueeSelectionState.currentY);
+      const right = Math.max(marqueeSelectionState.startX, marqueeSelectionState.currentX);
+      const bottom = Math.max(marqueeSelectionState.startY, marqueeSelectionState.currentY);
+      return {
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top
+      };
+    }
+
+    function updateMarqueeSelectionBoxVisual() {
+      if (!marqueeSelectionBoxEl) return;
+      if (!marqueeSelectionState.active || !marqueeSelectionState.moved) {
+        marqueeSelectionBoxEl.classList.add("hidden");
+        return;
+      }
+      const rect = getMarqueeSelectionRect();
+      marqueeSelectionBoxEl.classList.remove("hidden");
+      marqueeSelectionBoxEl.style.left = `${rect.left}px`;
+      marqueeSelectionBoxEl.style.top = `${rect.top}px`;
+      marqueeSelectionBoxEl.style.width = `${rect.width}px`;
+      marqueeSelectionBoxEl.style.height = `${rect.height}px`;
+    }
+
+    function clearMarqueeSelectionState() {
+      marqueeSelectionState = {
+        active: false,
+        startX: 0,
+        startY: 0,
+        currentX: 0,
+        currentY: 0,
+        moved: false
+      };
+      if (marqueeSelectionBoxEl) {
+        marqueeSelectionBoxEl.classList.add("hidden");
+      }
+    }
+
+    function beginMarqueeSelection(event) {
+      if (!viewportEl || !event || event.button !== 0) return false;
+      if (!isMultiSelectModifier(event)) return false;
+      if (portalLinkModalState.open || entityLinkModalState.open) return false;
+      if (event.target instanceof Element && isInteractiveDragBlockTarget(event.target)) {
+        return false;
+      }
+      const startPoint = getClampedViewportPointFromClient(event.clientX, event.clientY);
+      marqueeSelectionState = {
+        active: true,
+        startX: startPoint.x,
+        startY: startPoint.y,
+        currentX: startPoint.x,
+        currentY: startPoint.y,
+        moved: false
+      };
+      cancelEdgeCreateInteractions();
+      closeCreateNodeMenu();
+      clearEdgeHoverIntent();
+      clearEdgeCreateHover();
+      clearEdgeActionIntent();
+      if (!edgeActionPinned) {
+        hideEdgeActionMenu({ clearIntent: false });
+      }
+      isPanning = false;
+      updateMarqueeSelectionBoxVisual();
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+
+    function updateMarqueeSelectionDrag(event) {
+      if (!marqueeSelectionState.active || !event) return false;
+      const point = getClampedViewportPointFromClient(event.clientX, event.clientY);
+      marqueeSelectionState.currentX = point.x;
+      marqueeSelectionState.currentY = point.y;
+      if (!marqueeSelectionState.moved) {
+        const dx = Math.abs(marqueeSelectionState.currentX - marqueeSelectionState.startX);
+        const dy = Math.abs(marqueeSelectionState.currentY - marqueeSelectionState.startY);
+        marqueeSelectionState.moved = dx > MARQUEE_DRAG_THRESHOLD_PX || dy > MARQUEE_DRAG_THRESHOLD_PX;
+      }
+      updateMarqueeSelectionBoxVisual();
+      return true;
+    }
+
+    function resolveMarqueeIntersectedNodeIds(rect) {
+      if (!rect) return [];
+      const nodeIds = [];
+      lastVisibleNodeFrames.forEach((frame, nodeId) => {
+        if (!lastVisibleNodeIds.has(nodeId)) return;
+        const nodeRect = projectRect(frame);
+        const intersects = intersectsRect(
+          rect,
+          {
+            left: nodeRect.x,
+            top: nodeRect.y,
+            right: nodeRect.x + nodeRect.w,
+            bottom: nodeRect.y + nodeRect.h
+          }
+        );
+        if (intersects) {
+          nodeIds.push(nodeId);
+        }
+      });
+      return nodeIds;
+    }
+
+    function resolveMarqueeIntersectedEdgeIds(rect) {
+      if (!rect) return [];
+      const edgeIds = [];
+      lastVisibleEdgeScreenBounds.forEach((bounds, edgeId) => {
+        if (intersectsRect(rect, bounds)) {
+          edgeIds.push(edgeId);
+        }
+      });
+      return edgeIds;
+    }
+
+    function finalizeMarqueeSelection(event) {
+      if (!marqueeSelectionState.active) return false;
+      if (event && event.clientX !== undefined && event.clientY !== undefined) {
+        updateMarqueeSelectionDrag(event);
+      }
+      const hadMove = marqueeSelectionState.moved;
+      if (!hadMove) {
+        clearMarqueeSelectionState();
+        return false;
+      }
+      let selectionChanged = false;
+      let nodeSelectionChanged = false;
+      const marqueeRect = getMarqueeSelectionRect();
+      const intersectedNodeIds = resolveMarqueeIntersectedNodeIds(marqueeRect);
+      const intersectedEdgeIds = resolveMarqueeIntersectedEdgeIds(marqueeRect);
+      nodeSelectionChanged = addNodesToSelection(intersectedNodeIds);
+      const edgeSelectionChanged = addEdgesToSelection(intersectedEdgeIds);
+      selectionChanged = nodeSelectionChanged || edgeSelectionChanged;
+      clearMarqueeSelectionState();
+      if (selectionChanged) {
+        renderNodeLists();
+        renderCanvas();
+        if (nodeSelectionChanged) {
+          renderDetailsPane();
+        }
+      }
+      if (event) {
+        event.preventDefault();
+      }
+      return true;
+    }
+
     function applyZoomAtCursor(mx, my, zoomMultiplier) {
-      const currentZoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
-      const worldX = (mx - camera.panX) / currentZoom;
-      const worldY = (my - camera.panY) / currentZoom;
+      const currentZoom = getCameraZoom();
+      const worldAtCursor = screenToWorld(mx, my);
       const nextZoom = clamp(currentZoom * zoomMultiplier, ZOOM_MIN, ZOOM_MAX);
       camera.zoom = nextZoom;
-      camera.panX = mx - (worldX * nextZoom);
-      camera.panY = my - (worldY * nextZoom);
+      camera.panX = mx - (worldAtCursor.worldX * nextZoom);
+      camera.panY = my - (worldAtCursor.worldY * nextZoom);
+      rememberViewportFromCamera({ persist: true });
       requestRender({ edges: false });
     }
+
+function hasAnyGraphSelection() {
+  ensureGraphSelectionState();
+  return state.selectedNodeIds.size > 0 || state.selectedEdgeIds.size > 0;
+}
+
+function selectContextTargetForMenu(nodeId, edgeId) {
+  if (nodeId) {
+    if (!state.selectedNodeIds.has(nodeId) || state.selectedNodeIds.size + state.selectedEdgeIds.size <= 1) {
+      selectSingleNode(nodeId);
+      return true;
+    }
+    return false;
+  }
+  if (edgeId) {
+    if (!state.selectedEdgeIds.has(edgeId) || state.selectedNodeIds.size + state.selectedEdgeIds.size <= 1) {
+      selectSingleEdge(edgeId, { preserveNodes: false });
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
 
 function onViewportWheel(event) {
   if (portalLinkModalState.open || entityLinkModalState.open) {
@@ -8591,25 +10967,39 @@ function onViewportContextMenu(event) {
   cancelEdgeCreateInteractions();
   if (!viewportEl) return;
   if (!currentWorkspaceId) return;
-      const nodeId = getNodeIdFromTarget(event.target);
-      if (nodeId) {
-        event.preventDefault();
-        event.stopPropagation();
-        openNodeActionMenu(event.clientX, event.clientY, nodeId);
-        return;
-      }
-      if (!shouldOpenCreateNodeMenuForTarget(event.target)) {
-        closeCreateNodeMenu();
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      const { mx, my } = getViewportPoint(event);
-      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
-      const worldX = (mx - camera.panX) / zoom;
-      const worldY = (my - camera.panY) / zoom;
-      openCreateNodeMenu(event.clientX, event.clientY, worldX, worldY);
+  const nodeId = getNodeIdFromTarget(event.target);
+  const edgeId = nodeId ? null : getEdgeIdFromTarget(event.target);
+  const worldPoint = getWorldPointFromClient(event.clientX, event.clientY);
+
+  if (nodeId || edgeId) {
+    event.preventDefault();
+    event.stopPropagation();
+    const selectionChanged = selectContextTargetForMenu(nodeId, edgeId);
+    if (selectionChanged) {
+      renderNodeLists();
+      renderCanvas();
+      renderDetailsPane();
     }
+    if (nodeId) {
+      openNodeActionMenu(event.clientX, event.clientY, nodeId, worldPoint.worldX, worldPoint.worldY);
+    } else {
+      openSelectionActionMenu(event.clientX, event.clientY, worldPoint.worldX, worldPoint.worldY, {
+        kind: "edge",
+        edgeId
+      });
+    }
+    return;
+  }
+
+  if (!shouldOpenCreateNodeMenuForTarget(event.target)) {
+    closeCreateNodeMenu();
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  clearGraphSelection({ render: true, resetDetails: true });
+  openCreateNodeMenu(event.clientX, event.clientY, worldPoint.worldX, worldPoint.worldY);
+}
 
 function onViewportMouseDown(event) {
   if (event.button !== 0) return;
@@ -8617,24 +11007,29 @@ function onViewportMouseDown(event) {
     event.preventDefault();
     return;
   }
+  if (beginMarqueeSelection(event)) return;
   if (dragState.isDragging) return;
   if (resizeState.isResizing) return;
   if (event.target.closest(".node-card")) return;
-      cancelEdgeCreateInteractions();
-      closeCreateNodeMenu();
-      isPanning = true;
-      lastPanClientX = event.clientX;
-      lastPanClientY = event.clientY;
-      event.preventDefault();
-    }
+  if (shouldOpenCreateNodeMenuForTarget(event.target)) {
+    clearGraphSelection({ render: true, resetDetails: true });
+  }
+  cancelEdgeCreateInteractions();
+  closeCreateNodeMenu();
+  isPanning = true;
+  lastPanClientX = event.clientX;
+  lastPanClientY = event.clientY;
+  event.preventDefault();
+}
 
-    function isInteractiveDragBlockTarget(target) {
-      if (!target || !target.closest) return false;
-      return !!target.closest("button, input, select, textarea, a, label, .node-child-loc, .node-resize-handle, .node-child-exp-marker");
-    }
+function isInteractiveDragBlockTarget(target) {
+  if (!target || !target.closest) return false;
+  return !!target.closest("button, input, select, textarea, a, label, .node-child-loc, .node-resize-handle, .node-child-exp-marker");
+}
 
     function startLocationResize(event, nodeId, cardEl, childContainerEl) {
       if (event.button !== 0) return;
+      if (beginMarqueeSelection(event)) return;
       const node = getNodeById(nodeId);
       if (!node || node.type !== "location" || !cardEl || !childContainerEl) return;
       const metrics = getExpandedLocationMetrics(node);
@@ -8661,11 +11056,11 @@ function onViewportMouseDown(event) {
       const resizeNode = getNodeById(resizeState.nodeId);
       if (!resizeNode || resizeNode.type !== "location") return false;
 
-      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
       const dxScreen = event.clientX - resizeState.startClientX;
       const dyScreen = event.clientY - resizeState.startClientY;
-      const dxWorld = dxScreen / zoom;
-      const dyWorld = dyScreen / zoom;
+      const deltaWorld = screenDeltaToWorld(dxScreen, dyScreen);
+      const dxWorld = deltaWorld.dxWorld;
+      const dyWorld = deltaWorld.dyWorld;
       const deltaWFromX = dxWorld;
       const deltaWFromY = dyWorld * resizeState.aspect;
       const widthDelta = Math.abs(deltaWFromX) >= Math.abs(deltaWFromY) ? deltaWFromX : deltaWFromY;
@@ -8702,25 +11097,19 @@ function onViewportMouseDown(event) {
       resizeNode.expandedAspect = lockedAspect;
       resizeNode.expandedInnerWidthPx = nextInnerWidth;
 
-      if (resizeState.cardEl) {
-        resizeState.cardEl.style.width = `${nextCardWidth}px`;
-        resizeState.cardEl.style.height = `${nextCardHeight}px`;
-      }
-      if (resizeState.childContainerEl) {
-        resizeState.childContainerEl.style.height = `${nextInnerHeight}px`;
-        updateChildMarkerSizes(resizeState.childContainerEl, nextInnerWidth, nextInnerHeight);
-      }
-
-      const left = resizeState.cardEl ? Number.parseFloat(resizeState.cardEl.style.left) : Number.NaN;
-      const top = resizeState.cardEl ? Number.parseFloat(resizeState.cardEl.style.top) : Number.NaN;
-      const frameLeft = Number.isFinite(left) ? left : 0;
-      const frameTop = Number.isFinite(top) ? top : 0;
-      lastVisibleNodeFrames.set(resizeNode.id, {
+      const currentFrame = lastVisibleNodeFrames.get(resizeNode.id);
+      const frameLeft = Number.isFinite(currentFrame?.x) ? currentFrame.x : 0;
+      const frameTop = Number.isFinite(currentFrame?.y) ? currentFrame.y : 0;
+      const nextWrapperFrame = {
         x: frameLeft,
         y: frameTop,
         w: nextCardWidth,
         h: nextCardHeight
-      });
+      };
+      lastVisibleNodeFrames.set(resizeNode.id, nextWrapperFrame);
+      if (resizeState.cardEl) {
+        applyProjectedFrameToNodeCard(resizeState.cardEl, resizeNode, nextWrapperFrame);
+      }
 
       const activeExpandedRoot = state.expandedCanvasLocationId;
       if (activeExpandedRoot) {
@@ -8762,62 +11151,86 @@ function onViewportMouseDown(event) {
 
     function startNodeDrag(event, nodeId, cardEl) {
       if (event.button !== 0) return;
+      if (beginMarqueeSelection(event)) return;
       if (resizeState.isResizing) return;
       if (isInteractiveDragBlockTarget(event.target)) return;
       const node = getNodeById(nodeId);
       if (!node || !cardEl) return;
-
-      const currentLeft = Number.parseFloat(cardEl.style.left);
-      const currentTop = Number.parseFloat(cardEl.style.top);
+      const shouldDragSelection = state.selectedNodeIds.size > 1 && state.selectedNodeIds.has(nodeId);
+      const candidateNodeIds = shouldDragSelection
+        ? [...state.selectedNodeIds]
+          .filter((selectedNodeId) => {
+            const selectedNode = getNodeById(selectedNodeId);
+            return !!selectedNode && isSelectableNode(selectedNode) && !!lastVisibleNodeFrames.get(selectedNodeId);
+          })
+        : [nodeId];
+      const startFramesByNodeId = new Map();
+      candidateNodeIds.forEach((candidateNodeId) => {
+        const frame = lastVisibleNodeFrames.get(candidateNodeId);
+        if (!frame) return;
+        startFramesByNodeId.set(candidateNodeId, {
+          x: frame.x,
+          y: frame.y,
+          w: frame.w,
+          h: frame.h
+        });
+      });
+      const dragNodeIds = [...startFramesByNodeId.keys()];
+      if (!dragNodeIds.length) return;
+      const primaryFrame = startFramesByNodeId.get(nodeId) || startFramesByNodeId.get(dragNodeIds[0]);
       dragState = {
         isDragging: true,
         nodeId,
+        nodeIds: dragNodeIds,
         cardEl,
+        startFramesByNodeId,
         startClientX: event.clientX,
         startClientY: event.clientY,
-        startLeft: Number.isFinite(currentLeft) ? currentLeft : cardEl.offsetLeft,
-        startTop: Number.isFinite(currentTop) ? currentTop : cardEl.offsetTop,
+        startLeft: Number.isFinite(primaryFrame?.x) ? primaryFrame.x : 0,
+        startTop: Number.isFinite(primaryFrame?.y) ? primaryFrame.y : 0,
         moved: false
       };
       cancelEdgeCreateInteractions();
       isPanning = false;
-      cardEl.classList.add("dragging");
+      dragNodeIds.forEach((dragNodeId) => {
+        const dragCardEl = lastRenderedCardsById.get(dragNodeId);
+        if (dragCardEl) {
+          dragCardEl.classList.add("dragging");
+        }
+      });
       event.preventDefault();
       event.stopPropagation();
     }
 
     function updateDraggedNodePosition(event) {
       if (!dragState.isDragging) return false;
-      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
       const dxScreen = event.clientX - dragState.startClientX;
       const dyScreen = event.clientY - dragState.startClientY;
-      const dxWorld = dxScreen / zoom;
-      const dyWorld = dyScreen / zoom;
-      const nextLeft = dragState.startLeft + dxWorld;
-      const nextTop = dragState.startTop + dyWorld;
-
-      if (dragState.cardEl) {
-        dragState.cardEl.style.left = `${nextLeft}px`;
-        dragState.cardEl.style.top = `${nextTop}px`;
-      }
-
-      const draggedNode = getNodeById(dragState.nodeId);
-      const previousFrame = lastVisibleNodeFrames.get(dragState.nodeId);
-      const parsedWidth = dragState.cardEl ? Number.parseFloat(dragState.cardEl.style.width) : Number.NaN;
-      const parsedHeight = dragState.cardEl ? Number.parseFloat(dragState.cardEl.style.height) : Number.NaN;
-      const fallbackSize = getCardSize(draggedNode, state.expandedCanvasLocationId);
-      const nextWrapperFrame = {
-        x: nextLeft,
-        y: nextTop,
-        w: Number.isFinite(parsedWidth) ? parsedWidth : previousFrame?.w || fallbackSize.width,
-        h: Number.isFinite(parsedHeight) ? parsedHeight : previousFrame?.h || fallbackSize.height
-      };
-      if (draggedNode) {
+      const deltaWorld = screenDeltaToWorld(dxScreen, dyScreen);
+      const dxWorld = deltaWorld.dxWorld;
+      const dyWorld = deltaWorld.dyWorld;
+      const activeExpandedRoot = state.expandedCanvasLocationId;
+      dragState.nodeIds.forEach((dragNodeId) => {
+        const draggedNode = getNodeById(dragNodeId);
+        if (!draggedNode) return;
+        const startFrame = dragState.startFramesByNodeId.get(dragNodeId);
+        const fallbackSize = getCardSize(draggedNode, state.expandedCanvasLocationId);
+        const nextLeft = (Number.isFinite(startFrame?.x) ? startFrame.x : dragState.startLeft) + dxWorld;
+        const nextTop = (Number.isFinite(startFrame?.y) ? startFrame.y : dragState.startTop) + dyWorld;
+        const nextWrapperFrame = {
+          x: nextLeft,
+          y: nextTop,
+          w: startFrame?.w || fallbackSize.width,
+          h: startFrame?.h || fallbackSize.height
+        };
+        const dragCardEl = lastRenderedCardsById.get(dragNodeId);
+        if (dragCardEl) {
+          applyProjectedFrameToNodeCard(dragCardEl, draggedNode, nextWrapperFrame);
+        }
         if (draggedNode.type === "portal") {
-          const nextBodyFrame = getRenderedPortalBodyFrame(
-            dragState.cardEl,
-            nextWrapperFrame,
+          const nextBodyFrame = getPortalBodyFrameFromWrapperFrame(
             draggedNode,
+            nextWrapperFrame,
             state.expandedCanvasLocationId
           );
           const nextCenter = getNodeVisualCenter(draggedNode, nextBodyFrame);
@@ -8825,33 +11238,30 @@ function onViewportMouseDown(event) {
             x: nextCenter.x,
             y: nextCenter.y
           };
-          lastVisibleNodeBodyFrames.set(dragState.nodeId, nextBodyFrame);
+          lastVisibleNodeBodyFrames.set(dragNodeId, nextBodyFrame);
         } else {
           draggedNode.graphPos = {
             x: nextLeft + (fallbackSize.width / 2),
             y: nextTop + (fallbackSize.height / 2)
           };
-          lastVisibleNodeBodyFrames.delete(dragState.nodeId);
+          lastVisibleNodeBodyFrames.delete(dragNodeId);
         }
-      }
-      if (previousFrame) {
-        lastVisibleNodeFrames.set(dragState.nodeId, nextWrapperFrame);
-      }
+        lastVisibleNodeFrames.set(dragNodeId, nextWrapperFrame);
 
-      const activeExpandedRoot = state.expandedCanvasLocationId;
-      if (activeExpandedRoot) {
-        if (state.expandedDragRootId !== activeExpandedRoot) {
-          state.expandedDragRootId = activeExpandedRoot;
-          state.expandedDragOverrides = new Map();
+        if (activeExpandedRoot) {
+          if (state.expandedDragRootId !== activeExpandedRoot) {
+            state.expandedDragRootId = activeExpandedRoot;
+            state.expandedDragOverrides = new Map();
+          }
+          if (draggedNode.type === "portal") {
+            const bodyFrame = lastVisibleNodeBodyFrames.get(dragNodeId)
+              || getPortalBodyFrameFromWrapperFrame(draggedNode, nextWrapperFrame, activeExpandedRoot);
+            state.expandedDragOverrides.set(dragNodeId, { left: bodyFrame.x, top: bodyFrame.y });
+          } else {
+            state.expandedDragOverrides.set(dragNodeId, { left: nextLeft, top: nextTop });
+          }
         }
-        if (draggedNode?.type === "portal") {
-          const bodyFrame = lastVisibleNodeBodyFrames.get(dragState.nodeId)
-            || getPortalBodyFrameFromWrapperFrame(draggedNode, nextWrapperFrame, activeExpandedRoot);
-          state.expandedDragOverrides.set(dragState.nodeId, { left: bodyFrame.x, top: bodyFrame.y });
-        } else {
-          state.expandedDragOverrides.set(dragState.nodeId, { left: nextLeft, top: nextTop });
-        }
-      }
+      });
 
       if (Math.abs(dxScreen) > DRAG_CLICK_SUPPRESS_THRESHOLD || Math.abs(dyScreen) > DRAG_CLICK_SUPPRESS_THRESHOLD) {
         dragState.moved = true;
@@ -8864,16 +11274,28 @@ function onViewportMouseDown(event) {
 
     function stopNodeDrag() {
       if (!dragState.isDragging) return;
-      if (dragState.cardEl) {
-        dragState.cardEl.classList.remove("dragging");
-      }
+      dragState.nodeIds.forEach((dragNodeId) => {
+        const dragCardEl = lastRenderedCardsById.get(dragNodeId);
+        if (dragCardEl) {
+          dragCardEl.classList.remove("dragging");
+        }
+      });
       if (dragState.moved && dragState.nodeId) {
         suppressClickNodeId = dragState.nodeId;
+        const workspaceRecord = getCurrentWorkspaceRecord();
+        if (workspaceRecord) {
+          persistWorkspaceNodePositions(workspaceRecord, dragState.nodeIds, {
+            syncWorkspace: true,
+            persist: true
+          });
+        }
       }
       dragState = {
         isDragging: false,
         nodeId: null,
+        nodeIds: [],
         cardEl: null,
+        startFramesByNodeId: new Map(),
         startClientX: 0,
         startClientY: 0,
         startLeft: 0,
@@ -8883,6 +11305,10 @@ function onViewportMouseDown(event) {
     }
 
     function onWindowMouseMove(event) {
+      if (updateMarqueeSelectionDrag(event)) {
+        event.preventDefault();
+        return;
+      }
       if (edgeCreateDraft.active) {
         updateEdgeDraftFromPointer(event);
         event.preventDefault();
@@ -8930,11 +11356,13 @@ function onViewportMouseDown(event) {
       gridPanOffsetY += dy;
       lastPanClientX = event.clientX;
       lastPanClientY = event.clientY;
+      rememberViewportFromCamera({ persist: true });
       requestRender({ edges: false });
       event.preventDefault();
     }
 
     function onWindowMouseUp(event) {
+      if (finalizeMarqueeSelection(event)) return;
       finalizeEdgeCreateDraft(event);
       stopLocationResize();
       stopNodeDrag();
@@ -9028,6 +11456,7 @@ function onViewportMouseDown(event) {
 
     function updateChildMarkerSizes(childContainerEl, fallbackWidth = null, fallbackHeight = null) {
       if (!childContainerEl) return;
+      const zoom = getCameraZoom();
       const innerWidth =
         childContainerEl.clientWidth || (Number.isFinite(fallbackWidth) ? fallbackWidth : EXPANDED_INNER_MIN_W);
       const innerHeight =
@@ -9039,8 +11468,8 @@ function onViewportMouseDown(event) {
         const childPixelHeight = (innerHeight * heightPct) / 100;
         const markerSizePx = clamp(
           Math.round(Math.min(childPixelWidth, childPixelHeight) * 0.22),
-          6,
-          14
+          Math.round(6 * zoom),
+          Math.round(14 * zoom)
         );
         childEl.querySelectorAll(".node-child-exp-marker").forEach((markerEl) => {
           markerEl.style.width = `${markerSizePx}px`;
@@ -9087,21 +11516,112 @@ function onViewportMouseDown(event) {
         Number.isFinite(node.graphPos.y);
     }
 
+    function buildVisibleNeighborIdsMap(visibleNodeIds) {
+      const visibleIdSet = new Set(visibleNodeIds);
+      const neighborIdsByNodeId = new Map();
+      visibleIdSet.forEach((nodeId) => {
+        neighborIdsByNodeId.set(nodeId, new Set());
+      });
+      edges.forEach((edge) => {
+        if (!edge || !visibleIdSet.has(edge.sourceId) || !visibleIdSet.has(edge.targetId)) return;
+        neighborIdsByNodeId.get(edge.sourceId).add(edge.targetId);
+        neighborIdsByNodeId.get(edge.targetId).add(edge.sourceId);
+      });
+      return neighborIdsByNodeId;
+    }
+
+    function placeMissingNodePositionsLocally(visibleNodeIds) {
+      if (!visibleNodeIds || !visibleNodeIds.size) return false;
+      const visibleIdSet = new Set(visibleNodeIds);
+      const neighborIdsByNodeId = buildVisibleNeighborIdsMap(visibleIdSet);
+      const positionedEntries = [];
+      const missingNodes = [];
+
+      visibleIdSet.forEach((nodeId) => {
+        const node = getNodeById(nodeId);
+        if (!node) return;
+        if (hasValidGraphPos(node)) {
+          positionedEntries.push({
+            id: node.id,
+            x: node.graphPos.x,
+            y: node.graphPos.y,
+            radius: getNodePlacementCollisionRadius(node)
+          });
+        } else {
+          missingNodes.push(node);
+        }
+      });
+      if (!missingNodes.length) return false;
+
+      missingNodes.sort(compareNodesStable);
+      let changed = false;
+      missingNodes.forEach((node) => {
+        const neighborNodes = [...(neighborIdsByNodeId.get(node.id) || [])]
+          .map((neighborId) => getNodeById(neighborId))
+          .filter((neighborNode) => hasValidGraphPos(neighborNode));
+        let basePos = null;
+        if (neighborNodes.length) {
+          const total = neighborNodes.reduce((acc, neighborNode) => {
+            acc.x += neighborNode.graphPos.x;
+            acc.y += neighborNode.graphPos.y;
+            return acc;
+          }, { x: 0, y: 0 });
+          basePos = {
+            x: total.x / neighborNodes.length,
+            y: total.y / neighborNodes.length
+          };
+        } else if (positionedEntries.length) {
+          const total = positionedEntries.reduce((acc, entry) => {
+            acc.x += entry.x;
+            acc.y += entry.y;
+            return acc;
+          }, { x: 0, y: 0 });
+          basePos = {
+            x: total.x / positionedEntries.length,
+            y: total.y / positionedEntries.length
+          };
+        } else if (currentWorkspaceKind === "collab") {
+          basePos = getDefaultCollaborationGraphPos(getCurrentWorkspaceRecord(), node.id);
+        } else {
+          basePos = { x: 0, y: 0 };
+        }
+
+        const radius = getNodePlacementCollisionRadius(node);
+        const nextPos = resolveNonOverlappingGraphPos(basePos, radius, positionedEntries, node.id);
+        node.graphPos = { x: nextPos.x, y: nextPos.y };
+        positionedEntries.push({
+          id: node.id,
+          x: nextPos.x,
+          y: nextPos.y,
+          radius
+        });
+        changed = true;
+      });
+      return changed;
+    }
+
     function getVisibleNodeIdsForCurrentView() {
       return computeVisibleSet(state.expandedCanvasLocationId).visibleNodeIds;
     }
 
     function renderLayoutControls() {
       const expanded = state.expandedCanvasLocationId !== null;
+      const disabled = expanded;
+      const disabledTitle = "Switch to global view to change layout mode";
       if (forceModeBtnEl) {
-        forceModeBtnEl.disabled = expanded;
+        forceModeBtnEl.disabled = disabled;
         forceModeBtnEl.classList.toggle("is-active", layoutMode === "force");
-        forceModeBtnEl.title = expanded ? "Switch to global view to change layout mode" : "Force layout";
+        forceModeBtnEl.title = disabled ? disabledTitle : "Force layout";
       }
       if (hybridModeBtnEl) {
-        hybridModeBtnEl.disabled = expanded;
+        hybridModeBtnEl.disabled = disabled;
         hybridModeBtnEl.classList.toggle("is-active", layoutMode === "hybrid");
-        hybridModeBtnEl.title = expanded ? "Switch to global view to change layout mode" : "Hybrid layout";
+        hybridModeBtnEl.title = disabled ? disabledTitle : "Hybrid layout";
+      }
+      if (collabShellModeBtnEl) {
+        collabShellModeBtnEl.disabled = disabled;
+        collabShellModeBtnEl.classList.toggle("is-active", layoutMode === "collab-shell");
+        collabShellModeBtnEl.title = disabled ? disabledTitle : "Collaboration shell layout";
       }
     }
 
@@ -9146,6 +11666,1143 @@ function onViewportMouseDown(event) {
       });
 
       return { nodesForSim, linksForSim, modelById };
+    }
+
+    function normalizeRadians(value) {
+      if (!Number.isFinite(value)) return normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
+      const tau = Math.PI * 2;
+      let normalized = value % tau;
+      if (normalized < 0) {
+        normalized += tau;
+      }
+      return normalized;
+    }
+
+    function compareNodeEntriesStable(a, b) {
+      const typeDiff = compareNodesStable(a.node, b.node);
+      if (typeDiff !== 0) return typeDiff;
+      return a.id.localeCompare(b.id);
+    }
+
+    function getLinkEndpointId(endpoint) {
+      if (typeof endpoint === "string") return endpoint;
+      if (endpoint && typeof endpoint === "object" && typeof endpoint.id === "string") return endpoint.id;
+      return null;
+    }
+
+    function getCollaborationShellRole(node, workspaceRecord, projectionMeta = null) {
+      if (!node) return "other";
+      if (node.type === "collaboration" || workspaceRecord?.homeNodeId === node.id) {
+        return "anchor";
+      }
+      const meta = projectionMeta || getCurrentProjectionNodeMeta(node.id) || null;
+      const roles = Array.isArray(meta?.roles) ? meta.roles : [];
+      if (node.type === "handover") return "handover";
+      if (roles.includes("handover-object")) return "artifact";
+      if (node.type === "entity") return "entity";
+      return "other";
+    }
+
+    function getCollaborationEntityKind(entry) {
+      const normalizedFromNode = normalizeEntityKind(entry?.node?.entityKind);
+      if (normalizedFromNode) return normalizedFromNode;
+      const collaboratorKinds = Array.isArray(entry?.projectionMeta?.collaboratorKinds)
+        ? entry.projectionMeta.collaboratorKinds
+        : [];
+      for (const rawKind of collaboratorKinds) {
+        const normalized = normalizeEntityKind(rawKind);
+        if (normalized) return normalized;
+      }
+      return null;
+    }
+
+    function getCollaborationEntityRefId(entry) {
+      if (typeof entry?.node?.entityRefId === "string" && entry.node.entityRefId) {
+        return entry.node.entityRefId;
+      }
+      const collaboratorRefIds = Array.isArray(entry?.projectionMeta?.collaboratorRefIds)
+        ? entry.projectionMeta.collaboratorRefIds
+        : [];
+      const firstRefId = collaboratorRefIds.find((refId) => typeof refId === "string" && refId);
+      return firstRefId || null;
+    }
+
+    function getCollaborationEntityKey(entry) {
+      if (!entry || entry.role !== "entity") return null;
+      const entityKind = getCollaborationEntityKind(entry);
+      const entityRefId = getCollaborationEntityRefId(entry);
+      if (entityKind && entityRefId) return `${entityKind}:${entityRefId}`;
+      return `entity:${entry.id}`;
+    }
+
+    function getCircularMeanAngle(angles) {
+      if (!Array.isArray(angles) || !angles.length) return null;
+      const totals = angles.reduce((acc, angle) => {
+        if (!Number.isFinite(angle)) return acc;
+        acc.sin += Math.sin(angle);
+        acc.cos += Math.cos(angle);
+        acc.count += 1;
+        return acc;
+      }, { sin: 0, cos: 0, count: 0 });
+      if (!totals.count) return null;
+      return normalizeRadians(Math.atan2(totals.sin, totals.cos));
+    }
+
+    function buildUndirectedPairKey(a, b) {
+      return a < b ? `${a}::${b}` : `${b}::${a}`;
+    }
+
+    function getUndirectedPairWeight(weightByPairKey, keyA, keyB) {
+      if (!weightByPairKey || keyA === keyB) return 0;
+      return weightByPairKey.get(buildUndirectedPairKey(keyA, keyB)) || 0;
+    }
+
+    function computeCircularArrangementCost(order, weightByPairKey) {
+      if (!Array.isArray(order) || order.length <= 1) return 0;
+      const total = order.length;
+      let score = 0;
+      for (let i = 0; i < total; i += 1) {
+        for (let j = i + 1; j < total; j += 1) {
+          const weight = getUndirectedPairWeight(weightByPairKey, order[i], order[j]);
+          if (!weight) continue;
+          const directDistance = Math.abs(i - j);
+          const circularDistance = Math.min(directDistance, total - directDistance);
+          score += weight * circularDistance;
+        }
+      }
+      return score;
+    }
+
+    function computeCollaboratorCircularOrder(collaboratorKeys, collaboratorCountByKey, weightByPairKey) {
+      const remaining = [...collaboratorKeys]
+        .filter((key) => typeof key === "string" && key)
+        .sort((a, b) => {
+          const diff = (collaboratorCountByKey.get(b) || 0) - (collaboratorCountByKey.get(a) || 0);
+          if (diff !== 0) return diff;
+          return a.localeCompare(b);
+        });
+      if (!remaining.length) return [];
+      const order = [remaining.shift()];
+      while (remaining.length) {
+        const currentFirst = order[0];
+        const currentLast = order[order.length - 1];
+        let best = null;
+        remaining.forEach((candidate, index) => {
+          const leftWeight = getUndirectedPairWeight(weightByPairKey, candidate, currentFirst);
+          const rightWeight = getUndirectedPairWeight(weightByPairKey, candidate, currentLast);
+          const attachRight = rightWeight > leftWeight;
+          const score = Math.max(leftWeight, rightWeight);
+          const count = collaboratorCountByKey.get(candidate) || 0;
+          const ranked = {
+            index,
+            candidate,
+            side: attachRight ? "right" : "left",
+            score,
+            count
+          };
+          if (
+            !best ||
+            ranked.score > best.score ||
+            (ranked.score === best.score && ranked.count > best.count) ||
+            (ranked.score === best.score && ranked.count === best.count && ranked.candidate.localeCompare(best.candidate) < 0)
+          ) {
+            best = ranked;
+          }
+        });
+        const [nextCandidate] = remaining.splice(best.index, 1);
+        if (best.side === "left") {
+          order.unshift(nextCandidate);
+        } else {
+          order.push(nextCandidate);
+        }
+      }
+      if (order.length <= 2) return order;
+
+      let improved = true;
+      let iterations = 0;
+      while (improved && iterations < 8) {
+        improved = false;
+        iterations += 1;
+        for (let index = 0; index < order.length; index += 1) {
+          const nextIndex = (index + 1) % order.length;
+          const swapped = [...order];
+          const temp = swapped[index];
+          swapped[index] = swapped[nextIndex];
+          swapped[nextIndex] = temp;
+          if (computeCircularArrangementCost(swapped, weightByPairKey) + 0.0001 < computeCircularArrangementCost(order, weightByPairKey)) {
+            order.splice(0, order.length, ...swapped);
+            improved = true;
+          }
+        }
+      }
+
+      return order;
+    }
+
+    function shortestAngleDelta(fromAngle, toAngle) {
+      const from = normalizeRadians(fromAngle);
+      const to = normalizeRadians(toAngle);
+      let delta = to - from;
+      if (delta > Math.PI) delta -= Math.PI * 2;
+      if (delta < -Math.PI) delta += Math.PI * 2;
+      return delta;
+    }
+
+    function buildCollaborationShellModel(visibleNodeIds, workspaceRecord) {
+      const { nodesForSim, linksForSim, modelById } = buildLayoutInput(visibleNodeIds);
+      const entryById = new Map();
+      const neighborIdsByNodeId = new Map();
+
+      nodesForSim.forEach((simNode) => {
+        neighborIdsByNodeId.set(simNode.id, new Set());
+      });
+      linksForSim.forEach((link) => {
+        const sourceId = getLinkEndpointId(link.source);
+        const targetId = getLinkEndpointId(link.target);
+        if (!sourceId || !targetId || sourceId === targetId) return;
+        if (neighborIdsByNodeId.has(sourceId)) neighborIdsByNodeId.get(sourceId).add(targetId);
+        if (neighborIdsByNodeId.has(targetId)) neighborIdsByNodeId.get(targetId).add(sourceId);
+      });
+
+      const nodeEntries = nodesForSim.map((simNode) => {
+        const node = modelById.get(simNode.id);
+        const projectionMeta = getCurrentProjectionNodeMeta(simNode.id) || null;
+        const role = getCollaborationShellRole(node, workspaceRecord, projectionMeta);
+        const entry = {
+          id: simNode.id,
+          node,
+          simNode,
+          projectionMeta,
+          role,
+          collaboratorKey: null,
+          handoverRefs: [],
+          groupKey: role === "anchor" ? "anchor" : "",
+          sectorId: -1,
+          localOrder: 0,
+          chainDepth: 0,
+          seedAngle: normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD),
+          depthRadius: 0,
+          seedRadius: 0,
+          seedX: 0,
+          seedY: 0,
+          radialOffset: 0
+        };
+        entryById.set(entry.id, entry);
+        return entry;
+      });
+
+      const compareEntryIds = (aId, bId) => {
+        const entryA = entryById.get(aId);
+        const entryB = entryById.get(bId);
+        if (!entryA || !entryB) return String(aId).localeCompare(String(bId));
+        return compareNodeEntriesStable(entryA, entryB);
+      };
+
+      const getSemanticParentCandidateId = (entry) => {
+        const rolePriority = {
+          entity: 0,
+          other: 1,
+          handover: 2,
+          context: 3,
+          anchor: 4,
+          artifact: 5
+        };
+        return [...(neighborIdsByNodeId.get(entry.id) || [])]
+          .map((nodeId) => entryById.get(nodeId))
+          .filter((candidate) => candidate && candidate.role !== "artifact" && candidate.role !== "anchor")
+          .sort((left, right) => {
+            const leftPriority = rolePriority[left.role] ?? 99;
+            const rightPriority = rolePriority[right.role] ?? 99;
+            if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+            return compareNodeEntriesStable(left, right);
+          })[0]?.id || null;
+      };
+
+      nodeEntries.forEach((entry) => {
+        const fromMeta = Array.isArray(entry.projectionMeta?.handoverIds)
+          ? entry.projectionMeta.handoverIds.filter((candidateId) => entryById.get(candidateId)?.role === "handover")
+          : [];
+        const fromLinks = [...(neighborIdsByNodeId.get(entry.id) || [])]
+          .filter((candidateId) => entryById.get(candidateId)?.role === "handover");
+        const resolved = [...new Set([...fromMeta, ...fromLinks])]
+          .sort(compareEntryIds);
+        entry.handoverRefs = entry.role === "handover"
+          ? [entry.id]
+          : resolved;
+        entry.collaboratorKey = getCollaborationEntityKey(entry);
+      });
+
+      const handoverEntries = nodeEntries
+        .filter((entry) => entry.role === "handover")
+        .sort(compareNodeEntriesStable);
+
+      const handoverParentById = new Map();
+      const handoverContextKeyById = new Map();
+      const handoverChainSignatureById = new Map();
+      const buildHandoverChainSignature = (handoverEntry) => {
+        if (!handoverEntry) return "";
+        const directEntityIds = [...(neighborIdsByNodeId.get(handoverEntry.id) || [])]
+          .filter((candidateId) => entryById.get(candidateId)?.role === "entity");
+        const userRefIds = new Set();
+        const orgRefIds = new Set();
+
+        const registerEntity = (entityEntry) => {
+          if (!entityEntry || entityEntry.role !== "entity") return;
+          const entityKind = getCollaborationEntityKind(entityEntry);
+          const entityRefId = getCollaborationEntityRefId(entityEntry);
+          if (!entityKind || !entityRefId) return;
+          if (entityKind === "user") {
+            userRefIds.add(entityRefId);
+            return;
+          }
+          if (entityKind === "org") {
+            orgRefIds.add(entityRefId);
+          }
+        };
+
+        directEntityIds.forEach((entityId) => {
+          const entityEntry = entryById.get(entityId);
+          registerEntity(entityEntry);
+          const entityKind = getCollaborationEntityKind(entityEntry);
+          if (entityKind !== "user") return;
+          [...(neighborIdsByNodeId.get(entityId) || [])]
+            .map((candidateId) => entryById.get(candidateId))
+            .filter((candidateEntry) => candidateEntry?.role === "entity")
+            .forEach((candidateEntry) => {
+              if (getCollaborationEntityKind(candidateEntry) !== "org") return;
+              registerEntity(candidateEntry);
+            });
+        });
+
+        const sortedOrgRefs = [...orgRefIds].sort((left, right) => left.localeCompare(right));
+        const sortedUserRefs = [...userRefIds].sort((left, right) => left.localeCompare(right));
+        if (!sortedOrgRefs.length && !sortedUserRefs.length) return "";
+        return `org:${sortedOrgRefs.join(",") || "-"}|user:${sortedUserRefs.join(",") || "-"}`;
+      };
+      handoverEntries.forEach((handoverEntry) => {
+        const semanticParentId = getSemanticParentCandidateId(handoverEntry) || handoverEntry.id;
+        const contextNodeId = getHandoverGraphContextNode(handoverEntry.node)?.id || "";
+        const chainSignature = buildHandoverChainSignature(handoverEntry);
+        handoverParentById.set(handoverEntry.id, semanticParentId);
+        handoverContextKeyById.set(handoverEntry.id, contextNodeId);
+        handoverChainSignatureById.set(handoverEntry.id, chainSignature || `handover:${handoverEntry.id}`);
+        if (chainSignature) {
+          handoverEntry.groupKey = `chain:${chainSignature}`;
+        } else if (semanticParentId && semanticParentId !== handoverEntry.id) {
+          handoverEntry.groupKey = `parent:${semanticParentId}`;
+        } else {
+          handoverEntry.groupKey = `handover:${handoverEntry.id}`;
+        }
+      });
+
+      const handoverGroupById = new Map(handoverEntries.map((entry) => [entry.id, entry.groupKey]));
+      const pickMostCommonGroupKey = (handoverRefs) => {
+        const counts = new Map();
+        handoverRefs.forEach((handoverId) => {
+          const key = handoverGroupById.get(handoverId);
+          if (!key) return;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        if (!counts.size) return null;
+        return [...counts.entries()]
+          .sort((left, right) => {
+            if (left[1] !== right[1]) return right[1] - left[1];
+            return left[0].localeCompare(right[0]);
+          })[0][0];
+      };
+
+      nodeEntries
+        .filter((entry) => entry.role !== "handover" && entry.role !== "anchor")
+        .forEach((entry) => {
+          const byRefs = pickMostCommonGroupKey(entry.handoverRefs);
+          if (byRefs) {
+            entry.groupKey = byRefs;
+            return;
+          }
+          const semanticParentId = getSemanticParentCandidateId(entry);
+          const semanticParentGroup = semanticParentId ? (entryById.get(semanticParentId)?.groupKey || "") : "";
+          if (semanticParentGroup && semanticParentGroup !== "anchor") {
+            entry.groupKey = semanticParentGroup;
+            return;
+          }
+          entry.groupKey = `isolated:${entry.id}`;
+        });
+
+      const groupByKey = new Map();
+      const ensureGroup = (groupKey) => {
+        if (!groupByKey.has(groupKey)) {
+          groupByKey.set(groupKey, {
+            key: groupKey,
+            entryIds: [],
+            handoverIds: [],
+            contextIds: new Set(),
+            parentIds: new Set(),
+            collaboratorKeys: new Set(),
+            roleCounts: {
+              entity: 0,
+              context: 0,
+              handover: 0,
+              artifact: 0,
+              other: 0
+            },
+            weight: 1,
+            sectorId: -1,
+            sectorStart: normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD),
+            sectorCenter: normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD),
+            sectorSpan: Math.PI * 2
+          });
+        }
+        return groupByKey.get(groupKey);
+      };
+
+      nodeEntries
+        .filter((entry) => entry.role !== "anchor")
+        .forEach((entry) => {
+          const group = ensureGroup(entry.groupKey);
+          group.entryIds.push(entry.id);
+          if (entry.role === "handover") {
+            group.handoverIds.push(entry.id);
+            const parentId = handoverParentById.get(entry.id);
+            if (parentId) group.parentIds.add(parentId);
+            const contextKey = handoverContextKeyById.get(entry.id) || "";
+            if (contextKey) group.contextIds.add(contextKey);
+          }
+          if (entry.role === "context") {
+            group.contextIds.add(entry.id);
+          }
+          if (entry.role === "entity") group.roleCounts.entity += 1;
+          else if (entry.role === "context") group.roleCounts.context += 1;
+          else if (entry.role === "handover") group.roleCounts.handover += 1;
+          else if (entry.role === "artifact") group.roleCounts.artifact += 1;
+          else group.roleCounts.other += 1;
+        });
+
+      const collaboratorKeysByHandoverId = new Map();
+      handoverEntries.forEach((handoverEntry) => {
+        collaboratorKeysByHandoverId.set(handoverEntry.id, new Set());
+      });
+      nodeEntries
+        .filter((entry) => entry.role === "entity" && entry.collaboratorKey)
+        .forEach((entityEntry) => {
+          entityEntry.handoverRefs.forEach((handoverId) => {
+            if (collaboratorKeysByHandoverId.has(handoverId)) {
+              collaboratorKeysByHandoverId.get(handoverId).add(entityEntry.collaboratorKey);
+            }
+          });
+        });
+      linksForSim.forEach((link) => {
+        const sourceId = getLinkEndpointId(link.source);
+        const targetId = getLinkEndpointId(link.target);
+        if (!sourceId || !targetId) return;
+        const sourceEntry = entryById.get(sourceId);
+        const targetEntry = entryById.get(targetId);
+        if (!sourceEntry || !targetEntry) return;
+        const sourceHandover = sourceEntry.role === "handover" ? sourceEntry : null;
+        const targetHandover = targetEntry.role === "handover" ? targetEntry : null;
+        const sourceEntity = sourceEntry.role === "entity" ? sourceEntry : null;
+        const targetEntity = targetEntry.role === "entity" ? targetEntry : null;
+        if (sourceHandover && targetEntity?.collaboratorKey) {
+          collaboratorKeysByHandoverId.get(sourceHandover.id)?.add(targetEntity.collaboratorKey);
+        } else if (targetHandover && sourceEntity?.collaboratorKey) {
+          collaboratorKeysByHandoverId.get(targetHandover.id)?.add(sourceEntity.collaboratorKey);
+        }
+      });
+
+      handoverEntries.forEach((handoverEntry) => {
+        const group = groupByKey.get(handoverEntry.groupKey);
+        if (!group) return;
+        (collaboratorKeysByHandoverId.get(handoverEntry.id) || []).forEach((collaboratorKey) => {
+          group.collaboratorKeys.add(collaboratorKey);
+        });
+      });
+
+      const groupCountByKey = new Map();
+      groupByKey.forEach((group) => {
+        group.weight = Math.max(
+          1,
+          (group.roleCounts.handover * 2) +
+          Math.ceil(group.roleCounts.context * 1.2) +
+          Math.ceil(group.roleCounts.entity * 0.6) +
+          Math.ceil(group.roleCounts.artifact * 0.35) +
+          Math.ceil(group.roleCounts.other * 0.25)
+        );
+        groupCountByKey.set(group.key, group.weight);
+      });
+
+      const groupPairWeightByKey = new Map();
+      const incrementGroupPairWeight = (groupAKey, groupBKey, amount) => {
+        if (!groupAKey || !groupBKey || groupAKey === groupBKey || !(amount > 0)) return;
+        const pairKey = buildUndirectedPairKey(groupAKey, groupBKey);
+        groupPairWeightByKey.set(pairKey, (groupPairWeightByKey.get(pairKey) || 0) + amount);
+      };
+
+      const groupKeys = [...groupByKey.keys()].sort((left, right) => left.localeCompare(right));
+      for (let i = 0; i < groupKeys.length; i += 1) {
+        const leftGroup = groupByKey.get(groupKeys[i]);
+        for (let j = i + 1; j < groupKeys.length; j += 1) {
+          const rightGroup = groupByKey.get(groupKeys[j]);
+          const sharedCollaboratorCount = [...leftGroup.collaboratorKeys]
+            .filter((collaboratorKey) => rightGroup.collaboratorKeys.has(collaboratorKey))
+            .length;
+          const sharedParentCount = [...leftGroup.parentIds]
+            .filter((parentId) => rightGroup.parentIds.has(parentId))
+            .length;
+          const sharedContextCount = [...leftGroup.contextIds]
+            .filter((contextId) => rightGroup.contextIds.has(contextId))
+            .length;
+          incrementGroupPairWeight(
+            leftGroup.key,
+            rightGroup.key,
+            (sharedCollaboratorCount * 3) + (sharedParentCount * 4) + (sharedContextCount * 1.5)
+          );
+        }
+      }
+
+      linksForSim.forEach((link) => {
+        const sourceId = getLinkEndpointId(link.source);
+        const targetId = getLinkEndpointId(link.target);
+        if (!sourceId || !targetId) return;
+        const sourceEntry = entryById.get(sourceId);
+        const targetEntry = entryById.get(targetId);
+        if (!sourceEntry || !targetEntry) return;
+        if (sourceEntry.role === "anchor" || targetEntry.role === "anchor") return;
+        if (sourceEntry.role === "artifact" && targetEntry.role === "artifact") return;
+        incrementGroupPairWeight(sourceEntry.groupKey, targetEntry.groupKey, 1.2);
+      });
+
+      let orderedGroupKeys = computeCollaboratorCircularOrder(groupKeys, groupCountByKey, groupPairWeightByKey);
+      if (!orderedGroupKeys.length) {
+        orderedGroupKeys = groupKeys;
+      } else if (orderedGroupKeys.length !== groupKeys.length) {
+        const included = new Set(orderedGroupKeys);
+        orderedGroupKeys = [
+          ...orderedGroupKeys,
+          ...groupKeys.filter((groupKey) => !included.has(groupKey))
+        ];
+      }
+
+      if (orderedGroupKeys.length) {
+        const totalCount = orderedGroupKeys.length;
+        let sectorGap = COLLAB_SHELL_SECTOR_GAP_RAD;
+        let availableSpan = (Math.PI * 2) - (sectorGap * totalCount);
+        if (availableSpan <= 0.001) {
+          sectorGap = 0;
+          availableSpan = Math.PI * 2;
+        }
+        const minSectorSpan = Math.min(
+          COLLAB_SHELL_MIN_SECTOR_SPAN_RAD,
+          availableSpan / Math.max(1, totalCount)
+        );
+        const minReservedSpan = minSectorSpan * totalCount;
+        const extraSpan = Math.max(0, availableSpan - minReservedSpan);
+        const totalWeight = orderedGroupKeys.reduce((acc, groupKey) => acc + (groupByKey.get(groupKey)?.weight || 1), 0) || 1;
+        let cursor = normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
+        orderedGroupKeys.forEach((groupKey, index) => {
+          const group = groupByKey.get(groupKey);
+          if (!group) return;
+          const weightedExtra = extraSpan * ((group.weight || 1) / totalWeight);
+          const sectorSpan = minSectorSpan + weightedExtra;
+          group.sectorId = index;
+          group.sectorStart = normalizeRadians(cursor);
+          group.sectorCenter = normalizeRadians(cursor + (sectorSpan / 2));
+          group.sectorSpan = sectorSpan;
+          cursor = normalizeRadians(cursor + sectorSpan + sectorGap);
+        });
+      }
+
+      const handoverAngleById = new Map();
+      groupByKey.forEach((group) => {
+        const handoverIds = [...group.handoverIds]
+          .filter((handoverId) => entryById.has(handoverId))
+          .sort(compareEntryIds);
+        if (!handoverIds.length) return;
+        const handoverCountMap = new Map();
+        const handoverPairWeightByKey = new Map();
+        handoverIds.forEach((handoverId) => {
+          handoverCountMap.set(handoverId, (collaboratorKeysByHandoverId.get(handoverId) || []).length || 1);
+        });
+        for (let i = 0; i < handoverIds.length; i += 1) {
+          for (let j = i + 1; j < handoverIds.length; j += 1) {
+            const leftId = handoverIds[i];
+            const rightId = handoverIds[j];
+            const leftCollaborators = collaboratorKeysByHandoverId.get(leftId) || new Set();
+            const rightCollaborators = collaboratorKeysByHandoverId.get(rightId) || new Set();
+            const sharedCollaborators = [...leftCollaborators].filter((key) => rightCollaborators.has(key)).length;
+            const sameParent = handoverParentById.get(leftId) && handoverParentById.get(leftId) === handoverParentById.get(rightId);
+            const sameContext = handoverContextKeyById.get(leftId) &&
+              handoverContextKeyById.get(leftId) === handoverContextKeyById.get(rightId);
+            const sameChainSignature = handoverChainSignatureById.get(leftId) &&
+              handoverChainSignatureById.get(leftId) === handoverChainSignatureById.get(rightId);
+            const directlyLinked = (neighborIdsByNodeId.get(leftId) || new Set()).has(rightId);
+            const weight = (sharedCollaborators * 3) + (sameParent ? 3 : 0) + (sameContext ? 1.5 : 0) + (sameChainSignature ? 4 : 0) + (directlyLinked ? 1 : 0);
+            if (weight > 0) {
+              const pairKey = buildUndirectedPairKey(leftId, rightId);
+              handoverPairWeightByKey.set(pairKey, weight);
+            }
+          }
+        }
+        let orderedHandoverIds = computeCollaboratorCircularOrder(handoverIds, handoverCountMap, handoverPairWeightByKey);
+        if (!orderedHandoverIds.length) orderedHandoverIds = handoverIds;
+        const slotCount = orderedHandoverIds.length;
+        orderedHandoverIds.forEach((handoverId, index) => {
+          const angle = slotCount === 1
+            ? group.sectorCenter
+            : normalizeRadians(group.sectorStart + ((group.sectorSpan * (index + 1)) / (slotCount + 1)));
+          handoverAngleById.set(handoverId, angle);
+          const entry = entryById.get(handoverId);
+          if (!entry) return;
+          entry.seedAngle = angle;
+          entry.sectorId = group.sectorId;
+          entry.localOrder = index;
+        });
+      });
+
+      const resolveEntryBaseAngle = (entry, fallbackCenter) => {
+        const refAngles = entry.handoverRefs
+          .map((handoverId) => handoverAngleById.get(handoverId))
+          .filter((angle) => Number.isFinite(angle));
+        const meanAngle = getCircularMeanAngle(refAngles);
+        if (Number.isFinite(meanAngle)) return meanAngle;
+        return normalizeRadians(fallbackCenter);
+      };
+
+      groupByKey.forEach((group) => {
+        const groupEntries = group.entryIds
+          .map((entryId) => entryById.get(entryId))
+          .filter(Boolean)
+          .sort(compareNodeEntriesStable);
+
+        const contextByRefSignature = new Map();
+        groupEntries
+          .filter((entry) => entry.role === "context")
+          .forEach((entry) => {
+            const signature = entry.handoverRefs.length ? entry.handoverRefs.join("|") : `context:${entry.id}`;
+            if (!contextByRefSignature.has(signature)) contextByRefSignature.set(signature, []);
+            contextByRefSignature.get(signature).push(entry);
+          });
+        contextByRefSignature.forEach((entries) => {
+          const baseAngle = resolveEntryBaseAngle(entries[0], group.sectorCenter);
+          entries
+            .sort(compareNodeEntriesStable)
+            .forEach((entry, index) => {
+              const offset = (index - ((entries.length - 1) / 2)) * COLLAB_SHELL_CONTEXT_FAN_STEP_RAD;
+              entry.seedAngle = normalizeRadians(baseAngle + offset);
+              entry.sectorId = group.sectorId;
+            });
+        });
+
+        const entitiesByCollaborator = new Map();
+        groupEntries
+          .filter((entry) => entry.role === "entity")
+          .forEach((entry) => {
+            const collaboratorKey = entry.collaboratorKey || `entity:${entry.id}`;
+            if (!entitiesByCollaborator.has(collaboratorKey)) entitiesByCollaborator.set(collaboratorKey, []);
+            entitiesByCollaborator.get(collaboratorKey).push(entry);
+          });
+        entitiesByCollaborator.forEach((entries) => {
+          const baseAngle = resolveEntryBaseAngle(entries[0], group.sectorCenter);
+          entries
+            .sort(compareNodeEntriesStable)
+            .forEach((entry) => {
+              entry.seedAngle = normalizeRadians(baseAngle);
+              entry.sectorId = group.sectorId;
+            });
+        });
+
+        const artifactsByHandover = new Map();
+        groupEntries
+          .filter((entry) => entry.role === "artifact")
+          .forEach((entry) => {
+            const handoverId = entry.handoverRefs[0] || "";
+            const key = handoverId || `artifact:${entry.id}`;
+            if (!artifactsByHandover.has(key)) artifactsByHandover.set(key, []);
+            artifactsByHandover.get(key).push(entry);
+          });
+        artifactsByHandover.forEach((entries, key) => {
+          const baseAngle = handoverAngleById.get(key) ?? resolveEntryBaseAngle(entries[0], group.sectorCenter);
+          entries
+            .sort(compareNodeEntriesStable)
+            .forEach((entry, index) => {
+              const offset = (index - ((entries.length - 1) / 2)) * COLLAB_SHELL_ARTIFACT_FAN_STEP_RAD;
+              entry.seedAngle = normalizeRadians(baseAngle + offset);
+              entry.sectorId = group.sectorId;
+            });
+        });
+
+        const otherEntries = groupEntries.filter((entry) => entry.role === "other");
+        if (otherEntries.length) {
+          otherEntries.forEach((entry, index) => {
+            entry.seedAngle = normalizeRadians(
+              group.sectorStart + ((group.sectorSpan * (index + 1)) / (otherEntries.length + 1))
+            );
+            entry.sectorId = group.sectorId;
+          });
+        }
+      });
+
+      const getDepthLayerKey = (entry) => {
+        if (entry.role === "entity") {
+          return getCollaborationEntityKind(entry) === "org" ? "org" : "user";
+        }
+        if (entry.role === "context") return "context";
+        if (entry.role === "handover") return "handover";
+        if (entry.role === "artifact") return "artifact";
+        return "other";
+      };
+      const depthLayerOrder = ["org", "user", "context", "handover", "artifact", "other"];
+      const depthLayerBaseGap = {
+        org: 48,
+        user: 46,
+        context: 58,
+        handover: 64,
+        artifact: 56,
+        other: 52
+      };
+      const getEntryCollisionRadius = (entry) => {
+        const collisionRadius = entry?.simNode?.collisionRadius;
+        if (Number.isFinite(collisionRadius) && collisionRadius > 0) {
+          return collisionRadius;
+        }
+        const fallbackW = Number.isFinite(entry?.simNode?.w) ? entry.simNode.w : 120;
+        const fallbackH = Number.isFinite(entry?.simNode?.h) ? entry.simNode.h : 120;
+        return 0.5 * Math.max(fallbackW, fallbackH, 120);
+      };
+
+      groupByKey.forEach((group) => {
+        const groupEntries = group.entryIds.map((entryId) => entryById.get(entryId)).filter(Boolean);
+        const densityBoost = (Math.max(0, groupEntries.length - 4) * 8) + (Math.max(0, group.handoverIds.length - 1) * 18);
+        const sectorSpan = Math.max(
+          Math.PI / 3,
+          Number.isFinite(group.sectorSpan) ? group.sectorSpan : (Math.PI * 2)
+        );
+        let previousLayerRadius = 150 + densityBoost;
+        let previousLayerMaxCollision = 0;
+        let nextDepth = 1;
+        depthLayerOrder.forEach((layerKey) => {
+          const layerEntries = groupEntries.filter((entry) => getDepthLayerKey(entry) === layerKey);
+          if (!layerEntries.length) return;
+          const layerCollisionRadii = layerEntries.map((entry) => getEntryCollisionRadius(entry));
+          const layerMaxCollision = layerCollisionRadii.reduce(
+            (maxValue, value) => Math.max(maxValue, value),
+            0
+          );
+          const arcDemand = layerCollisionRadii.reduce(
+            (sum, radius) => sum + (radius * 2) + COLLAB_SHELL_LAYER_ARC_GAP_PX,
+            0
+          );
+          const arcBasedRadius = layerEntries.length > 1
+            ? arcDemand / sectorSpan
+            : layerMaxCollision + COLLAB_SHELL_LAYER_ARC_GAP_PX;
+          const minLayerRadius = previousLayerRadius +
+            previousLayerMaxCollision +
+            layerMaxCollision +
+            (depthLayerBaseGap[layerKey] || COLLAB_SHELL_LAYER_RADIAL_GAP_PX);
+          const resolvedLayerRadius = Math.max(
+            180 + densityBoost,
+            arcBasedRadius,
+            minLayerRadius
+          );
+          layerEntries.forEach((entry) => {
+            entry.chainDepth = nextDepth;
+            entry.depthRadius = resolvedLayerRadius;
+          });
+          nextDepth += 1;
+          previousLayerRadius = resolvedLayerRadius;
+          previousLayerMaxCollision = layerMaxCollision;
+        });
+
+        const entityBuckets = new Map();
+        groupEntries
+          .filter((entry) => entry.role === "entity")
+          .forEach((entry) => {
+            const key = entry.collaboratorKey || `entity:${entry.id}`;
+            if (!entityBuckets.has(key)) entityBuckets.set(key, []);
+            entityBuckets.get(key).push(entry);
+          });
+        entityBuckets.forEach((bucketEntries) => {
+          bucketEntries
+            .sort(compareNodeEntriesStable)
+            .forEach((entry, index) => {
+              entry.radialOffset = (index - ((bucketEntries.length - 1) / 2)) * 8;
+            });
+        });
+      });
+
+      nodeEntries.forEach((entry) => {
+        if (entry.role === "anchor") {
+          entry.seedAngle = normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
+          entry.seedRadius = 0;
+          return;
+        }
+        if (!Number.isFinite(entry.depthRadius) || entry.depthRadius <= 0) {
+          entry.depthRadius = 240;
+          entry.chainDepth = 1;
+        }
+        if (!Number.isFinite(entry.seedAngle)) {
+          const groupCenter = groupByKey.get(entry.groupKey)?.sectorCenter || COLLAB_SHELL_START_ANGLE_RAD;
+          entry.seedAngle = normalizeRadians(groupCenter);
+        }
+        entry.seedRadius = Math.max(40, entry.depthRadius + (Number.isFinite(entry.radialOffset) ? entry.radialOffset : 0));
+      });
+
+      return {
+        nodesForSim,
+        linksForSim,
+        nodeEntries,
+        entryById,
+        groupByKey
+      };
+    }
+
+    function seedCollaborationShellPositions(model) {
+      if (!model || !Array.isArray(model.nodeEntries)) return;
+      model.nodeEntries.forEach((entry) => {
+        if (entry.role === "anchor") {
+          entry.seedAngle = normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
+          entry.seedX = 0;
+          entry.seedY = 0;
+          entry.simNode.x = 0;
+          entry.simNode.y = 0;
+          return;
+        }
+        const angle = normalizeRadians(entry.seedAngle);
+        const radius = Math.max(40, Number.isFinite(entry.seedRadius) ? entry.seedRadius : 240);
+        entry.seedAngle = angle;
+        entry.seedRadius = radius;
+        entry.seedX = Math.cos(angle) * radius;
+        entry.seedY = Math.sin(angle) * radius;
+        entry.simNode.x = entry.seedX;
+        entry.simNode.y = entry.seedY;
+      });
+    }
+
+    function resolveCollaborationShellOverlap(model) {
+      if (!model || !Array.isArray(model.nodesForSim)) return;
+      const entryById = model.entryById || new Map();
+      const groupByKey = model.groupByKey || new Map();
+      const layersByGroup = new Map();
+      const getCollisionRadius = (entry) => {
+        const collisionRadius = entry?.simNode?.collisionRadius;
+        if (Number.isFinite(collisionRadius) && collisionRadius > 0) {
+          return collisionRadius;
+        }
+        const fallbackW = Number.isFinite(entry?.simNode?.w) ? entry.simNode.w : 120;
+        const fallbackH = Number.isFinite(entry?.simNode?.h) ? entry.simNode.h : 120;
+        return 0.5 * Math.max(fallbackW, fallbackH, 120);
+      };
+
+      model.nodesForSim.forEach((simNode) => {
+        const entry = entryById.get(simNode.id);
+        if (!entry || entry.role === "anchor" || !entry.groupKey) return;
+        if (!layersByGroup.has(entry.groupKey)) {
+          layersByGroup.set(entry.groupKey, new Map());
+        }
+        const layerKey = Number.isFinite(entry.chainDepth) ? entry.chainDepth : 1;
+        if (!layersByGroup.get(entry.groupKey).has(layerKey)) {
+          layersByGroup.get(entry.groupKey).set(layerKey, []);
+        }
+        layersByGroup.get(entry.groupKey).get(layerKey).push({ entry, simNode });
+      });
+
+      layersByGroup.forEach((layerMap, groupKey) => {
+        const group = groupByKey.get(groupKey) || null;
+        const sectorCenter = normalizeRadians(group?.sectorCenter ?? COLLAB_SHELL_START_ANGLE_RAD);
+        const hasSectorBounds = !!group && Number.isFinite(group.sectorSpan) && group.sectorSpan < (Math.PI * 2);
+        const layerDepths = [...layerMap.keys()].sort((left, right) => left - right);
+        let previousOuterRadius = 0;
+
+        layerDepths.forEach((layerDepth) => {
+          const layerItems = (layerMap.get(layerDepth) || [])
+            .map(({ entry, simNode }) => {
+              const rawAngle = Number.isFinite(simNode.x) && Number.isFinite(simNode.y)
+                ? normalizeRadians(Math.atan2(simNode.y, simNode.x))
+                : normalizeRadians(entry.seedAngle);
+              const rawRadius = Math.hypot(simNode.x || 0, simNode.y || 0) || entry.seedRadius || entry.depthRadius || 220;
+              return {
+                entry,
+                simNode,
+                collisionRadius: getCollisionRadius(entry),
+                desiredRelAngle: shortestAngleDelta(sectorCenter, rawAngle),
+                desiredRadius: rawRadius
+              };
+            })
+            .sort((left, right) => {
+              if (left.desiredRelAngle !== right.desiredRelAngle) {
+                return left.desiredRelAngle - right.desiredRelAngle;
+              }
+              return compareNodeEntriesStable(left.entry, right.entry);
+            });
+
+          if (!layerItems.length) return;
+          const layerMaxCollisionRadius = layerItems.reduce(
+            (maxValue, item) => Math.max(maxValue, item.collisionRadius),
+            0
+          );
+          let layerRadius = Math.max(
+            previousOuterRadius + layerMaxCollisionRadius + COLLAB_SHELL_LAYER_RADIAL_GAP_PX,
+            ...layerItems.map((item) => item.desiredRadius)
+          );
+          layerRadius = Math.max(140, layerRadius);
+
+          const overflowPad = layerItems.some((item) => item.entry.role === "artifact") ? 0.2 : 0.12;
+          const minRel = hasSectorBounds ? -((group.sectorSpan / 2) + overflowPad) : -Math.PI;
+          const maxRel = hasSectorBounds ? ((group.sectorSpan / 2) + overflowPad) : Math.PI;
+          const packLayerAtRadius = (candidateRadius) => {
+            const packedAngles = new Array(layerItems.length);
+            packedAngles[0] = Math.max(minRel, layerItems[0].desiredRelAngle);
+            for (let index = 1; index < layerItems.length; index += 1) {
+              const previousItem = layerItems[index - 1];
+              const currentItem = layerItems[index];
+              const minGap = (previousItem.collisionRadius + currentItem.collisionRadius + COLLAB_SHELL_DEOVERLAP_PAIR_PAD_PX) / Math.max(1, candidateRadius);
+              packedAngles[index] = Math.max(currentItem.desiredRelAngle, packedAngles[index - 1] + minGap);
+            }
+            if (!hasSectorBounds) {
+              return { fits: true, packedAngles };
+            }
+
+            const overflow = packedAngles[packedAngles.length - 1] - maxRel;
+            if (overflow > 0) {
+              for (let index = 0; index < packedAngles.length; index += 1) {
+                packedAngles[index] -= overflow;
+              }
+            }
+            if (packedAngles[0] < minRel) {
+              packedAngles[0] = minRel;
+              for (let index = 1; index < packedAngles.length; index += 1) {
+                const previousItem = layerItems[index - 1];
+                const currentItem = layerItems[index];
+                const minGap = (previousItem.collisionRadius + currentItem.collisionRadius + COLLAB_SHELL_DEOVERLAP_PAIR_PAD_PX) / Math.max(1, candidateRadius);
+                packedAngles[index] = Math.max(packedAngles[index], packedAngles[index - 1] + minGap);
+              }
+            }
+            const fits = packedAngles[packedAngles.length - 1] <= (maxRel + 0.0001);
+            return { fits, packedAngles };
+          };
+
+          let packResult = packLayerAtRadius(layerRadius);
+          let guard = 0;
+          while (!packResult.fits && guard < 120) {
+            layerRadius += COLLAB_SHELL_LAYER_RADIUS_STEP_PX;
+            packResult = packLayerAtRadius(layerRadius);
+            guard += 1;
+          }
+
+          let layerOuterRadius = previousOuterRadius;
+          layerItems.forEach((item, index) => {
+            const radialOffset = Number.isFinite(item.entry.radialOffset)
+              ? clamp(item.entry.radialOffset, -COLLAB_SHELL_RADIAL_OFFSET_LIMIT_PX, COLLAB_SHELL_RADIAL_OFFSET_LIMIT_PX)
+              : 0;
+            const resolvedRadius = Math.max(40, layerRadius + radialOffset);
+            const resolvedAngle = normalizeRadians(sectorCenter + packResult.packedAngles[index]);
+            item.simNode.x = Math.cos(resolvedAngle) * resolvedRadius;
+            item.simNode.y = Math.sin(resolvedAngle) * resolvedRadius;
+            item.entry.seedAngle = resolvedAngle;
+            item.entry.seedRadius = resolvedRadius;
+            item.entry.depthRadius = layerRadius;
+            layerOuterRadius = Math.max(layerOuterRadius, resolvedRadius + item.collisionRadius);
+          });
+          previousOuterRadius = layerOuterRadius + COLLAB_SHELL_LAYER_RADIAL_GAP_PX;
+        });
+      });
+    }
+
+    function runCollaborationShellRelax(model) {
+      if (!model || !window.d3 || !d3.forceSimulation) return;
+      const simNodes = model.nodesForSim;
+      const entryById = model.entryById || new Map();
+      const groupByKey = model.groupByKey || new Map();
+      if (!simNodes.length) return;
+
+      simNodes.forEach((simNode) => {
+        const entry = entryById.get(simNode.id);
+        if (!entry) return;
+        simNode.x = Number.isFinite(entry.seedX) ? entry.seedX : 0;
+        simNode.y = Number.isFinite(entry.seedY) ? entry.seedY : 0;
+        simNode.fx = null;
+        simNode.fy = null;
+      });
+      const anchorEntry = model.nodeEntries.find((entry) => entry.role === "anchor") || null;
+      if (anchorEntry) {
+        anchorEntry.simNode.fx = 0;
+        anchorEntry.simNode.fy = 0;
+      }
+
+      const radialForce = () => {
+        let nodesForForce = [];
+        const force = (alpha) => {
+          nodesForForce.forEach((simNode) => {
+            const entry = entryById.get(simNode.id);
+            if (!entry || entry.role === "anchor") return;
+            const targetRadius = Number.isFinite(entry.seedRadius) ? entry.seedRadius : entry.depthRadius;
+            if (!Number.isFinite(targetRadius) || targetRadius <= 0) return;
+            const radius = Math.hypot(simNode.x, simNode.y) || 1;
+            const strength = COLLAB_SHELL_RADIAL_STRENGTH[entry.role] ?? COLLAB_SHELL_RADIAL_STRENGTH.other;
+            const delta = targetRadius - radius;
+            const scaled = strength * alpha;
+            simNode.vx += (simNode.x / radius) * delta * scaled;
+            simNode.vy += (simNode.y / radius) * delta * scaled;
+          });
+        };
+        force.initialize = (nodes) => {
+          nodesForForce = nodes || [];
+        };
+        return force;
+      };
+
+      const slotForce = () => {
+        let nodesForForce = [];
+        const force = (alpha) => {
+          nodesForForce.forEach((simNode) => {
+            const entry = entryById.get(simNode.id);
+            if (!entry || entry.role === "anchor") return;
+            const targetRadius = Number.isFinite(entry.seedRadius) ? entry.seedRadius : entry.depthRadius;
+            if (!Number.isFinite(targetRadius) || targetRadius <= 0) return;
+            const targetAngle = Number.isFinite(entry.seedAngle) ? entry.seedAngle : normalizeRadians(COLLAB_SHELL_START_ANGLE_RAD);
+            const targetX = Math.cos(targetAngle) * targetRadius;
+            const targetY = Math.sin(targetAngle) * targetRadius;
+            const strength = COLLAB_SHELL_TANGENTIAL_STRENGTH[entry.role] ?? COLLAB_SHELL_TANGENTIAL_STRENGTH.other;
+            const scaled = strength * alpha;
+            simNode.vx += (targetX - simNode.x) * scaled;
+            simNode.vy += (targetY - simNode.y) * scaled;
+          });
+        };
+        force.initialize = (nodes) => {
+          nodesForForce = nodes || [];
+        };
+        return force;
+      };
+
+      const groupCohesionForce = () => {
+        let handoverNodesByGroup = new Map();
+        let allNodesByGroup = new Map();
+        const force = (alpha) => {
+          handoverNodesByGroup.forEach((handoverNodes) => {
+            if (handoverNodes.length <= 1) return;
+            const center = handoverNodes.reduce((acc, node) => {
+              acc.x += node.x || 0;
+              acc.y += node.y || 0;
+              return acc;
+            }, { x: 0, y: 0 });
+            center.x /= handoverNodes.length;
+            center.y /= handoverNodes.length;
+            const scaled = COLLAB_SHELL_GROUP_HANDOVER_COHESION_STRENGTH * alpha;
+            handoverNodes.forEach((node) => {
+              node.vx += (center.x - node.x) * scaled;
+              node.vy += (center.y - node.y) * scaled;
+            });
+          });
+          allNodesByGroup.forEach((groupNodes) => {
+            if (groupNodes.length <= 1) return;
+            const center = groupNodes.reduce((acc, node) => {
+              acc.x += node.x || 0;
+              acc.y += node.y || 0;
+              return acc;
+            }, { x: 0, y: 0 });
+            center.x /= groupNodes.length;
+            center.y /= groupNodes.length;
+            const scaled = COLLAB_SHELL_GROUP_NODE_COHESION_STRENGTH * alpha;
+            groupNodes.forEach((node) => {
+              node.vx += (center.x - node.x) * scaled;
+              node.vy += (center.y - node.y) * scaled;
+            });
+          });
+        };
+        force.initialize = (nodes) => {
+          handoverNodesByGroup = new Map();
+          allNodesByGroup = new Map();
+          (nodes || []).forEach((node) => {
+            const entry = entryById.get(node.id);
+            if (!entry || !entry.groupKey || entry.role === "anchor") return;
+            if (!allNodesByGroup.has(entry.groupKey)) allNodesByGroup.set(entry.groupKey, []);
+            allNodesByGroup.get(entry.groupKey).push(node);
+            if (entry.role !== "handover") return;
+            if (!handoverNodesByGroup.has(entry.groupKey)) handoverNodesByGroup.set(entry.groupKey, []);
+            handoverNodesByGroup.get(entry.groupKey).push(node);
+          });
+        };
+        return force;
+      };
+
+      const simulation = d3.forceSimulation(simNodes)
+        .force(
+          "link",
+          d3.forceLink(model.linksForSim).id((nodeRecord) => nodeRecord.id)
+            .distance(COLLAB_SHELL_RELAX_LINK_DISTANCE)
+            .strength(COLLAB_SHELL_RELAX_LINK_STRENGTH)
+        )
+        .force("charge", d3.forceManyBody().strength(COLLAB_SHELL_RELAX_CHARGE_STRENGTH))
+        .force(
+          "collide",
+          d3.forceCollide()
+            .radius((simNode) => (simNode.collisionRadius || (0.5 * Math.max(simNode.w, simNode.h))) + 12)
+            .iterations(2)
+        )
+        .force("shellRadial", radialForce())
+        .force("shellSlot", slotForce())
+        .force("shellGroupCohesion", groupCohesionForce());
+
+      for (let tick = 0; tick < COLLAB_SHELL_RELAX_TICKS; tick += 1) {
+        simulation.tick();
+      }
+      simulation.stop();
+
+      simNodes.forEach((simNode) => {
+        const entry = entryById.get(simNode.id);
+        if (!entry) return;
+        if (entry.role === "anchor") {
+          simNode.x = 0;
+          simNode.y = 0;
+          return;
+        }
+        const targetRadius = Number.isFinite(entry.seedRadius) ? entry.seedRadius : entry.depthRadius;
+        if (!Number.isFinite(targetRadius) || targetRadius <= 0) return;
+        const bandThickness = COLLAB_SHELL_BAND_THICKNESS[entry.role] || 72;
+        const radius = Math.hypot(simNode.x, simNode.y);
+        const rawAngle = Number.isFinite(simNode.x) && Number.isFinite(simNode.y) && radius > 0
+          ? normalizeRadians(Math.atan2(simNode.y, simNode.x))
+          : normalizeRadians(entry.seedAngle);
+        const group = groupByKey.get(entry.groupKey) || null;
+        let clampedAngle = rawAngle;
+        if (group && Number.isFinite(group.sectorSpan) && group.sectorSpan < (Math.PI * 2)) {
+          const overflowPad = entry.role === "artifact" ? 0.2 : 0.12;
+          const maxDelta = (group.sectorSpan / 2) + overflowPad;
+          const delta = shortestAngleDelta(group.sectorCenter, rawAngle);
+          clampedAngle = normalizeRadians(group.sectorCenter + clamp(delta, -maxDelta, maxDelta));
+        }
+        const clampedRadius = clamp(
+          radius || targetRadius,
+          Math.max(40, targetRadius - (bandThickness / 2)),
+          targetRadius + (bandThickness / 2)
+        );
+        simNode.x = Math.cos(clampedAngle) * clampedRadius;
+        simNode.y = Math.sin(clampedAngle) * clampedRadius;
+      });
+
+      resolveCollaborationShellOverlap(model);
+
+      if (anchorEntry) {
+        anchorEntry.simNode.fx = null;
+        anchorEntry.simNode.fy = null;
+      }
+    }
+
+    function runCollaborationShellLayout(visibleNodeIds, options = {}) {
+      const workspaceRecord = getCurrentWorkspaceRecord();
+      if (!workspaceRecord) return;
+      const model = buildCollaborationShellModel(visibleNodeIds, workspaceRecord);
+      if (!model.nodeEntries.length) return;
+
+      seedCollaborationShellPositions(model);
+      runCollaborationShellRelax(model);
+
+      model.nodesForSim.forEach((simNode) => {
+        const modelNode = model.entryById.get(simNode.id)?.node || null;
+        if (!modelNode) return;
+        modelNode.graphPos = {
+          x: Number.isFinite(simNode.x) ? simNode.x : 0,
+          y: Number.isFinite(simNode.y) ? simNode.y : 0
+        };
+      });
     }
 
     function runD3Layout(visibleNodeIds, options = {}) {
@@ -9282,10 +12939,16 @@ function onViewportMouseDown(event) {
       };
       const fitPadding = Number.isFinite(options.fitPadding) ? options.fitPadding : 80;
 
-      if (layoutMode === "force") {
+      if (layoutMode === "collab-shell") {
+        runCollaborationShellLayout(visibleNodeIds, runOptions);
+      } else if (layoutMode === "force") {
         runD3Layout(visibleNodeIds, runOptions);
       } else {
         runHybridLayout(visibleNodeIds);
+      }
+      const workspaceRecord = getCurrentWorkspaceRecord();
+      if (workspaceRecord) {
+        persistWorkspaceNodePositions(workspaceRecord, visibleNodeIds, { syncWorkspace: true, persist: true });
       }
       fitCameraToNodes(visibleNodeIds, fitPadding);
     }
@@ -9324,11 +12987,11 @@ function onViewportMouseDown(event) {
       const nextZoom = clamp(Math.min(zoomX, zoomY), ZOOM_MIN, ZOOM_MAX);
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
-
-      camera.zoom = nextZoom;
-      camera.panX = (viewportWidth / 2) - (centerX * nextZoom);
-      camera.panY = (viewportHeight / 2) - (centerY * nextZoom);
-      requestRender({ edges: true });
+      applyCameraState({
+        zoom: nextZoom,
+        panX: (viewportWidth / 2) - (centerX * nextZoom),
+        panY: (viewportHeight / 2) - (centerY * nextZoom)
+      }, { edges: true, persistViewport: true });
     }
 
     function resetLayoutForCurrentView() {
@@ -9340,10 +13003,16 @@ function onViewportMouseDown(event) {
 
     function initializeGraphLayoutIfMissing() {
       if (!nodes.length) return;
-      const allHaveSavedPositions = nodes.every((node) => hasValidGraphPos(node));
-      if (allHaveSavedPositions) return;
       const visibleNodeIds = getVisibleNodeIdsForGlobalView();
-      applyCurrentLayoutMode(visibleNodeIds, { reset: true, randomize: true, fitPadding: 80 });
+      if (!visibleNodeIds || !visibleNodeIds.size) return;
+      if (!placeMissingNodePositionsLocally(visibleNodeIds)) return;
+      const workspaceRecord = getCurrentWorkspaceRecord();
+      if (workspaceRecord) {
+        setWorkspaceRuntimeNodePositions(workspaceRecord, visibleNodeIds);
+      }
+      syncNodeRuntimeAndStore();
+      syncWorkspaceRuntimeAndStore();
+      persistStoreToLocalStorage();
     }
 
     function getLocationDescendants(locationId) {
@@ -9475,14 +13144,17 @@ function onViewportMouseDown(event) {
       const scopedNodeIds = Array.isArray(workspaceRecord?.nodeIds) ? workspaceRecord.nodeIds : [];
       const positionedNodes = scopedNodeIds
         .filter((nodeId) => nodeId !== excludedNodeId)
-        .map((nodeId) => allNodesRuntime.find((node) => node.id === nodeId))
-        .filter((node) => node && node.graphPos && Number.isFinite(node.graphPos.x) && Number.isFinite(node.graphPos.y));
+        .map((nodeId) => ({
+          nodeId,
+          pos: getWorkspaceNodePos(workspaceRecord?.id, nodeId, { allowLegacyFallback: true })
+        }))
+        .filter((entry) => !!entry.pos);
       if (!positionedNodes.length) {
         return { x: 0, y: 0 };
       }
-      const total = positionedNodes.reduce((acc, node) => {
-        acc.x += node.graphPos.x;
-        acc.y += node.graphPos.y;
+      const total = positionedNodes.reduce((acc, entry) => {
+        acc.x += entry.pos.x;
+        acc.y += entry.pos.y;
         return acc;
       }, { x: 0, y: 0 });
       return {
@@ -9522,6 +13194,11 @@ function onViewportMouseDown(event) {
         }
         if (!Array.isArray(node.comments)) {
           node.comments = [];
+          changed = true;
+        }
+        const normalizedCommentsResult = normalizeCommentRecords(node.comments, node.id);
+        if (normalizedCommentsResult.changed) {
+          node.comments = normalizedCommentsResult.comments;
           changed = true;
         }
         if (typeof node.summary !== "string" || !node.summary.trim()) {
@@ -9655,6 +13332,7 @@ function onViewportMouseDown(event) {
         anchorNode.graphPos = getDefaultCollaborationGraphPos(workspaceRecord, anchorNode.id);
         changed = true;
       }
+      setWorkspaceNodePos(workspaceRecord.id, anchorNode.id, anchorNode.graphPos);
 
       rebuildVisibleWorkspaceGraph(workspaceRecord);
 
@@ -9687,39 +13365,88 @@ function onViewportMouseDown(event) {
       }
     }
 
-    function hasMentionForCurrentUser(text) {
-      const lower = String(text || "").toLowerCase();
-      return lower.includes(CURRENT_USER_HANDLE.toLowerCase()) || lower.includes(`@${CURRENT_USER.toLowerCase()}`);
+    function getCurrentUserMentionNeedles() {
+      const mentionNeedles = new Set();
+      const currentUserRecord = getCurrentUserRecord();
+      const currentUserName = String(getCurrentUserName() || "").trim();
+      const currentUserOrgLabel = currentUserId ? String(getUserDisplayNameWithOrg(currentUserId) || "").trim() : "";
+      const allowedAuthorLabels = new Set(
+        [currentUserName, currentUserOrgLabel, currentUserId]
+          .filter(Boolean)
+          .map((label) => String(label).trim().toLowerCase())
+      );
+      const addNeedle = (value, includePrefixedAt = true) => {
+        const trimmedValue = String(value || "").trim().toLowerCase();
+        if (!trimmedValue) return;
+        mentionNeedles.add(trimmedValue);
+        if (includePrefixedAt && !trimmedValue.startsWith("@")) {
+          mentionNeedles.add(`@${trimmedValue}`);
+        }
+      };
+      getCurrentUserCommentAuthorLabels().forEach((label) => {
+        const trimmedLabel = String(label || "").trim().toLowerCase();
+        if (!allowedAuthorLabels.has(trimmedLabel)) return;
+        addNeedle(trimmedLabel, true);
+      });
+      if (currentUserRecord?.name) {
+        const firstName = currentUserRecord.name.trim().split(/\s+/)[0] || "";
+        addNeedle(firstName, true);
+      }
+      return mentionNeedles;
     }
+
+    function hasMentionForCurrentUser(text) {
+      const lowerText = String(text || "").toLowerCase();
+      if (!lowerText) return false;
+      const mentionNeedles = getCurrentUserMentionNeedles();
+      for (const mentionNeedle of mentionNeedles) {
+        if (lowerText.includes(mentionNeedle)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function isCommentNotificationRelevantForCurrentUser(node, comment) {
+      if (!node || !comment || typeof comment.id !== "string" || !comment.id) return false;
+      if (comment.isNew === false) return false;
+      const mention = hasMentionForCurrentUser(comment.text);
+      const ownerUpdate = isNodeOwnedByCurrentUser(node);
+      return mention || ownerUpdate;
+    }
+
+    function isCommentUnreadForCurrentUser(node, comment) {
+      if (!isCommentNotificationRelevantForCurrentUser(node, comment)) return false;
+      return !hasCurrentUserSeenComment(comment.id);
+    }
+
     function buildNotifications() {
       const notifications = [];
       nodes.forEach((node) => {
         node.tasks.forEach((task) => {
-          if (isTaskAssignedToCurrentUser(task.assignedTo) && !task.done && !state.seenTaskIds.has(task.id)) {
-            notifications.push({
-              id: `task:${task.id}`,
-              kind: "task",
-              nodeId: node.id,
-              taskId: task.id,
-              title: `Task: ${task.text}`,
-              subtext: `${node.label} • assigned to ${task.assignedTo}`
-            });
-          }
+          if (!isTaskAssignedToCurrentUser(task.assignedTo) || task.done) return;
+          notifications.push({
+            id: `task:${task.id}`,
+            kind: "task",
+            nodeId: node.id,
+            taskId: task.id,
+            title: `Task: ${task.text}`,
+            subtext: `${node.label} • assigned to ${task.assignedTo}`,
+            isUnread: !hasCurrentUserSeenTask(task.id)
+          });
         });
 
-        node.comments.forEach((comment, commentIndex) => {
-          if (!comment.isNew) return;
+        node.comments.forEach((comment) => {
+          if (!isCommentNotificationRelevantForCurrentUser(node, comment)) return;
           const mention = hasMentionForCurrentUser(comment.text);
-          const ownerUpdate = isNodeOwnedByCurrentUser(node);
-          if (!mention && !ownerUpdate) return;
-
           notifications.push({
-            id: `comment:${node.id}:${commentIndex}`,
+            id: `comment:${node.id}:${comment.id}`,
             kind: "comment",
             nodeId: node.id,
-            commentIndex,
+            commentId: comment.id,
             title: mention ? `Mention in ${node.label}` : `New comment on ${node.label}`,
-            subtext: `${comment.author}: ${comment.text}`
+            subtext: `${comment.author}: ${comment.text}`,
+            isUnread: !hasCurrentUserSeenComment(comment.id)
           });
         });
       });
@@ -9744,17 +13471,18 @@ function onViewportMouseDown(event) {
     }
 
     function markNotificationSeen(notification) {
+      let notificationStateChanged = false;
       if (notification.kind === "task") {
-        state.seenTaskIds.add(notification.taskId);
+        notificationStateChanged = markCurrentUserTaskSeen(notification.taskId) || notificationStateChanged;
       }
 
       if (notification.kind === "comment") {
-        const node = getNodeById(notification.nodeId);
-        if (node && node.comments[notification.commentIndex]) {
-          node.comments[notification.commentIndex].isNew = false;
-        }
+        notificationStateChanged = markCurrentUserCommentSeen(notification.commentId) || notificationStateChanged;
       }
 
+      if (notificationStateChanged) {
+        persistStoreToLocalStorage();
+      }
       const node = getNodeById(notification.nodeId);
       const focusTarget = getFocusTargetForNode(node);
       setFocusLocation(focusTarget);
@@ -9765,10 +13493,15 @@ function onViewportMouseDown(event) {
 
     function renderNotifications() {
       const notifications = buildNotifications();
-      notifCountEl.textContent = String(notifications.length);
-      notifCountEl.classList.toggle("zero", notifications.length === 0);
+      const unreadNotifications = notifications.filter((notification) => !!notification.isUnread);
+      const readNotifications = notifications.filter((notification) => !notification.isUnread);
+      notifCountEl.textContent = String(unreadNotifications.length);
+      notifCountEl.classList.toggle("zero", unreadNotifications.length === 0);
       notifBellEl.classList.toggle("active", state.notificationsOpen);
       notificationsPanelEl.classList.toggle("hidden", !state.notificationsOpen);
+      if (!state.notificationsOpen) {
+        notificationsPanelEl.style.removeProperty("transform");
+      }
 
       notificationsPanelEl.innerHTML = "";
       if (!state.notificationsOpen) return;
@@ -9777,29 +13510,65 @@ function onViewportMouseDown(event) {
         const emptyText = document.createElement("p");
         emptyText.className = "muted";
         emptyText.style.margin = "6px";
-        emptyText.textContent = "No unread notifications.";
+        emptyText.textContent = "No alerts.";
         notificationsPanelEl.appendChild(emptyText);
+        clampNotificationsPanelToViewport();
         return;
       }
 
-      notifications.forEach((notification) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "notif-item";
+      const appendNotificationsSection = (sectionLabel, items, unread = false) => {
+        if (!items.length) return;
+        const sectionTitle = document.createElement("p");
+        sectionTitle.className = "notif-section-label";
+        sectionTitle.textContent = sectionLabel;
+        notificationsPanelEl.appendChild(sectionTitle);
+        items.forEach((notification) => {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = `notif-item ${unread ? "is-unread" : "is-read"}`;
 
-        const title = document.createElement("p");
-        title.className = "notif-title";
-        title.textContent = notification.title;
+          const title = document.createElement("p");
+          title.className = "notif-title";
+          title.textContent = notification.title;
 
-        const sub = document.createElement("p");
-        sub.className = "notif-sub";
-        sub.textContent = notification.subtext;
+          const sub = document.createElement("p");
+          sub.className = "notif-sub";
+          sub.textContent = notification.subtext;
 
-        item.appendChild(title);
-        item.appendChild(sub);
-        item.addEventListener("click", () => markNotificationSeen(notification));
-        notificationsPanelEl.appendChild(item);
-      });
+          item.appendChild(title);
+          item.appendChild(sub);
+          item.addEventListener("click", () => markNotificationSeen(notification));
+          notificationsPanelEl.appendChild(item);
+        });
+      };
+
+      if (!unreadNotifications.length && readNotifications.length) {
+        const noUnread = document.createElement("p");
+        noUnread.className = "notif-empty-note";
+        noUnread.textContent = "No unread alerts.";
+        notificationsPanelEl.appendChild(noUnread);
+      }
+
+      appendNotificationsSection("Unread", unreadNotifications, true);
+      appendNotificationsSection("Read", readNotifications, false);
+      clampNotificationsPanelToViewport();
+    }
+
+    function clampNotificationsPanelToViewport() {
+      if (!notificationsPanelEl || !state.notificationsOpen) return;
+      notificationsPanelEl.style.transform = "translateX(0px)";
+      const panelRect = notificationsPanelEl.getBoundingClientRect();
+      const viewportMargin = 8;
+      const viewportRight = window.innerWidth - viewportMargin;
+      const viewportLeft = viewportMargin;
+      let shiftX = 0;
+      if (panelRect.right > viewportRight) {
+        shiftX -= (panelRect.right - viewportRight);
+      }
+      if ((panelRect.left + shiftX) < viewportLeft) {
+        shiftX += (viewportLeft - (panelRect.left + shiftX));
+      }
+      notificationsPanelEl.style.transform = `translateX(${Math.round(shiftX)}px)`;
     }
 
     function createTypeBadge(type) {
@@ -10129,31 +13898,8 @@ function onViewportMouseDown(event) {
     }
 
     function getPortalBodyFrameFromCardStyles(cardEl, wrapperFrame, node, expandedLocationId = null) {
-      if (!cardEl || !wrapperFrame || !node || node.type !== "portal") {
-        return getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
-      }
-      const expectedFrame = getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
-      const bodyEl = cardEl.querySelector(".node-portal-body");
-      if (!(bodyEl instanceof HTMLElement)) {
-        return expectedFrame;
-      }
-      const parsedLeft = Number.parseFloat(bodyEl.style.left);
-      const parsedTop = Number.parseFloat(bodyEl.style.top);
-      const parsedWidth = Number.parseFloat(bodyEl.style.width);
-      const parsedHeight = Number.parseFloat(bodyEl.style.height);
-      const left = Number.isFinite(parsedLeft) ? parsedLeft : bodyEl.offsetLeft;
-      const top = Number.isFinite(parsedTop) ? parsedTop : bodyEl.offsetTop;
-      const width = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : bodyEl.offsetWidth;
-      const height = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : bodyEl.offsetHeight;
-      if (!Number.isFinite(left) || !Number.isFinite(top) || width <= 0 || height <= 0) {
-        return expectedFrame;
-      }
-      return {
-        x: wrapperFrame.x + left,
-        y: wrapperFrame.y + top,
-        w: width,
-        h: height
-      };
+      void cardEl;
+      return getPortalBodyFrameFromWrapperFrame(node, wrapperFrame, expandedLocationId);
     }
 
     function getRenderedPortalBodyFrame(cardEl, wrapperFrame, node, expandedLocationId = null) {
@@ -10163,7 +13909,6 @@ function onViewportMouseDown(event) {
       if (!(bodyEl instanceof HTMLElement)) {
         return expectedFrame;
       }
-      const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
       const planeEl = cardEl.closest(".canvas-plane");
       if (planeEl instanceof HTMLElement) {
         const planeRect = planeEl.getBoundingClientRect();
@@ -10176,11 +13921,15 @@ function onViewportMouseDown(event) {
           bodyRect.width > 0 &&
           bodyRect.height > 0
         ) {
+          const originLocalX = bodyRect.left - planeRect.left;
+          const originLocalY = bodyRect.top - planeRect.top;
+          const worldOrigin = screenToWorld(originLocalX, originLocalY);
+          const worldSize = screenDeltaToWorld(bodyRect.width, bodyRect.height);
           const renderedFrame = {
-            x: (bodyRect.left - planeRect.left) / zoom,
-            y: (bodyRect.top - planeRect.top) / zoom,
-            w: bodyRect.width / zoom,
-            h: bodyRect.height / zoom
+            x: worldOrigin.worldX,
+            y: worldOrigin.worldY,
+            w: worldSize.dxWorld,
+            h: worldSize.dyWorld
           };
           const maxDelta = Math.max(
             Math.abs(renderedFrame.x - expectedFrame.x),
@@ -10229,8 +13978,7 @@ function onViewportMouseDown(event) {
       lastVisibleNodeBodyFrames = buildVisibleNodeBodyFrameCache(
         lastVisibleNodeFrames,
         lastRenderedCardsById,
-        expandedLocationId,
-        { useRenderedFrame: true }
+        expandedLocationId
       );
     }
 
@@ -10470,6 +14218,23 @@ function onViewportMouseDown(event) {
       if (suppressClickNodeId) {
         suppressClickNodeId = null;
       }
+      if (isMultiSelectModifier(event)) {
+        resetLocationClickTracker();
+        resetPortalClickTracker();
+        if (node.type === "collaboration" || !isSelectableNode(node)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (toggleNodeSelection(node.id)) {
+          renderNodeLists();
+          renderCanvas();
+          renderDetailsPane();
+        }
+        return;
+      }
       if (node.type === "collaboration") {
         resetLocationClickTracker();
         resetPortalClickTracker();
@@ -10497,13 +14262,17 @@ function onViewportMouseDown(event) {
       selectNode(node.id, { source: "graph" });
     }
 
-    function createNodeCard(node, isSelected, layoutOverride = null) {
-      const frame = computeNodeFrame(node, state.expandedCanvasLocationId, layoutOverride);
+    function createNodeCard(node, isSelected, screenFrame) {
       const isExpandedLocationCard = node.type === "location" && isLocationCardExpanded(node.id);
       const isAnchorCard = isWorkspaceAnchorNode(node);
+      const isMultiDragReady = isSelected && state.selectedNodeIds.size > 1;
+      const zoom = getCameraZoom();
 
       const card = document.createElement("div");
       card.className = `node-card ${node.type}${isSelected ? " selected" : ""}`;
+      if (isMultiDragReady) {
+        card.classList.add("multi-drag-ready");
+      }
       if (isAnchorCard) {
         card.classList.add("anchor");
       }
@@ -10512,13 +14281,15 @@ function onViewportMouseDown(event) {
       } else {
         card.classList.add("drag-anywhere");
       }
-      card.style.width = `${frame.w}px`;
-      card.style.height = `${frame.h}px`;
-      card.style.left = `${frame.x}px`;
-      card.style.top = `${frame.y}px`;
-      card.style.setProperty("--graph-node-text-inset", `${GRAPH_NODE_TEXT_INSET_PX}px`);
+      card.style.width = `${screenFrame.w}px`;
+      card.style.height = `${screenFrame.h}px`;
+      card.style.left = `${screenFrame.x}px`;
+      card.style.top = `${screenFrame.y}px`;
+      card.style.setProperty("--camera-zoom", String(zoom));
+      card.style.setProperty("--graph-node-text-inset", `${GRAPH_NODE_TEXT_INSET_PX * zoom}px`);
+      card.style.setProperty("--node-card-radius", `${16 * zoom}px`);
       card.dataset.nodeId = node.id;
-      buildNodeCardContent(card, node, frame);
+      buildNodeCardContent(card, node, screenFrame);
       const dragHandle = card.querySelector(".node-drag-handle");
       const portalBody = node.type === "portal" && !isAnchorCard ? card.querySelector(".node-portal-body") : null;
       const anchorBody = isAnchorCard ? card.querySelector(".node-anchor-body") : null;
@@ -10706,7 +14477,7 @@ function onViewportMouseDown(event) {
         return;
       }
       if (node.type === "entity") {
-        buildEntityCardContent(card, node);
+        buildEntityCardContent(card, node, frame);
         return;
       }
       if (node.type === "collaboration") {
@@ -10717,13 +14488,14 @@ function onViewportMouseDown(event) {
     }
 
     function buildAnchorCardContent(card, node, frame) {
+      const zoom = getCameraZoom();
       const labelText = getAnchorNodeDisplayLabel(node);
       if (labelText) {
         const hoverLabel = document.createElement("div");
         hoverLabel.className = "node-portal-hover-label";
         hoverLabel.textContent = labelText;
         hoverLabel.style.left = `${frame.w / 2}px`;
-        hoverLabel.style.top = `${-PORTAL_LABEL_GAP_PX}px`;
+        hoverLabel.style.top = `${-(PORTAL_LABEL_GAP_PX * zoom)}px`;
         card.appendChild(hoverLabel);
       }
       const body = document.createElement("div");
@@ -10768,6 +14540,7 @@ function onViewportMouseDown(event) {
     }
 
     function buildLocationCardContent(card, node) {
+      const zoom = getCameraZoom();
       const expanded = isLocationCardExpanded(node.id);
       const header = document.createElement("div");
       header.className = "node-card-header node-drag-handle";
@@ -10794,7 +14567,7 @@ function onViewportMouseDown(event) {
       const expandedMetrics = getExpandedLocationMetrics(node);
       const childContainer = document.createElement("div");
       childContainer.className = "node-children-container";
-      childContainer.style.height = `${expandedMetrics.innerHeightPx}px`;
+      childContainer.style.height = `${expandedMetrics.innerHeightPx * zoom}px`;
 
       if (!expandedMetrics.normalizedChildren.length) {
         const empty = document.createElement("p");
@@ -10807,7 +14580,7 @@ function onViewportMouseDown(event) {
           const childLayout = item.layout;
           const child = document.createElement("div");
           child.className = "node-child-loc";
-          if (state.selectedNodeId === childNode.id) {
+          if (state.selectedNodeIds.has(childNode.id)) {
             child.classList.add("selected");
           }
           child.style.left = `${childLayout.x}%`;
@@ -10821,9 +14594,9 @@ function onViewportMouseDown(event) {
             const childPixelWidth = (expandedMetrics.innerWidthPx * childLayout.w) / 100;
             const childPixelHeight = (expandedMetrics.innerHeightPx * childLayout.h) / 100;
             const markerSizePx = clamp(
-              Math.round(Math.min(childPixelWidth, childPixelHeight) * 0.22),
-              6,
-              14
+              Math.round(Math.min(childPixelWidth, childPixelHeight) * 0.22 * zoom),
+              Math.round(6 * zoom),
+              Math.round(14 * zoom)
             );
             const markerLayer = document.createElement("div");
             markerLayer.className = "node-child-marker-layer";
@@ -10833,7 +14606,7 @@ function onViewportMouseDown(event) {
               marker.className = "node-child-exp-marker";
               marker.style.width = `${markerSizePx}px`;
               marker.style.height = `${markerSizePx}px`;
-              if (state.selectedNodeId === experimentNode.id) {
+              if (state.selectedNodeIds.has(experimentNode.id)) {
                 marker.classList.add("selected");
               }
               marker.style.marginRight = index === activeExperiments.length - 1 ? "0" : "1px";
@@ -10856,15 +14629,21 @@ function onViewportMouseDown(event) {
         });
       }
       card.appendChild(childContainer);
-      updateChildMarkerSizes(childContainer, expandedMetrics.innerWidthPx, expandedMetrics.innerHeightPx);
+      updateChildMarkerSizes(
+        childContainer,
+        expandedMetrics.innerWidthPx * zoom,
+        expandedMetrics.innerHeightPx * zoom
+      );
 
       const resizeHandle = document.createElement("button");
       resizeHandle.type = "button";
       resizeHandle.className = "node-resize-handle";
       resizeHandle.setAttribute("aria-label", "Resize location view");
       resizeHandle.title = "Resize";
-      resizeHandle.style.width = `${RESIZE_HANDLE_SIZE}px`;
-      resizeHandle.style.height = `${RESIZE_HANDLE_SIZE}px`;
+      resizeHandle.style.width = `${RESIZE_HANDLE_SIZE * zoom}px`;
+      resizeHandle.style.height = `${RESIZE_HANDLE_SIZE * zoom}px`;
+      resizeHandle.style.right = `${6 * zoom}px`;
+      resizeHandle.style.bottom = `${6 * zoom}px`;
       resizeHandle.addEventListener("mousedown", (event) => {
         startLocationResize(event, node.id, card, childContainer);
       });
@@ -10937,6 +14716,7 @@ function onViewportMouseDown(event) {
     }
 
     function buildPortalCardContent(card, node, frame) {
+      const zoom = getCameraZoom();
       const bodyOffset = getPortalBodyOffsetWithinWrapper(node, frame, state.expandedCanvasLocationId);
       const linkedWorkspaceName = getPortalLinkedWorkspaceName(node);
       if (linkedWorkspaceName) {
@@ -10944,7 +14724,7 @@ function onViewportMouseDown(event) {
         hoverLabel.className = "node-portal-hover-label";
         hoverLabel.textContent = linkedWorkspaceName;
         hoverLabel.style.left = `${bodyOffset.left + (bodyOffset.width / 2)}px`;
-        hoverLabel.style.top = `${bodyOffset.top - PORTAL_LABEL_GAP_PX}px`;
+        hoverLabel.style.top = `${bodyOffset.top - (PORTAL_LABEL_GAP_PX * zoom)}px`;
         card.appendChild(hoverLabel);
       }
       const body = document.createElement("div");
@@ -10966,208 +14746,26 @@ function onViewportMouseDown(event) {
       card.appendChild(body);
     }
 
-    function buildRoundedPolygonPathData(points, cornerRadius = 0) {
-      if (!Array.isArray(points) || points.length < 3) return "";
-      const normalizedPoints = points
-        .map((point) => ({
-          x: Number(point?.x),
-          y: Number(point?.y)
-        }))
-        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-      if (normalizedPoints.length < 3) return "";
-      const radius = Math.max(0, Number(cornerRadius) || 0);
-      const roundedPoints = normalizedPoints.map((point, index) => {
-        const prev = normalizedPoints[(index - 1 + normalizedPoints.length) % normalizedPoints.length];
-        const next = normalizedPoints[(index + 1) % normalizedPoints.length];
-        const prevDx = prev.x - point.x;
-        const prevDy = prev.y - point.y;
-        const nextDx = next.x - point.x;
-        const nextDy = next.y - point.y;
-        const prevLength = Math.hypot(prevDx, prevDy);
-        const nextLength = Math.hypot(nextDx, nextDy);
-        const effectiveRadius = Math.min(radius, prevLength / 2, nextLength / 2);
-        const incoming = effectiveRadius > 0 && prevLength > 0
-          ? {
-              x: point.x + ((prevDx / prevLength) * effectiveRadius),
-              y: point.y + ((prevDy / prevLength) * effectiveRadius)
-            }
-          : { x: point.x, y: point.y };
-        const outgoing = effectiveRadius > 0 && nextLength > 0
-          ? {
-              x: point.x + ((nextDx / nextLength) * effectiveRadius),
-              y: point.y + ((nextDy / nextLength) * effectiveRadius)
-            }
-          : { x: point.x, y: point.y };
-        return { point, incoming, outgoing };
-      });
-      const first = roundedPoints[0];
-      let path = `M ${first.outgoing.x.toFixed(2)} ${first.outgoing.y.toFixed(2)}`;
-      for (let index = 1; index < roundedPoints.length; index += 1) {
-        const roundedPoint = roundedPoints[index];
-        path += ` L ${roundedPoint.incoming.x.toFixed(2)} ${roundedPoint.incoming.y.toFixed(2)}`;
-        path += ` Q ${roundedPoint.point.x.toFixed(2)} ${roundedPoint.point.y.toFixed(2)} ${roundedPoint.outgoing.x.toFixed(2)} ${roundedPoint.outgoing.y.toFixed(2)}`;
-      }
-      path += ` L ${first.incoming.x.toFixed(2)} ${first.incoming.y.toFixed(2)}`;
-      path += ` Q ${first.point.x.toFixed(2)} ${first.point.y.toFixed(2)} ${first.outgoing.x.toFixed(2)} ${first.outgoing.y.toFixed(2)} Z`;
-      return path;
-    }
-
-    function buildRoundedDiamondPathData(width = 100, height = 100, cornerRadius = 0, inset = 0) {
-      const normalizedWidth = Math.max(1, Number(width) || 1);
-      const normalizedHeight = Math.max(1, Number(height) || 1);
-      const normalizedInset = Math.max(
-        0,
-        Math.min(
-          Number(inset) || 0,
-          (normalizedWidth / 2) - 0.5,
-          (normalizedHeight / 2) - 0.5
-        )
-      );
-      const left = normalizedInset;
-      const right = normalizedWidth - normalizedInset;
-      const top = normalizedInset;
-      const bottom = normalizedHeight - normalizedInset;
-      return buildRoundedPolygonPathData([
-        { x: normalizedWidth / 2, y: top },
-        { x: right, y: normalizedHeight / 2 },
-        { x: normalizedWidth / 2, y: bottom },
-        { x: left, y: normalizedHeight / 2 }
-      ], cornerRadius);
-    }
-
-    function buildEntityCardContent(card, node) {
-      const idBase = String(node?.id || "entity").replace(/[^A-Za-z0-9_-]/g, "_");
-      const baseGradientId = `entityBaseGrad_${idBase}`;
-      const sheenGradientId = `entitySheenGrad_${idBase}`;
-      const highlightGradientId = `entityHighlightGrad_${idBase}`;
-      const innerGradientId = `entityInnerGrad_${idBase}`;
-      const outerPathData = buildRoundedDiamondPathData(100, 100, 9, 0.8);
-      const innerPathData = buildRoundedDiamondPathData(100, 100, 6.5, 12);
+    function buildEntityCardContent(card, node, frame) {
+      const visualDiamondFrame = getEntityVisualDiamondFrame(frame);
+      const squareSide = Math.max(1, visualDiamondFrame.w / Math.SQRT2);
+      card.style.setProperty("--entity-shape-size", `${squareSide}px`);
       const body = document.createElement("div");
       body.className = "node-entity-body";
-      const surface = createSvgElement("svg", {
-        class: "node-entity-surface",
-        viewBox: "0 0 100 100",
-        preserveAspectRatio: "none",
-        "aria-hidden": "true"
-      });
-      const defs = createSvgElement("defs");
-      const baseGradient = createSvgElement("linearGradient", {
-        id: baseGradientId,
-        x1: "14%",
-        y1: "4%",
-        x2: "86%",
-        y2: "100%"
-      });
-      [
-        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.42" },
-        { offset: "54%", color: "rgb(255, 255, 255)", opacity: "0.31" },
-        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.22" }
-      ].forEach((stop) => {
-        baseGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      const sheenGradient = createSvgElement("linearGradient", {
-        id: sheenGradientId,
-        x1: "18%",
-        y1: "0%",
-        x2: "70%",
-        y2: "100%"
-      });
-      [
-        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.28" },
-        { offset: "42%", color: "rgb(255, 255, 255)", opacity: "0.14" },
-        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.03" }
-      ].forEach((stop) => {
-        sheenGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      const highlightGradient = createSvgElement("radialGradient", {
-        id: highlightGradientId,
-        cx: "26%",
-        cy: "8%",
-        r: "84%"
-      });
-      [
-        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.34" },
-        { offset: "58%", color: "rgb(255, 255, 255)", opacity: "0.10" },
-        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0" }
-      ].forEach((stop) => {
-        highlightGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      const innerGradient = createSvgElement("linearGradient", {
-        id: innerGradientId,
-        x1: "28%",
-        y1: "14%",
-        x2: "78%",
-        y2: "88%"
-      });
-      [
-        { offset: "0%", color: "rgb(255, 255, 255)", opacity: "0.16" },
-        { offset: "100%", color: "rgb(255, 255, 255)", opacity: "0.03" }
-      ].forEach((stop) => {
-        innerGradient.appendChild(createSvgElement("stop", {
-          offset: stop.offset,
-          "stop-color": stop.color,
-          "stop-opacity": stop.opacity
-        }));
-      });
-      defs.appendChild(baseGradient);
-      defs.appendChild(sheenGradient);
-      defs.appendChild(highlightGradient);
-      defs.appendChild(innerGradient);
-      surface.appendChild(defs);
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-base",
-        d: outerPathData,
-        fill: `url(#${baseGradientId})`
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-tint",
-        d: outerPathData
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-sheen",
-        d: outerPathData,
-        fill: `url(#${sheenGradientId})`
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-highlight",
-        d: outerPathData,
-        fill: `url(#${highlightGradientId})`
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-inner",
-        d: innerPathData,
-        fill: `url(#${innerGradientId})`
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-outline",
-        d: outerPathData
-      }));
-      surface.appendChild(createSvgElement("path", {
-        class: "node-entity-diamond-focus-ring",
-        d: outerPathData
-      }));
+      const shape = document.createElement("div");
+      shape.className = "node-entity-shape node-drag-handle";
+      const face = document.createElement("div");
+      face.className = "node-entity-face";
       const content = document.createElement("div");
       content.className = "node-entity-content";
       const label = document.createElement("div");
       label.className = "node-entity-label";
       label.textContent = node.label || getEntityLabelFallback(node) || "Entity";
       content.appendChild(label);
-      body.appendChild(surface);
+      shape.appendChild(face);
+      shape.appendChild(content);
+      body.appendChild(shape);
       card.appendChild(body);
-      card.appendChild(content);
     }
 
     function buildCollaborationCardContent(card, node, frame) {
@@ -11203,7 +14801,12 @@ function onViewportMouseDown(event) {
 
       const owner = document.createElement("div");
       owner.className = "node-card-owner";
-      owner.textContent = node.owner;
+      if (node.type === "handover") {
+        const contextLabel = getHandoverContextDisplayLabel(node);
+        owner.textContent = contextLabel ? `${node.owner} · ${contextLabel}` : node.owner;
+      } else {
+        owner.textContent = node.owner;
+      }
       footer.appendChild(owner);
 
       const statusValue = getNodeStatusValue(node);
@@ -11227,6 +14830,42 @@ function onViewportMouseDown(event) {
         handoverCorner.className = "handover-corner-mark";
         handoverCorner.setAttribute("aria-hidden", "true");
         card.appendChild(handoverCorner);
+        const portalLink = getHandoverPortalBadgeLink(node, getCurrentWorkspaceRecord(), currentUserId);
+        if (portalLink?.targetWorkspaceId) {
+          const portalBadge = document.createElement("button");
+          portalBadge.type = "button";
+          portalBadge.className = "handover-portal-badge";
+          portalBadge.setAttribute("aria-label", `Open ${portalLink.targetLabel || "linked workspace"}`);
+          portalBadge.title = portalLink.targetLabel || "Open linked workspace";
+          const portalGlyph = document.createElement("span");
+          portalGlyph.className = "handover-portal-badge-glyph";
+          portalGlyph.setAttribute("aria-hidden", "true");
+          const portalRing = document.createElement("span");
+          portalRing.className = "handover-portal-badge-ring";
+          const portalCore = document.createElement("span");
+          portalCore.className = "handover-portal-badge-core";
+          portalGlyph.appendChild(portalRing);
+          portalGlyph.appendChild(portalCore);
+          portalBadge.appendChild(portalGlyph);
+          portalBadge.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          });
+          portalBadge.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleHandoverPortalBadgeClick(node.id);
+          });
+          portalBadge.addEventListener("dblclick", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          });
+          portalBadge.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          });
+          card.appendChild(portalBadge);
+        }
       }
     }
 
@@ -11308,45 +14947,27 @@ function onViewportMouseDown(event) {
       if (!edgesLayerEl) return;
       if (!lastVisibleNodeFrames || lastVisibleNodeFrames.size === 0) {
         edgesLayerEl.innerHTML = "";
+        lastVisibleEdgeScreenBounds = new Map();
         return;
       }
-
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      lastVisibleNodeFrames.forEach((frame) => {
-        minX = Math.min(minX, frame.x);
-        minY = Math.min(minY, frame.y);
-        maxX = Math.max(maxX, frame.x + frame.w);
-        maxY = Math.max(maxY, frame.y + frame.h);
-      });
-      if (edgeCreateDraft.active) {
-        minX = Math.min(minX, edgeCreateDraft.startX, edgeCreateDraft.endX);
-        minY = Math.min(minY, edgeCreateDraft.startY, edgeCreateDraft.endY);
-        maxX = Math.max(maxX, edgeCreateDraft.startX, edgeCreateDraft.endX);
-        maxY = Math.max(maxY, edgeCreateDraft.startY, edgeCreateDraft.endY);
-      }
-
-      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-        edgesLayerEl.innerHTML = "";
-        return;
-      }
-
-      const vx = minX - EDGE_PAD;
-      const vy = minY - EDGE_PAD;
-      const vw = Math.max(1, (maxX - minX) + (2 * EDGE_PAD));
-      const vh = Math.max(1, (maxY - minY) + (2 * EDGE_PAD));
-
       edgesLayerEl.innerHTML = "";
-      edgesLayerEl.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+      lastVisibleEdgeScreenBounds = new Map();
+      const viewportRect = viewportEl ? viewportEl.getBoundingClientRect() : null;
+      const viewportWidth = Math.max(1, viewportRect?.width || CANVAS_WIDTH);
+      const viewportHeight = Math.max(1, viewportRect?.height || CANVAS_HEIGHT);
+      edgesLayerEl.setAttribute("viewBox", `0 0 ${viewportWidth} ${viewportHeight}`);
       edgesLayerEl.setAttribute("preserveAspectRatio", "none");
-      edgesLayerEl.setAttribute("width", String(vw));
-      edgesLayerEl.setAttribute("height", String(vh));
-      edgesLayerEl.style.left = `${vx}px`;
-      edgesLayerEl.style.top = `${vy}px`;
-      edgesLayerEl.style.width = `${vw}px`;
-      edgesLayerEl.style.height = `${vh}px`;
+      edgesLayerEl.setAttribute("width", String(viewportWidth));
+      edgesLayerEl.setAttribute("height", String(viewportHeight));
+      edgesLayerEl.style.left = "0px";
+      edgesLayerEl.style.top = "0px";
+      edgesLayerEl.style.width = `${viewportWidth}px`;
+      edgesLayerEl.style.height = `${viewportHeight}px`;
+      const zoom = getCameraZoom();
+      const chevronLen = 6 * zoom;
+      const chevronHalfHeight = 4 * zoom;
+      const edgeHitPadding = 6 * zoom;
+      const chevronPathD = `M -${chevronLen} -${chevronHalfHeight} L 0 0 L -${chevronLen} ${chevronHalfHeight}`;
 
       nodes.forEach((sourceNode) => {
         if (!lastVisibleNodeIds.has(sourceNode.id)) return;
@@ -11369,30 +14990,51 @@ function onViewportMouseDown(event) {
           const by = targetCenter.y;
           const borderA = getBorderAnchorToward(sourceNode, sourceFrame, bx, by);
           const borderB = getBorderAnchorToward(targetNode, targetFrame, ax, ay);
-          const { cx, cy } = getQuadraticControlPoint(borderA.x, borderA.y, borderB.x, borderB.y);
-          const curveD = `M ${borderA.x} ${borderA.y} Q ${cx} ${cy} ${borderB.x} ${borderB.y}`;
+          const worldControl = getQuadraticControlPoint(borderA.x, borderA.y, borderB.x, borderB.y);
+          const control = { x: worldControl.cx, y: worldControl.cy };
+          const borderAScreen = worldToScreen(borderA.x, borderA.y);
+          const borderBScreen = worldToScreen(borderB.x, borderB.y);
+          const controlScreen = worldToScreen(control.x, control.y);
+          const curveD =
+            `M ${borderAScreen.screenX} ${borderAScreen.screenY}` +
+            ` Q ${controlScreen.screenX} ${controlScreen.screenY}` +
+            ` ${borderBScreen.screenX} ${borderBScreen.screenY}`;
           const visibleEdge = createSvgElement("path", {
             class: "edge-line",
             d: curveD
           });
+          const isEdgeSelected = state.selectedEdgeIds.has(edgeRecord.id);
+          if (isEdgeSelected) {
+            visibleEdge.classList.add("edge-line--selected");
+          }
           edgesLayerEl.appendChild(visibleEdge);
 
           const midpoint = getQuadraticPointAndTangentAt(
             borderA.x,
             borderA.y,
-            cx,
-            cy,
+            control.x,
+            control.y,
             borderB.x,
             borderB.y,
             EDGE_CHEVRON_T
           );
+          const midpointScreen = worldToScreen(midpoint.px, midpoint.py);
           const angleDeg = Math.atan2(midpoint.ty, midpoint.tx) * (180 / Math.PI);
           const chevron = createSvgElement("path", {
             class: "edge-chevron",
-            d: "M -6 -4 L 0 0 L -6 4",
-            transform: `translate(${midpoint.px} ${midpoint.py}) rotate(${angleDeg})`
+            d: chevronPathD,
+            transform: `translate(${midpointScreen.screenX} ${midpointScreen.screenY}) rotate(${angleDeg})`
           });
+          if (isEdgeSelected) {
+            chevron.classList.add("edge-chevron--selected");
+          }
           edgesLayerEl.appendChild(chevron);
+          lastVisibleEdgeScreenBounds.set(edgeRecord.id, {
+            left: Math.min(borderAScreen.screenX, borderBScreen.screenX, controlScreen.screenX) - edgeHitPadding,
+            top: Math.min(borderAScreen.screenY, borderBScreen.screenY, controlScreen.screenY) - edgeHitPadding,
+            right: Math.max(borderAScreen.screenX, borderBScreen.screenX, controlScreen.screenX) + edgeHitPadding,
+            bottom: Math.max(borderAScreen.screenY, borderBScreen.screenY, controlScreen.screenY) + edgeHitPadding
+          });
 
           const edgeMeta = {
             edgeId: edgeRecord.id,
@@ -11400,8 +15042,8 @@ function onViewportMouseDown(event) {
             targetId: edgeRecord.targetId,
             startX: borderA.x,
             startY: borderA.y,
-            controlX: cx,
-            controlY: cy,
+            controlX: control.x,
+            controlY: control.y,
             endX: borderB.x,
             endY: borderB.y
           };
@@ -11409,6 +15051,7 @@ function onViewportMouseDown(event) {
             class: "edge-hit",
             d: curveD
           });
+          hitEdge.dataset.edgeId = edgeRecord.id;
           const handleEdgeEnter = (event) => {
             setEdgeHoverState(visibleEdge, chevron, sourceNode.id, targetId, true);
             const candidate = buildEdgeActionCandidate(event, edgeMeta);
@@ -11425,17 +15068,34 @@ function onViewportMouseDown(event) {
           hitEdge.addEventListener("pointerenter", handleEdgeEnter);
           hitEdge.addEventListener("pointermove", handleEdgeMove);
           hitEdge.addEventListener("pointerleave", handleEdgeLeave);
+          if (isEdgeSelected) {
+            hitEdge.classList.add("is-selected");
+          }
+          hitEdge.addEventListener("click", (event) => {
+            if (!isMultiSelectModifier(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (!toggleEdgeSelection(edgeRecord.id)) return;
+            renderCanvas();
+          });
           edgesLayerEl.appendChild(hitEdge);
         });
       });
       if (edgeCreateDraft.active) {
-        const { cx, cy } = getQuadraticControlPoint(
+        const worldControl = getQuadraticControlPoint(
           edgeCreateDraft.startX,
           edgeCreateDraft.startY,
           edgeCreateDraft.endX,
           edgeCreateDraft.endY
         );
-        const draftCurveD = `M ${edgeCreateDraft.startX} ${edgeCreateDraft.startY} Q ${cx} ${cy} ${edgeCreateDraft.endX} ${edgeCreateDraft.endY}`;
+        const control = { x: worldControl.cx, y: worldControl.cy };
+        const startScreen = worldToScreen(edgeCreateDraft.startX, edgeCreateDraft.startY);
+        const controlScreen = worldToScreen(control.x, control.y);
+        const endScreen = worldToScreen(edgeCreateDraft.endX, edgeCreateDraft.endY);
+        const draftCurveD =
+          `M ${startScreen.screenX} ${startScreen.screenY}` +
+          ` Q ${controlScreen.screenX} ${controlScreen.screenY}` +
+          ` ${endScreen.screenX} ${endScreen.screenY}`;
         const draftEdge = createSvgElement("path", {
           class: "edge-line edge-line--draft",
           d: draftCurveD
@@ -11444,17 +15104,18 @@ function onViewportMouseDown(event) {
         const midpoint = getQuadraticPointAndTangentAt(
           edgeCreateDraft.startX,
           edgeCreateDraft.startY,
-          cx,
-          cy,
+          control.x,
+          control.y,
           edgeCreateDraft.endX,
           edgeCreateDraft.endY,
           EDGE_CHEVRON_T
         );
+        const midpointScreen = worldToScreen(midpoint.px, midpoint.py);
         const angleDeg = Math.atan2(midpoint.ty, midpoint.tx) * (180 / Math.PI);
         const draftChevron = createSvgElement("path", {
           class: "edge-chevron edge-chevron--draft",
-          d: "M -6 -4 L 0 0 L -6 4",
-          transform: `translate(${midpoint.px} ${midpoint.py}) rotate(${angleDeg})`
+          d: chevronPathD,
+          transform: `translate(${midpointScreen.screenX} ${midpointScreen.screenY}) rotate(${angleDeg})`
         });
         edgesLayerEl.appendChild(draftChevron);
       }
@@ -11504,12 +15165,13 @@ function onViewportMouseDown(event) {
 
       lensEntries.forEach(([locationId, frame]) => {
         const locationNode = getNodeById(locationId);
+        const projectedFrame = projectRect(frame);
         const card = document.createElement("article");
         card.className = "lens-card";
-        card.style.left = `${frame.x}px`;
-        card.style.top = `${frame.y}px`;
-        card.style.width = `${frame.w}px`;
-        card.style.height = `${frame.h}px`;
+        card.style.left = `${projectedFrame.x}px`;
+        card.style.top = `${projectedFrame.y}px`;
+        card.style.width = `${projectedFrame.w}px`;
+        card.style.height = `${projectedFrame.h}px`;
         card.dataset.locationId = locationId;
         card.addEventListener("mousedown", stopLensEvent);
         card.addEventListener("click", stopLensEvent);
@@ -11552,6 +15214,7 @@ function onViewportMouseDown(event) {
     }
 
     function renderGlobalGraph() {
+      pruneSelectionState();
       const { visibleNodeIds } = computeVisibleSet(state.expandedCanvasLocationId);
       const expandedLocationId =
         state.expandedCanvasLocationId && visibleNodeIds.has(state.expandedCanvasLocationId)
@@ -11603,15 +15266,16 @@ function onViewportMouseDown(event) {
       plane.style.width = `${CANVAS_WIDTH}px`;
       plane.style.height = `${planeHeight}px`;
 
-      const selectedNode = getSelectedNode();
       const visibleNodeFrames = new Map();
       const renderedCardsById = new Map();
       nodes.forEach((node) => {
         if (!visibleNodeIds.has(node.id)) return;
         const overridePos = expandedLocationId ? layoutById.get(node.id) || null : null;
         const frame = computeNodeFrame(node, expandedLocationId, overridePos);
+        const screenFrame = projectRect(frame);
         visibleNodeFrames.set(node.id, frame);
-        const card = createNodeCard(node, !!selectedNode && selectedNode.id === node.id, overridePos);
+        const card = createNodeCard(node, state.selectedNodeIds.has(node.id), screenFrame);
+        applyProjectedFrameToNodeCard(card, node, frame, { updatePortalCache: false });
         plane.appendChild(card);
         renderedCardsById.set(node.id, card);
       });
@@ -11673,20 +15337,13 @@ function onViewportMouseDown(event) {
     }
 
     function selectNode(nodeId, options = {}) {
-      const node = getNodeById(nodeId);
-      if (!node) return;
-      if (!isSelectableNode(node)) {
-        state.selectedNodeId = getFirstSelectableNodeId(nodes);
-        resetDetailsEditState();
+      const node = selectSingleNode(nodeId);
+      if (!node) {
         if (options.source !== "sanitize") {
           renderAll();
         }
         return;
       }
-      if (state.selectedNodeId !== nodeId) {
-        resetDetailsEditState();
-      }
-      state.selectedNodeId = nodeId;
 
       if (node.type === "location") {
         expandLocationAncestors(node.id);
@@ -12114,12 +15771,18 @@ function onViewportMouseDown(event) {
             shareBtn.type = "button";
             shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
             shareBtn.textContent = "↗";
-            shareBtn.title = "share workspace";
-            shareBtn.setAttribute("aria-label", "share workspace");
-            shareBtn.addEventListener("click", () => {
-              toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId);
-              renderDetailsPane();
-            });
+            const shareDisabled = collaborator.kind !== "user" || isCollabWorkspaceOnlyHandover(selectedNode);
+            shareBtn.title = shareDisabled ? "share workspace unavailable" : "share workspace";
+            shareBtn.setAttribute("aria-label", shareDisabled ? "share workspace unavailable" : "share workspace");
+            shareBtn.disabled = shareDisabled;
+            if (shareDisabled) {
+              shareBtn.classList.add("is-disabled");
+            } else {
+              shareBtn.addEventListener("click", () => {
+                toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId);
+                renderDetailsPane();
+              });
+            }
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
             removeBtn.className = "collaborator-remove-btn";
@@ -12285,9 +15948,7 @@ function onViewportMouseDown(event) {
           }
           check.addEventListener("change", () => {
             task.done = check.checked;
-            if (!task.done && isTaskAssignedToCurrentUser(task.assignedTo)) {
-              state.seenTaskIds.delete(task.id);
-            }
+            syncSeenStateForTask(task);
             syncNodeRuntimeAndStore();
             persistStoreToLocalStorage();
             renderDetailsPane();
@@ -12353,9 +16014,7 @@ function onViewportMouseDown(event) {
           assignedTo: assigneeSelect.value
         };
         selectedNode.tasks.push(newTask);
-        if (isTaskAssignedToCurrentUser(newTask.assignedTo)) {
-          state.seenTaskIds.delete(newTask.id);
-        }
+        syncSeenStateForTask(newTask);
         syncNodeRuntimeAndStore();
         persistStoreToLocalStorage();
         taskInput.value = "";
@@ -12385,7 +16044,7 @@ function onViewportMouseDown(event) {
       } else {
         orderedComments.forEach((comment) => {
           const item = document.createElement("div");
-          item.className = `comment-item${comment.isNew ? " is-new" : ""}`;
+          item.className = `comment-item${isCommentUnreadForCurrentUser(selectedNode, comment) ? " is-new" : ""}`;
 
           const head = document.createElement("div");
           head.className = "comment-head";
@@ -12683,6 +16342,30 @@ function onViewportMouseDown(event) {
           openCollaboratorPickerModal(selectedNode.id);
         });
         sectionHeader.appendChild(addBtn);
+      } else {
+        const directUserCollaborator = getDirectUserCollaboratorEntryForNode(selectedNode, currentUserId);
+        if (directUserCollaborator) {
+          const leaveBtn = document.createElement("button");
+          leaveBtn.type = "button";
+          leaveBtn.className = "inline-link";
+          leaveBtn.textContent = "Leave handover";
+          leaveBtn.setAttribute("aria-label", "Leave handover");
+          leaveBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openConfirmationModal({
+              title: "Leave handover",
+              message: "Are you sure? This removes you as a collaborator across workspaces.",
+              confirmLabel: "Leave handover",
+              confirmTone: "delete",
+              onConfirm: () => {
+                if (!removeCurrentUserFromHandover(selectedNode.id)) return;
+                renderAll();
+              }
+            });
+          });
+          sectionHeader.appendChild(leaveBtn);
+        }
       }
       section.appendChild(sectionHeader);
 
@@ -12713,8 +16396,12 @@ function onViewportMouseDown(event) {
             shareBtn.type = "button";
             shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
             shareBtn.textContent = "↗";
-            const shareDisabled = isCollabWorkspaceOnlyHandover(selectedNode);
-            shareBtn.title = shareDisabled ? "Collaboration-workspace handovers cannot share workspaces" : "share workspace";
+            const shareUnsupportedKind = collaborator.kind !== "user";
+            const shareDisabled = isCollabWorkspaceOnlyHandover(selectedNode) || shareUnsupportedKind;
+            const shareDisabledTitle = shareUnsupportedKind
+              ? "Workspace sharing is available for direct user collaborators only"
+              : "Collaboration-workspace handovers cannot share workspaces";
+            shareBtn.title = shareDisabled ? shareDisabledTitle : "share workspace";
             shareBtn.setAttribute("aria-label", shareDisabled ? "share workspace unavailable" : "share workspace");
             shareBtn.disabled = shareDisabled;
             if (shareDisabled) {
@@ -12770,7 +16457,6 @@ function onViewportMouseDown(event) {
       section.appendChild(sectionHeader);
 
       const handoverObjects = getHandoverObjects(selectedNode)
-        .filter((handoverObject) => handoverObject.role !== "context")
         .map((handoverObject) => {
           const objectNode = getAnyNodeById(handoverObject.id);
           return objectNode ? { handoverObject, node: objectNode } : null;
@@ -13211,6 +16897,9 @@ function onViewportMouseDown(event) {
       const comment = node.comments[commentIndex];
       if (!canCurrentUserDeleteComment(node, comment)) return false;
       node.comments.splice(commentIndex, 1);
+      if (typeof comment.id === "string" && comment.id) {
+        clearCommentSeenForAllUsers(comment.id);
+      }
       return true;
     }
 
@@ -13235,7 +16924,7 @@ function onViewportMouseDown(event) {
       } else {
         orderedComments.forEach(({ comment, index }) => {
           const item = document.createElement("div");
-          item.className = `comment-item${comment.isNew ? " is-new" : ""}`;
+          item.className = `comment-item${isCommentUnreadForCurrentUser(selectedNode, comment) ? " is-new" : ""}`;
           const head = document.createElement("div");
           head.className = "comment-head";
           const meta = document.createElement("div");
@@ -13348,6 +17037,7 @@ function onViewportMouseDown(event) {
       if (!selectedNode) return;
 
       selectedNode.comments.push({
+        id: generateCommentId(),
         author: getCurrentUserName() || CURRENT_USER,
         text: message,
         timestamp: new Date().toISOString(),
@@ -13365,18 +17055,26 @@ function onViewportMouseDown(event) {
       closeCreateNodeMenu();
       const targetWorkspaceId = workspaceId || currentWorkspaceId;
       if (!hasAppliedWorkspace || appliedWorkspaceId !== targetWorkspaceId) {
+        const autoFitPolicy = consumePendingWorkspaceApplyAutoFit();
         applyWorkspaceData(targetWorkspaceId, { sanitizeState: true });
         normalizeActiveWorkspaceSemantics();
         initializeGraphLayoutIfMissing();
         const visibleNodeIds = getVisibleNodeIdsForGlobalView();
+        const workspaceRecord = getCurrentWorkspaceRecord();
+        if (workspaceRecord && visibleNodeIds && visibleNodeIds.size) {
+          const seededWorkspacePositions = persistWorkspaceNodePositions(workspaceRecord, visibleNodeIds, {
+            syncWorkspace: true,
+            persist: false
+          });
+          if (seededWorkspacePositions) {
+            persistStoreToLocalStorage();
+          }
+        }
+        const restoredViewport = restoreRememberedViewportForWorkspace(workspaceRecord);
         if (visibleNodeIds && visibleNodeIds.size) {
-          if (suppressNextWorkspaceAutoFit) {
-            suppressNextWorkspaceAutoFit = false;
-          } else {
+          if (autoFitPolicy === "always" || (autoFitPolicy === "if-missing" && !restoredViewport)) {
             fitCameraToNodes(visibleNodeIds, 80);
           }
-        } else {
-          suppressNextWorkspaceAutoFit = false;
         }
         appliedWorkspaceId = currentWorkspaceId;
         hasAppliedWorkspace = true;
@@ -13446,9 +17144,20 @@ function onViewportMouseDown(event) {
       }
     }
 
+    function warnIfUsingBuiltBundleLocally() {
+      const host = window.location?.hostname || "";
+      if (host !== "localhost" && host !== "127.0.0.1") return;
+      const moduleScriptEls = [...document.querySelectorAll('script[type="module"][src]')];
+      const activeModuleSrc = String(moduleScriptEls[moduleScriptEls.length - 1]?.getAttribute("src") || "");
+      const isBuiltBundle = /\/assets\/index-[^/]+\.js$/i.test(activeModuleSrc) || /\/dist\//i.test(window.location?.pathname || "");
+      if (!isBuiltBundle) return;
+      console.info("Running built preview bundle. If recent local JS/CSS edits are missing, run `npm run build` and refresh.");
+    }
+
     async function bootApp() {
       renderPanelState();
       renderLoadingState();
+      warnIfUsingBuiltBundleLocally();
       clearLegacyLocalStore();
       renderPersistStatusBanner();
 
@@ -13467,3 +17176,4 @@ function onViewportMouseDown(event) {
     }
 
     void bootApp();
+
