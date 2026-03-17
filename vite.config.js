@@ -107,5 +107,6 @@ function canonicalStorePlugin() {
 }
 
 module.exports = defineConfig({
+  base: "./",
   plugins: [canonicalStorePlugin()]
 });

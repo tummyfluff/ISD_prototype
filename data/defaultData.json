@@ -1,6 +1,14 @@
 {
   "meta": {
-    "portalGraphPosSchemaVersion": 2
+    "portalGraphPosSchemaVersion": 2,
+    "notificationStateByUserId": {
+      "user-prof-green": {
+        "seenTaskIds": [
+          "task-mmkrynti-eb2l72"
+        ],
+        "seenCommentIds": []
+      }
+    }
   },
   "users": [
     {
@@ -9,24 +17,14 @@
       "orgId": null
     },
     {
-      "id": "user-alice",
-      "name": "Alice",
-      "orgId": "org-bootstrap"
-    },
-    {
       "id": "user-bob",
       "name": "Bob",
       "orgId": "org-bootstrap"
     },
     {
       "id": "user-patricia",
-      "name": "Patricia",
+      "name": "Dr Dexter",
       "orgId": "org-external-lab"
-    },
-    {
-      "id": "user-betty",
-      "name": "Nancy",
-      "orgId": "org-hawkin-s-lab"
     },
     {
       "id": "user-steve",
@@ -37,157 +35,28 @@
       "id": "user-ashley",
       "name": "Ashley",
       "orgId": "org-bootstrap"
+    },
+    {
+      "id": "user-prof-green",
+      "name": "Prof. Green",
+      "orgId": "org-bootstrap"
     }
   ],
   "orgs": [
     {
       "id": "org-bootstrap",
-      "name": "Professor Green's Lab"
+      "name": "Green's Lab"
     },
     {
       "id": "org-external-lab",
-      "name": "External Lab"
+      "name": "Dexter's Lab"
     },
     {
       "id": "org-hawkin-s-lab",
-      "name": "Hawkin's Lab"
+      "name": "Data Analytics"
     }
   ],
   "nodes": [
-    {
-      "id": "standard-mmf1kzuh",
-      "type": "standard",
-      "title": "Project A",
-      "ownerId": "user-alice",
-      "summary": "standard-mmf1kzuh node",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 304.80847905873634,
-        "y": -46.42096807387739
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "handover-mmf1mfga",
-      "type": "handover",
-      "title": "Run Test",
-      "ownerId": "user-alice",
-      "summary": "Run NMR on Sample A",
-      "tasks": [
-        {
-          "id": "task-mmfd3o1g-gsv06n",
-          "text": "Run NMR",
-          "done": true,
-          "assignedTo": "Professor Green's Lab / Bob",
-          "taskGroupId": "task-group-mmfd3o1f-iihin2",
-          "originNodeId": "handover-mmf1mfga",
-          "linkedObjectIds": [
-            "standard-mmf1ntgh"
-          ]
-        }
-      ],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 520.110603683466,
-        "y": -179.80408838083525
-      },
-      "status": "Active",
-      "handoverCollaborators": [
-        {
-          "kind": "user",
-          "refId": "user-bob",
-          "shareWorkspace": true
-        }
-      ],
-      "linkedWorkspaceId": null,
-      "sourceWorkspaceId": "ws-user-alice-project-a",
-      "handoverObjects": [
-        {
-          "id": "standard-mmf6r3o6",
-          "role": "output"
-        },
-        {
-          "id": "standard-mmf1ntgh",
-          "role": "input"
-        }
-      ]
-    },
-    {
-      "id": "standard-mmf1mz22",
-      "type": "standard",
-      "title": "Protocol 1",
-      "ownerId": "user-alice",
-      "summary": "standard-mmf1mz22 node",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 61.58083531274761,
-        "y": -13.041997529965839
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "process-mmf1n8rp",
-      "type": "process",
-      "title": "Experiment #1",
-      "ownerId": "user-alice",
-      "summary": "process-mmf1n8rp node",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 195.96163867454408,
-        "y": 166.83919978719308
-      },
-      "status": "Active",
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "standard-mmf1ntgh",
-      "type": "standard",
-      "title": "Sample A",
-      "ownerId": "user-alice",
-      "summary": "standard-mmf1ntgh node",
-      "tasks": [
-        {
-          "id": "task-mmfd3o1g-spz1dm",
-          "text": "Run NMR",
-          "done": true,
-          "assignedTo": "Professor Green's Lab / Bob",
-          "taskGroupId": "task-group-mmfd3o1f-iihin2",
-          "originNodeId": "handover-mmf1mfga",
-          "linkedObjectIds": [
-            "standard-mmf1ntgh"
-          ]
-        }
-      ],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 802.4610098009849,
-        "y": -82.79267653494537
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "collaboration-ws-user-alice-collaboration",
-      "type": "collaboration",
-      "title": "",
-      "ownerId": "user-alice",
-      "summary": "Collaboration anchor",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 0,
-        "y": 0
-      },
-      "linkedWorkspaceId": null
-    },
     {
       "id": "collaboration-ws-user-bob-collaboration",
       "type": "collaboration",
@@ -201,196 +70,10 @@
         "x": 0,
         "y": 0
       },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "handover-mmf4incs",
-      "type": "handover",
-      "title": "Test",
-      "ownerId": "user-alice",
-      "summary": "Click to enter node description",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 13.465712854110208,
-        "y": -84.70741290947689
-      },
-      "status": "Active",
-      "handoverCollaborators": [],
       "linkedWorkspaceId": null,
-      "sourceWorkspaceId": null,
-      "handoverObjects": []
-    },
-    {
-      "id": "entity-mmf4j293",
-      "type": "entity",
-      "title": "External Lab",
-      "ownerId": "user-alice",
-      "summary": "Collaboration organisation",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "org",
-      "entityRefId": "org-external-lab",
-      "graphPos": {
-        "x": 508.93465040269496,
-        "y": 370.63702226431235
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "entity-mmf4j293-2",
-      "type": "entity",
-      "title": "Patricia",
-      "ownerId": "user-alice",
-      "summary": "Collaboration collaborator",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "user",
-      "entityRefId": "user-patricia",
-      "graphPos": {
-        "x": 614.2124706839809,
-        "y": 246.178737929965
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "handover-mmf50fop",
-      "type": "handover",
-      "title": "TEst",
-      "ownerId": "user-alice",
-      "summary": "Click to enter node description",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 1282.6152480971505,
-        "y": 616.8036753748567
-      },
-      "status": "Draft",
-      "handoverCollaborators": [],
-      "linkedWorkspaceId": null,
-      "sourceWorkspaceId": null,
-      "handoverObjects": []
-    },
-    {
-      "id": "entity-mmf50orv",
-      "type": "entity",
-      "title": "External Lab",
-      "ownerId": "user-alice",
-      "summary": "Collaboration organisation",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "org",
-      "entityRefId": "org-external-lab",
-      "graphPos": {
-        "x": 1012.7114223229402,
-        "y": 220.26983744880684
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "entity-mmf50orv-2",
-      "type": "entity",
-      "title": "Patricia",
-      "ownerId": "user-alice",
-      "summary": "Collaboration collaborator",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "user",
-      "entityRefId": "user-patricia",
-      "graphPos": {
-        "x": 1303.283470933217,
-        "y": 160.78614660623592
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
-      "type": "entity",
-      "title": "Bob",
-      "ownerId": "user-alice",
-      "summary": "Projected collaborator user",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "user",
-      "entityRefId": "user-bob",
-      "graphPos": {
-        "x": -23.968361361430293,
-        "y": -266.40418820011365
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-      "type": "entity",
-      "title": "Professor Green's Lab",
-      "ownerId": "user-alice",
-      "summary": "Projected collaborator organisation",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "org",
-      "entityRefId": "org-bootstrap",
-      "graphPos": {
-        "x": 245.28636740751583,
-        "y": -98.14574347475414
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "projection-node-ws-user-bob-collaboration-linked-user-user-alice-user-alice",
-      "type": "entity",
-      "title": "Alice",
-      "ownerId": "user-alice",
-      "summary": "Projected collaborator user",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "user",
-      "entityRefId": "user-alice",
-      "graphPos": {
-        "x": -408.5314336311915,
-        "y": 456.5993146717646
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "projection-node-ws-user-bob-collaboration-linked-org-org-bootstrap-org-bootstrap",
-      "type": "entity",
-      "title": "Professor Green's Lab",
-      "ownerId": "user-alice",
-      "summary": "Projected collaborator organisation",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "org",
-      "entityRefId": "org-bootstrap",
-      "graphPos": {
-        "x": -234.47171709349857,
-        "y": 262.00508508012047
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "standard-mmf6r3o6",
-      "type": "standard",
-      "title": "Data",
-      "ownerId": "user-bob",
-      "summary": "Click to enter node description",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": 746.6120410381878,
-        "y": -305.56302085728197
-      },
-      "linkedWorkspaceId": null
+      "sourceWorkspaceId": "ws-user-bob-collaboration",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
     },
     {
       "id": "collaboration-ws-user-patricia-collaboration",
@@ -405,67 +88,28 @@
         "x": 0,
         "y": 0
       },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "handover-mmjnp96e",
-      "type": "handover",
-      "title": "Review Document",
-      "ownerId": "user-alice",
-      "summary": "Click to enter node description",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": -311.513626740501,
-        "y": -54.44895965044652
-      },
-      "status": "Active",
-      "handoverCollaborators": [
-        {
-          "kind": "user",
-          "refId": "user-patricia",
-          "shareWorkspace": false
-        }
-      ],
-      "handoverObjects": [
-        {
-          "id": "standard-mmjnq12b",
-          "role": "reference"
-        }
-      ],
-      "sourceWorkspaceId": "ws-user-alice-project-a",
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "standard-mmjnq12b",
-      "type": "standard",
-      "title": "Document",
-      "ownerId": "user-alice",
-      "summary": "Click to enter node description",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": -26.064440776924467,
-        "y": 200.23960294028672
-      },
-      "linkedWorkspaceId": null
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-patricia-collaboration",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
     },
     {
       "id": "standard-mmjxjta3",
       "type": "standard",
-      "title": "Project C",
+      "title": "Project A",
       "ownerId": "user-ashley",
       "summary": "Click to enter node description",
       "tasks": [],
       "comments": [],
       "locationId": null,
       "graphPos": {
-        "x": 414,
-        "y": 412
+        "x": 313.5487191894741,
+        "y": -307.90632070662997
       },
-      "linkedWorkspaceId": null
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
     },
     {
       "id": "collaboration-ws-user-steve-collaboration",
@@ -480,120 +124,10 @@
         "x": 0,
         "y": 0
       },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "handover-mmkj9ukk",
-      "type": "handover",
-      "title": "Review Draft",
-      "ownerId": "user-alice",
-      "summary": "Please review my first draft",
-      "tasks": [
-        {
-          "id": "task-mmkjcsrf-nfhyom",
-          "text": "Provide feedback",
-          "done": false,
-          "assignedTo": "Professor Green's Lab / Ashley",
-          "taskGroupId": "task-group-mmkjcsrf-ps87jv",
-          "originNodeId": "handover-mmkj9ukk",
-          "linkedObjectIds": [
-            "standard-mmkjbspk"
-          ]
-        },
-        {
-          "id": "task-mmkjd0vr-hv2vdb",
-          "text": "Add figures",
-          "done": false,
-          "assignedTo": "Professor Green's Lab / Bob",
-          "taskGroupId": "task-group-mmkjd7aj-he1dn9",
-          "originNodeId": "handover-mmkj9ukk",
-          "linkedObjectIds": [
-            "standard-mmkjbspk"
-          ]
-        }
-      ],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": -544.0080476279925,
-        "y": 8.243213249902984
-      },
-      "status": "Active",
-      "handoverCollaborators": [
-        {
-          "kind": "user",
-          "refId": "user-bob",
-          "shareWorkspace": false
-        },
-        {
-          "kind": "user",
-          "refId": "user-ashley",
-          "shareWorkspace": false
-        }
-      ],
-      "handoverObjects": [
-        {
-          "id": "standard-mmkjbspk",
-          "role": "input"
-        }
-      ],
-      "sourceWorkspaceId": "ws-user-alice-collaboration",
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "entity-mmkja8k2",
-      "type": "entity",
-      "title": "Ashley",
-      "ownerId": "user-alice",
-      "summary": "Collaboration collaborator",
-      "tasks": [],
-      "comments": [],
-      "locationId": null,
-      "entityKind": "user",
-      "entityRefId": "user-ashley",
-      "graphPos": {
-        "x": -267.406760020861,
-        "y": 6.268854126499509
-      },
-      "linkedWorkspaceId": null
-    },
-    {
-      "id": "standard-mmkjbspk",
-      "type": "standard",
-      "title": "Draft Chapter",
-      "ownerId": "user-alice",
-      "summary": "Click to enter node description",
-      "tasks": [
-        {
-          "id": "task-mmkjcsrf-qcvq28",
-          "text": "Provide feedback",
-          "done": false,
-          "assignedTo": "Professor Green's Lab / Ashley",
-          "taskGroupId": "task-group-mmkjcsrf-ps87jv",
-          "originNodeId": "handover-mmkj9ukk",
-          "linkedObjectIds": [
-            "standard-mmkjbspk"
-          ]
-        },
-        {
-          "id": "task-mmkjd7aj-adwu00",
-          "text": "Add figures",
-          "done": false,
-          "assignedTo": "Professor Green's Lab / Bob",
-          "taskGroupId": "task-group-mmkjd7aj-he1dn9",
-          "originNodeId": "handover-mmkj9ukk",
-          "linkedObjectIds": [
-            "standard-mmkjbspk"
-          ]
-        }
-      ],
-      "comments": [],
-      "locationId": null,
-      "graphPos": {
-        "x": -791.6461533959441,
-        "y": 87.5995340251949
-      },
-      "linkedWorkspaceId": null
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-steve-collaboration",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
     },
     {
       "id": "collaboration-ws-user-ashley-collaboration",
@@ -608,360 +142,509 @@
         "x": 0,
         "y": 0
       },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-collaboration",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkoupst",
+      "type": "standard",
+      "title": "Protocol 1",
+      "ownerId": "user-ashley",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 452.5123827342058,
+        "y": -105.52323692539822
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "process-mmkovsi6",
+      "type": "process",
+      "title": "Experiment A",
+      "ownerId": "user-ashley",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 292.8615798968397,
+        "y": 85.17361288543317
+      },
+      "status": "Complete",
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkow4hr",
+      "type": "standard",
+      "title": "Sample A",
+      "ownerId": "user-ashley",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 55.75966518584574,
+        "y": 204.06447147352156
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkowxnz",
+      "type": "standard",
+      "title": "Data",
+      "ownerId": "user-ashley",
+      "summary": "Click to enter node description",
+      "tasks": [
+        {
+          "id": "task-mmkozf65-2rz1ct",
+          "text": "Check Data",
+          "done": false,
+          "assignedTo": "Green's Lab / Prof. Green",
+          "taskGroupId": "task-group-mmkozf65-zjzghl",
+          "originNodeId": "handover-mmkoxaki",
+          "linkedObjectIds": [
+            "standard-mmkowxnz"
+          ]
+        },
+        {
+          "id": "task-mmkrynti-eb2l72",
+          "text": "Review data",
+          "done": false,
+          "assignedTo": "Green's Lab / Prof. Green",
+          "taskGroupId": "task-group-mmkrynti-gu1znn",
+          "originNodeId": "handover-mmkrxo90",
+          "linkedObjectIds": [
+            "standard-mmkowxnz"
+          ]
+        }
+      ],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -206.76864391098616,
+        "y": 205.3555141387116
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "sharedWithUserIds": [
+        "user-ashley",
+        "user-prof-green"
+      ],
+      "sharedViaHandoverIds": [
+        "handover-mmkwqgu8"
+      ]
+    },
+    {
+      "id": "collaboration-ws-user-prof-green-collaboration",
+      "type": "collaboration",
+      "title": "",
+      "ownerId": "user-prof-green",
+      "summary": "Collaboration anchor",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 0,
+        "y": 0
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-prof-green-collaboration",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkrhlzi",
+      "type": "standard",
+      "title": "Project B",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 4.265844381212133,
+        "y": -44.10991282087764
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkrhxnt",
+      "type": "standard",
+      "title": "Literature Review",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -123.74340805429401,
+        "y": 148.52536997041798
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkrijtj",
+      "type": "standard",
+      "title": "Draft Summary",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -77.97943413574612,
+        "y": 301.1810650611584
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkriwvu",
+      "type": "standard",
+      "title": "Document A",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 120.89541361072682,
+        "y": 185.47206273593778
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkrj600",
+      "type": "standard",
+      "title": "Document B",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -385.3314715621134,
+        "y": 172.2137395528396
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "standard-mmkrjkto",
+      "type": "standard",
+      "title": "Document C",
+      "ownerId": "user-bob",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -493.8086612420077,
+        "y": 289.12804398561457
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-bob-project-b",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "location-mmkrla1y",
+      "type": "location",
+      "title": "Onboarding",
+      "ownerId": "user-prof-green",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -2.740276308395835,
+        "y": 377.8288297973919
+      },
+      "kind": "generic",
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-prof-green-onboarding-workspace",
+      "sharedWithUserIds": [
+        "user-bob",
+        "user-prof-green"
+      ],
+      "sharedViaHandoverIds": [
+        "handover-mmks1y39"
+      ]
+    },
+    {
+      "id": "standard-mmkrn1qu",
+      "type": "standard",
+      "title": "Step 1: Review Lab Protocols",
+      "ownerId": "user-prof-green",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": 228.91143838337382,
+        "y": 534.4384397298559
+      },
+      "linkedWorkspaceId": null,
+      "sourceWorkspaceId": "ws-user-prof-green-onboarding-workspace",
+      "sharedWithUserIds": [],
+      "sharedViaHandoverIds": []
+    },
+    {
+      "id": "handover-mmks1y39",
+      "type": "handover",
+      "title": "Do Onboarding",
+      "ownerId": "user-prof-green",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "graphPos": {
+        "x": -837.2566400802889,
+        "y": 65.89352662456446
+      },
+      "status": "Active",
+      "handoverCollaborators": [
+        {
+          "kind": "user",
+          "refId": "user-bob",
+          "shareWorkspace": true
+        }
+      ],
+      "handoverObjects": [
+        {
+          "id": "location-mmkrla1y",
+          "role": "reference"
+        }
+      ],
+      "sourceWorkspaceId": "ws-user-prof-green-onboarding-workspace",
+      "linkedWorkspaceId": null,
+      "sharedWithUserIds": [
+        "user-bob",
+        "user-prof-green"
+      ],
+      "sharedViaHandoverIds": [
+        "handover-mmks1y39"
+      ]
+    },
+    {
+      "id": "handover-mmkwqgu8",
+      "type": "handover",
+      "title": "Review Data",
+      "ownerId": "user-ashley",
+      "summary": "Please can you review this data?",
+      "tasks": [
+        {
+          "id": "task-mmkwte0e-heclw1",
+          "text": "Review Data",
+          "done": true,
+          "assignedTo": "Green's Lab / Prof. Green",
+          "taskGroupId": "task-group-mmkwte0d-2jrgvg",
+          "originNodeId": "handover-mmkwqgu8"
+        }
+      ],
+      "comments": [
+        {
+          "id": "comment-mmkx3pkf-m6vs7u",
+          "author": "Prof. Green",
+          "text": "Ashley, I have attached my analysis of the data. I think the temperature was too high in step 3.",
+          "timestamp": "2026-03-10T18:02:25.455Z",
+          "isNew": true
+        }
+      ],
+      "locationId": null,
+      "graphPos": {
+        "x": -418.72452437751434,
+        "y": 74.35020011504808
+      },
+      "status": "Complete",
+      "handoverCollaborators": [
+        {
+          "kind": "user",
+          "refId": "user-prof-green",
+          "shareWorkspace": false
+        }
+      ],
+      "handoverObjects": [
+        {
+          "id": "standard-mmkowxnz",
+          "role": "input"
+        },
+        {
+          "id": "standard-mml38008",
+          "role": "reference"
+        }
+      ],
+      "sourceWorkspaceId": "ws-user-ashley-project-c",
+      "linkedWorkspaceId": null,
+      "sharedWithUserIds": [
+        "user-ashley",
+        "user-prof-green"
+      ],
+      "sharedViaHandoverIds": [
+        "handover-mmkwqgu8"
+      ]
+    },
+    {
+      "id": "standard-mml38008",
+      "type": "standard",
+      "title": "Test",
+      "ownerId": "user-prof-green",
+      "summary": "Click to enter node description",
+      "tasks": [],
+      "comments": [],
+      "locationId": null,
+      "sourceWorkspaceId": "ws-user-prof-green-collaboration",
+      "sharedWithUserIds": [
+        "user-ashley",
+        "user-prof-green"
+      ],
+      "sharedViaHandoverIds": [
+        "handover-mmkwqgu8"
+      ],
+      "graphPos": {
+        "x": -489.18239117495455,
+        "y": -155.50081287944187
+      },
       "linkedWorkspaceId": null
     }
   ],
   "edges": [
     {
-      "id": "edge-ws-user-alice-project-a-standard-mmf1kzuh-standard-mmf1mz22",
-      "sourceId": "standard-mmf1kzuh",
-      "targetId": "standard-mmf1mz22",
+      "id": "edge-ws-user-ashley-project-c-standard-mmjxjta3-standard-mmkoupst",
+      "sourceId": "standard-mmjxjta3",
+      "targetId": "standard-mmkoupst",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-standard-mmf1mz22-process-mmf1n8rp",
-      "sourceId": "standard-mmf1mz22",
-      "targetId": "process-mmf1n8rp",
+      "id": "edge-ws-user-ashley-project-c-standard-mmkoupst-process-mmkovsi6",
+      "sourceId": "standard-mmkoupst",
+      "targetId": "process-mmkovsi6",
       "kind": "standard_process",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-process-mmf1n8rp-standard-mmf1ntgh",
-      "sourceId": "process-mmf1n8rp",
-      "targetId": "standard-mmf1ntgh",
+      "id": "edge-ws-user-ashley-project-c-process-mmkovsi6-standard-mmkow4hr",
+      "sourceId": "process-mmkovsi6",
+      "targetId": "standard-mmkow4hr",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-handover-mmf1mfga-standard-mmf6r3o6",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf6r3o6",
+      "id": "edge-ws-user-ashley-project-c-standard-mmkow4hr-standard-mmkowxnz",
+      "sourceId": "standard-mmkow4hr",
+      "targetId": "standard-mmkowxnz",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-handover-mmf1mfga-standard-mmf1ntgh",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf1ntgh",
+      "id": "edge-ws-user-ashley-project-c-standard-mmkowxnz-handover-mmkwqgu8",
+      "sourceId": "standard-mmkowxnz",
+      "targetId": "handover-mmkwqgu8",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-standard-mmf1kzuh-standard-mmjnq12b",
-      "sourceId": "standard-mmf1kzuh",
-      "targetId": "standard-mmjnq12b",
+      "id": "edge-ws-user-ashley-project-c-standard-mml38008-handover-mmkwqgu8",
+      "sourceId": "standard-mml38008",
+      "targetId": "handover-mmkwqgu8",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-ashley-project-c"
     },
     {
-      "id": "edge-ws-user-alice-project-a-standard-mmjnq12b-handover-mmjnp96e",
-      "sourceId": "standard-mmjnq12b",
-      "targetId": "handover-mmjnp96e",
+      "id": "edge-ws-user-prof-green-collaboration-standard-mml38008-handover-mmkwqgu8",
+      "sourceId": "standard-mml38008",
+      "targetId": "handover-mmkwqgu8",
       "kind": "link",
-      "workspaceId": "ws-user-alice-project-a"
+      "workspaceId": "ws-user-prof-green-collaboration"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-projection-node-ws-user-alice-collaboration-link",
-      "sourceId": "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-      "targetId": "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
+      "id": "edge-ws-user-bob-project-b-standard-mmkrhlzi-standard-mmkrhxnt",
+      "sourceId": "standard-mmkrhlzi",
+      "targetId": "standard-mmkrhxnt",
       "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "workspaceId": "ws-user-bob-project-b"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-handover-mmkj9ukk",
-      "sourceId": "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
-      "targetId": "handover-mmkj9ukk",
+      "id": "edge-ws-user-bob-project-b-standard-mmkrhxnt-standard-mmkrijtj",
+      "sourceId": "standard-mmkrhxnt",
+      "targetId": "standard-mmkrijtj",
       "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "workspaceId": "ws-user-bob-project-b"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-collaboration-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link",
-      "sourceId": "collaboration-ws-user-alice-collaboration",
-      "targetId": "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
+      "id": "edge-ws-user-bob-project-b-standard-mmkriwvu-standard-mmkrhxnt",
+      "sourceId": "standard-mmkriwvu",
+      "targetId": "standard-mmkrhxnt",
       "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "workspaceId": "ws-user-bob-project-b"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-entity-mmkja8k2-handover-mmkj9ukk",
-      "sourceId": "entity-mmkja8k2",
-      "targetId": "handover-mmkj9ukk",
+      "id": "edge-ws-user-bob-project-b-standard-mmkrj600-standard-mmkrhxnt",
+      "sourceId": "standard-mmkrj600",
+      "targetId": "standard-mmkrhxnt",
       "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "workspaceId": "ws-user-bob-project-b"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-entity-mmkja8k2",
-      "sourceId": "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-      "targetId": "entity-mmkja8k2",
+      "id": "edge-ws-user-bob-project-b-standard-mmkrj600-standard-mmkrjkto",
+      "sourceId": "standard-mmkrj600",
+      "targetId": "standard-mmkrjkto",
       "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "workspaceId": "ws-user-bob-project-b"
     },
     {
-      "id": "edge-ws-user-alice-collaboration-standard-mmkjbspk-handover-mmkj9ukk",
-      "sourceId": "standard-mmkjbspk",
-      "targetId": "handover-mmkj9ukk",
-      "kind": "link",
-      "workspaceId": "ws-user-alice-collaboration"
+      "id": "edge-ws-user-prof-green-onboarding-workspace-location-mmkrla1y-standard-mmkrn1qu",
+      "sourceId": "location-mmkrla1y",
+      "targetId": "standard-mmkrn1qu",
+      "kind": "location_standard",
+      "workspaceId": "ws-user-prof-green-onboarding-workspace"
     },
     {
-      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf1ntgh",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf1ntgh",
+      "id": "edge-ws-user-prof-green-onboarding-workspace-location-mmkrla1y-handover-mmks1y39",
+      "sourceId": "location-mmkrla1y",
+      "targetId": "handover-mmks1y39",
       "kind": "link",
-      "workspaceId": "ws-user-bob-collaboration"
-    },
-    {
-      "id": "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf6r3o6",
-      "sourceId": "handover-mmf1mfga",
-      "targetId": "standard-mmf6r3o6",
-      "kind": "link",
-      "workspaceId": "ws-user-bob-collaboration"
+      "workspaceId": "ws-user-prof-green-onboarding-workspace"
     }
   ],
   "workspaces": [
     {
-      "id": "ws-user-alice-project-a",
-      "name": "Project A",
-      "kind": "normal",
-      "ownerId": "user-alice",
-      "nodeIds": [
-        "standard-mmf1kzuh",
-        "handover-mmf1mfga",
-        "standard-mmf1mz22",
-        "process-mmf1n8rp",
-        "standard-mmf1ntgh",
-        "standard-mmf6r3o6",
-        "handover-mmjnp96e",
-        "standard-mmjnq12b"
-      ],
-      "edgeIds": [
-        "edge-ws-user-alice-project-a-standard-mmf1kzuh-standard-mmf1mz22",
-        "edge-ws-user-alice-project-a-standard-mmf1mz22-process-mmf1n8rp",
-        "edge-ws-user-alice-project-a-process-mmf1n8rp-standard-mmf1ntgh",
-        "edge-ws-user-alice-project-a-handover-mmf1mfga-standard-mmf6r3o6",
-        "edge-ws-user-alice-project-a-handover-mmf1mfga-standard-mmf1ntgh",
-        "edge-ws-user-alice-project-a-standard-mmf1kzuh-standard-mmjnq12b",
-        "edge-ws-user-alice-project-a-standard-mmjnq12b-handover-mmjnp96e"
-      ],
-      "meta": {
-        "viewportByUserId": {
-          "user-alice": {
-            "panX": 416.1726993487143,
-            "panY": 464.1811148142963,
-            "zoom": 0.8110051821267852
-          },
-          "user-bob": {
-            "panX": 379.1370866863874,
-            "panY": 414.76195487490145,
-            "zoom": 0.7012448035256801
-          }
-        },
-        "runtimeNodePositions": {
-          "standard-mmf1kzuh": {
-            "x": 304.80847905873634,
-            "y": -46.42096807387739
-          },
-          "handover-mmf1mfga": {
-            "x": -110.23320542345301,
-            "y": -203.09641526455593
-          },
-          "standard-mmf1mz22": {
-            "x": 61.58083531274761,
-            "y": -13.041997529965839
-          },
-          "process-mmf1n8rp": {
-            "x": 195.96163867454408,
-            "y": 166.83919978719308
-          },
-          "standard-mmf1ntgh": {
-            "x": 141.19412460035093,
-            "y": -229.45710134730615
-          },
-          "standard-mmf6r3o6": {
-            "x": -255.71478173756938,
-            "y": 179.39209297262664
-          },
-          "handover-mmjnp96e": {
-            "x": -311.513626740501,
-            "y": -54.44895965044652
-          },
-          "standard-mmjnq12b": {
-            "x": -26.064440776924467,
-            "y": 200.23960294028672
-          }
-        }
-      },
-      "homeNodeId": "standard-mmf1kzuh"
-    },
-    {
-      "id": "ws-user-alice-collaboration",
-      "name": "Collab Map",
-      "kind": "collab",
-      "ownerId": "user-alice",
-      "nodeIds": [
-        "collaboration-ws-user-alice-collaboration",
-        "handover-mmf1mfga",
-        "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
-        "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-        "handover-mmkj9ukk",
-        "entity-mmkja8k2",
-        "standard-mmkjbspk"
-      ],
-      "edgeIds": [
-        "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-projection-node-ws-user-alice-collaboration-link",
-        "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-handover-mmkj9ukk",
-        "edge-ws-user-alice-collaboration-collaboration-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link",
-        "edge-ws-user-alice-collaboration-entity-mmkja8k2-handover-mmkj9ukk",
-        "edge-ws-user-alice-collaboration-projection-node-ws-user-alice-collaboration-link-entity-mmkja8k2",
-        "edge-ws-user-alice-collaboration-standard-mmkjbspk-handover-mmkj9ukk"
-      ],
-      "homeNodeId": "collaboration-ws-user-alice-collaboration",
-      "meta": {
-        "handoverView": {
-          "handover-mmf1mfga": {
-            "objectEdgeDirections": {
-              "standard-mmf1ntgh": "object_to_handover",
-              "standard-mmf6r3o6": "handover_to_object"
-            }
-          },
-          "handover-mmjnp96e": {
-            "hiddenProjected": true
-          }
-        },
-        "collabAutoChain": {
-          "version": 2,
-          "edgeSignatures": [
-            "collaboration-ws-user-alice-collaboration=>projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-            "entity-mmkja8k2=>handover-mmkj9ukk",
-            "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap=>entity-mmkja8k2",
-            "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap=>projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob",
-            "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob=>handover-mmkj9ukk"
-          ],
-          "helperNodeIds": [
-            "entity-mmkja8k2",
-            "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap",
-            "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob"
-          ]
-        },
-        "viewportByUserId": {
-          "user-alice": {
-            "panX": 397.7267344407093,
-            "panY": 492.2990763878607,
-            "zoom": 0.35875132887147976
-          }
-        },
-        "runtimeNodePositions": {
-          "collaboration-ws-user-alice-collaboration": {
-            "x": 0,
-            "y": 0
-          },
-          "handover-mmf1mfga": {
-            "x": 520.110603683466,
-            "y": -179.80408838083525
-          },
-          "projection-node-ws-user-alice-collaboration-linked-user-user-bob-user-bob": {
-            "x": -23.968361361430293,
-            "y": -266.40418820011365
-          },
-          "projection-node-ws-user-alice-collaboration-linked-org-org-bootstrap-org-bootstrap": {
-            "x": 245.28636740751583,
-            "y": -98.14574347475414
-          },
-          "handover-mmjrnwt9": {
-            "x": 536.9570267650436,
-            "y": 263.41565879107605
-          },
-          "entity-mmjro8t8": {
-            "x": 176.2230059792699,
-            "y": -203.87507675904212
-          },
-          "entity-mmjro8t9": {
-            "x": 332.43154610431753,
-            "y": 58.26472514995968
-          },
-          "handover-mmjrpqtg": {
-            "x": 597.9032760208261,
-            "y": 14.91074821248481
-          },
-          "handover-mmjsx1ai": {
-            "x": 188.278626275635,
-            "y": 285.88788536693914
-          },
-          "entity-mmjsxdba": {
-            "x": 268.3967207844123,
-            "y": 155.49013865498284
-          },
-          "standard-mmf6r3o6": {
-            "x": 746.6120410381878,
-            "y": -305.56302085728197
-          },
-          "standard-mmf1ntgh": {
-            "x": 802.4610098009849,
-            "y": -82.79267653494537
-          },
-          "handover-mmjnp96e": {
-            "x": -358.00167125477594,
-            "y": 765.2428920726276
-          },
-          "projection-node-ws-user-alice-collaboration-linked-org-org-external-lab-org-external-lab": {
-            "x": -137.68933484317543,
-            "y": 294.7160508679991
-          },
-          "projection-node-ws-user-alice-collaboration-linked-user-user-patricia-user-patricia": {
-            "x": -247.41641540575247,
-            "y": 529.280535345128
-          },
-          "standard-mmjnq12b": {
-            "x": -464.4685492507373,
-            "y": 994.0978908518335
-          },
-          "handover-mmjwm7b9": {
-            "x": -159.29336853622203,
-            "y": 807.7746450629836
-          },
-          "entity-mmjwmqeu": {
-            "x": 292.53985230047203,
-            "y": -101.99494189905366
-          },
-          "entity-mmjwmqev": {
-            "x": 113.1788677875531,
-            "y": -288.84230672511086
-          },
-          "standard-mmk45v6y": {
-            "x": -998.9557484479406,
-            "y": 35.92539645637792
-          },
-          "handover-mmkj9ukk": {
-            "x": -544.0080476279925,
-            "y": 8.243213249902984
-          },
-          "entity-mmkja8k2": {
-            "x": -267.406760020861,
-            "y": 6.268854126499509
-          },
-          "standard-mmkjbspk": {
-            "x": -791.6461533959441,
-            "y": 87.5995340251949
-          }
-        }
-      }
-    },
-    {
       "id": "ws-user-bob-collaboration",
-      "name": "Collaboration map",
+      "name": "Collab Map",
       "kind": "collab",
       "ownerId": "user-bob",
       "nodeIds": [
-        "collaboration-ws-user-bob-collaboration",
-        "standard-mmf6r3o6",
-        "handover-mmf1mfga",
-        "projection-node-ws-user-bob-collaboration-linked-user-user-alice-user-alice",
-        "projection-node-ws-user-bob-collaboration-linked-org-org-bootstrap-org-bootstrap"
+        "collaboration-ws-user-bob-collaboration"
       ],
-      "edgeIds": [
-        "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf1ntgh",
-        "edge-ws-user-bob-collaboration-handover-mmf1mfga-standard-mmf6r3o6"
-      ],
+      "edgeIds": [],
       "homeNodeId": "collaboration-ws-user-bob-collaboration",
       "meta": {
         "collabAutoChain": {
@@ -971,9 +654,9 @@
         },
         "viewportByUserId": {
           "user-bob": {
-            "panX": 545.3365708268043,
-            "panY": 273.3795157744315,
-            "zoom": 0.476805499543984
+            "panX": 1181.8719427971441,
+            "panY": 289.44057277118327,
+            "zoom": 0.9472348116352727
           }
         },
         "runtimeNodePositions": {
@@ -990,12 +673,12 @@
             "y": 650.6565989519402
           },
           "projection-node-ws-user-bob-collaboration-linked-user-user-alice-user-alice": {
-            "x": -408.5314336311915,
-            "y": 456.5993146717646
+            "x": -473.9559070178527,
+            "y": 274.4866613552237
           },
           "projection-node-ws-user-bob-collaboration-linked-org-org-bootstrap-org-bootstrap": {
-            "x": -234.47171709349857,
-            "y": 262.00508508012047
+            "x": -319.30751316166993,
+            "y": 25.130046287747923
           },
           "projection-node-ws-user-bob-collaboration-portal-ws-user-alice-project-a": {
             "x": 192.5605785044538,
@@ -1012,6 +695,18 @@
           "standard-mmkjbspk": {
             "x": 289.2292575847008,
             "y": -67.35989035351717
+          },
+          "entity-mmkoinuc": {
+            "x": -160.54864542379417,
+            "y": 529.1180077058464
+          },
+          "handover-mmks1y39": {
+            "x": -837.2566400802889,
+            "y": 65.89352662456446
+          },
+          "projection-node-ws-user-bob-collaboration-linked-user-user-prof-green-user-prof-green": {
+            "x": -577.4696859633201,
+            "y": 45.447849924790034
           }
         }
       }
@@ -1027,13 +722,6 @@
       "edgeIds": [],
       "homeNodeId": "collaboration-ws-user-patricia-collaboration",
       "meta": {
-        "handoverView": {
-          "handover-mmjnp96e": {
-            "objectEdgeDirections": {
-              "standard-mmjnq12b": "object_to_handover"
-            }
-          }
-        },
         "collabAutoChain": {
           "version": 2,
           "edgeSignatures": [],
@@ -1067,8 +755,8 @@
         },
         "viewportByUserId": {
           "user-patricia": {
-            "panX": 617.5350155501371,
-            "panY": 27.042605912023078,
+            "panX": 433.53501555013713,
+            "panY": 270.0426059120231,
             "zoom": 0.7992036944850545
           }
         }
@@ -1076,7 +764,7 @@
     },
     {
       "id": "ws-user-steve-collaboration",
-      "name": "Collaboration map",
+      "name": "Collab Map",
       "kind": "collab",
       "ownerId": "user-steve",
       "nodeIds": [
@@ -1123,39 +811,99 @@
     },
     {
       "id": "ws-user-ashley-project-c",
-      "name": "Project C",
+      "name": "Project A",
       "kind": "normal",
       "ownerId": "user-ashley",
       "nodeIds": [
-        "standard-mmjxjta3"
+        "standard-mmjxjta3",
+        "standard-mmkoupst",
+        "process-mmkovsi6",
+        "standard-mmkow4hr",
+        "standard-mmkowxnz",
+        "handover-mmkwqgu8",
+        "standard-mml38008"
       ],
-      "edgeIds": [],
+      "edgeIds": [
+        "edge-ws-user-ashley-project-c-standard-mmjxjta3-standard-mmkoupst",
+        "edge-ws-user-ashley-project-c-standard-mmkoupst-process-mmkovsi6",
+        "edge-ws-user-ashley-project-c-process-mmkovsi6-standard-mmkow4hr",
+        "edge-ws-user-ashley-project-c-standard-mmkow4hr-standard-mmkowxnz",
+        "edge-ws-user-ashley-project-c-standard-mmkowxnz-handover-mmkwqgu8",
+        "edge-ws-user-ashley-project-c-standard-mml38008-handover-mmkwqgu8"
+      ],
       "meta": {
         "viewportByUserId": {
           "user-ashley": {
-            "panX": 157.676616604101,
-            "panY": 156.5765471859325,
-            "zoom": 0.6333101939439516
+            "panX": 811.9190206174173,
+            "panY": 487.85100502507396,
+            "zoom": 1.1506312951684217
+          },
+          "user-prof-green": {
+            "panX": 133.2655774492074,
+            "panY": 305.8242436380837,
+            "zoom": 0.8168228582816439
           }
         },
         "runtimeNodePositions": {
           "standard-mmjxjta3": {
-            "x": 414,
-            "y": 412
+            "x": 313.5487191894741,
+            "y": -307.90632070662997
+          },
+          "standard-mmkoupst": {
+            "x": 452.5123827342058,
+            "y": -105.52323692539822
+          },
+          "standard-mmkov003": {
+            "x": 358.5572746944241,
+            "y": 744.2579813712259
+          },
+          "process-mmkovsi6": {
+            "x": 292.8615798968397,
+            "y": 85.17361288543317
+          },
+          "standard-mmkow4hr": {
+            "x": 55.75966518584574,
+            "y": 204.06447147352156
+          },
+          "standard-mmkowxnz": {
+            "x": -206.76864391098616,
+            "y": 205.3555141387116
+          },
+          "handover-mmkoxaki": {
+            "x": 720.8053597983871,
+            "y": 557.2723650688254
+          },
+          "handover-mmkrxo90": {
+            "x": 633.4778155343932,
+            "y": 510.32781012139776
+          },
+          "handover-mmkwqgu8": {
+            "x": -418.72452437751434,
+            "y": 74.35020011504808
+          },
+          "standard-mmkx18tu": {
+            "x": 53.373848742556305,
+            "y": 275.2290160725997
+          },
+          "standard-mmkx7e1z": {
+            "x": 866.1394918068503,
+            "y": 407.00480097846173
+          },
+          "standard-mmkx872i": {
+            "x": 761.2129907503906,
+            "y": 402.42640923979593
+          },
+          "standard-mmkycvo8": {
+            "x": 905.2954335579794,
+            "y": 414.9653169890308
+          },
+          "standard-mml38008": {
+            "x": -489.18239117495455,
+            "y": -155.50081287944187
           }
         }
       },
       "homeNodeId": "standard-mmjxjta3"
-    },
-    {
-      "id": "ws-user-betty-collaboration",
-      "name": "Collaboration map",
-      "kind": "collab",
-      "ownerId": "user-betty",
-      "nodeIds": [],
-      "edgeIds": [],
-      "homeNodeId": null,
-      "meta": {}
     },
     {
       "id": "ws-user-ashley-collaboration",
@@ -1178,8 +926,8 @@
             "y": 857.6601115943549
           },
           "projection-node-ws-user-ashley-collaboration-linked-org-org-bootstrap-org-bootstrap": {
-            "x": 26.569397445147615,
-            "y": 337.59620365484056
+            "x": 116.60270065872932,
+            "y": 329.4544610070148
           },
           "projection-node-ws-user-ashley-collaboration-linked-user-user-alice-user-alice": {
             "x": 47.05363795809448,
@@ -1188,6 +936,42 @@
           "standard-mmkjbspk": {
             "x": 87.30298426866152,
             "y": 1109.2895921966456
+          },
+          "handover-mmkoxaki": {
+            "x": 290.03587383030987,
+            "y": 819.203271402141
+          },
+          "projection-node-ws-user-ashley-collaboration-linked-user-user-prof-green-user-prof-green": {
+            "x": 202.91649108437198,
+            "y": 573.6069853100253
+          },
+          "standard-mmkowxnz": {
+            "x": 484.09957870353975,
+            "y": 1011.5690634480098
+          },
+          "standard-mmkoupst": {
+            "x": -1121.013575705397,
+            "y": -30.869650309464447
+          },
+          "handover-mmkrxo90": {
+            "x": -866.3543218360338,
+            "y": 68.15421498709537
+          },
+          "handover-mmkwqgu8": {
+            "x": 290.0440601375808,
+            "y": 819.2003730244443
+          },
+          "standard-mmkx18tu": {
+            "x": 260.3394938722829,
+            "y": 1090.8014118786023
+          },
+          "standard-mml38008": {
+            "x": 216.64815026622,
+            "y": 1027.6392882666491
+          },
+          "standard-mml5kwg3": {
+            "x": 157.576487460117,
+            "y": 956.4129028939072
           }
         },
         "collabAutoChain": {
@@ -1197,12 +981,201 @@
         },
         "viewportByUserId": {
           "user-ashley": {
-            "panX": 800.657610357726,
-            "panY": 135.64954122231558,
-            "zoom": 0.604886317633865
+            "panX": 267.36152064432764,
+            "panY": 110.24272423820344,
+            "zoom": 0.6323181901163466
           }
         }
       }
+    },
+    {
+      "id": "ws-user-prof-green-collaboration",
+      "name": "Collab Map",
+      "kind": "collab",
+      "ownerId": "user-prof-green",
+      "nodeIds": [
+        "collaboration-ws-user-prof-green-collaboration",
+        "standard-mml38008"
+      ],
+      "edgeIds": [
+        "edge-ws-user-prof-green-collaboration-standard-mml38008-handover-mmkwqgu8"
+      ],
+      "homeNodeId": "collaboration-ws-user-prof-green-collaboration",
+      "meta": {
+        "runtimeNodePositions": {
+          "collaboration-ws-user-prof-green-collaboration": {
+            "x": 0,
+            "y": 0
+          },
+          "handover-mmkoxaki": {
+            "x": 290.03587383030987,
+            "y": 819.203271402141
+          },
+          "projection-node-ws-user-prof-green-collaboration-linked-org-org-bootstrap-org-bootstrap": {
+            "x": -144.90884763687592,
+            "y": 303.80771696433595
+          },
+          "projection-node-ws-user-prof-green-collaboration-linked-user-user-ashley-user-ashley": {
+            "x": -262.4348403267577,
+            "y": 520.9298576587171
+          },
+          "standard-mmkowxnz": {
+            "x": -477.24546090788004,
+            "y": 1000.5659162603022
+          },
+          "standard-mmkoupst": {
+            "x": -1121.013575705397,
+            "y": -30.869650309464447
+          },
+          "handover-mmkrxo90": {
+            "x": -866.3543218360338,
+            "y": 68.15421498709537
+          },
+          "handover-mmks1y39": {
+            "x": 203.01782296650458,
+            "y": -504.7736819671213
+          },
+          "projection-node-ws-user-prof-green-collaboration-linked-user-user-bob-user-bob": {
+            "x": 53.63608450274908,
+            "y": -273.03401715078644
+          },
+          "handover-mmkwqgu8": {
+            "x": -368.5812015778347,
+            "y": 772.7465589122387
+          },
+          "standard-mmkx18tu": {
+            "x": -711.7994387412076,
+            "y": 847.3195803089554
+          },
+          "standard-mml38008": {
+            "x": -704.248638256409,
+            "y": 844.2992601150361
+          }
+        },
+        "collabAutoChain": {
+          "version": 2,
+          "edgeSignatures": [],
+          "helperNodeIds": []
+        },
+        "viewportByUserId": {
+          "user-prof-green": {
+            "panX": 810.4570663005188,
+            "panY": 86.7939972954527,
+            "zoom": 0.6802407052143611
+          }
+        },
+        "handoverView": {
+          "handover-mmks1y39": {
+            "hiddenProjected": true
+          },
+          "handover-mmkwqgu8": {
+            "objectEdgeDirections": {
+              "standard-mmkowxnz": "handover_to_object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ws-user-bob-project-b",
+      "name": "Project B",
+      "kind": "normal",
+      "ownerId": "user-bob",
+      "nodeIds": [
+        "standard-mmkrhlzi",
+        "standard-mmkrhxnt",
+        "standard-mmkrijtj",
+        "standard-mmkriwvu",
+        "standard-mmkrj600",
+        "standard-mmkrjkto"
+      ],
+      "edgeIds": [
+        "edge-ws-user-bob-project-b-standard-mmkrhlzi-standard-mmkrhxnt",
+        "edge-ws-user-bob-project-b-standard-mmkrhxnt-standard-mmkrijtj",
+        "edge-ws-user-bob-project-b-standard-mmkriwvu-standard-mmkrhxnt",
+        "edge-ws-user-bob-project-b-standard-mmkrj600-standard-mmkrhxnt",
+        "edge-ws-user-bob-project-b-standard-mmkrj600-standard-mmkrjkto"
+      ],
+      "meta": {
+        "runtimeNodePositions": {
+          "standard-mmkrhlzi": {
+            "x": 4.265844381212133,
+            "y": -44.10991282087764
+          },
+          "standard-mmkrhxnt": {
+            "x": -123.74340805429401,
+            "y": 148.52536997041798
+          },
+          "standard-mmkrijtj": {
+            "x": -77.97943413574612,
+            "y": 301.1810650611584
+          },
+          "standard-mmkriwvu": {
+            "x": 120.89541361072682,
+            "y": 185.47206273593778
+          },
+          "standard-mmkrj600": {
+            "x": -385.3314715621134,
+            "y": 172.2137395528396
+          },
+          "standard-mmkrjkto": {
+            "x": -493.8086612420077,
+            "y": 289.12804398561457
+          }
+        },
+        "viewportByUserId": {
+          "user-bob": {
+            "panX": 474.21209070407434,
+            "panY": 279.26018831975927,
+            "zoom": 0.7122965960448913
+          }
+        }
+      },
+      "homeNodeId": "standard-mmkrhlzi"
+    },
+    {
+      "id": "ws-user-prof-green-onboarding-workspace",
+      "name": "Onboarding Workspace",
+      "kind": "normal",
+      "ownerId": "user-prof-green",
+      "nodeIds": [
+        "location-mmkrla1y",
+        "standard-mmkrn1qu",
+        "handover-mmks1y39"
+      ],
+      "edgeIds": [
+        "edge-ws-user-prof-green-onboarding-workspace-location-mmkrla1y-standard-mmkrn1qu",
+        "edge-ws-user-prof-green-onboarding-workspace-location-mmkrla1y-handover-mmks1y39"
+      ],
+      "meta": {
+        "runtimeNodePositions": {
+          "location-mmkrla1y": {
+            "x": -2.740276308395835,
+            "y": 377.8288297973919
+          },
+          "standard-mmkrn1qu": {
+            "x": 228.91143838337382,
+            "y": 534.4384397298559
+          },
+          "handover-mmks1y39": {
+            "x": 349.6013716755554,
+            "y": 190.20845009032837
+          }
+        },
+        "viewportByUserId": {
+          "user-prof-green": {
+            "panX": 378.03579579761106,
+            "panY": 29.929898964933898,
+            "zoom": 0.9592707030551156
+          },
+          "user-bob": {
+            "panX": 426.12303124441985,
+            "panY": 37.30036829801185,
+            "zoom": 0.9940830849703598
+          }
+        }
+      },
+      "homeNodeId": "location-mmkrla1y"
     }
   ]
 }
