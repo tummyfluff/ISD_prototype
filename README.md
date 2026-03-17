@@ -1,4 +1,4 @@
-# Amytis Mock Up
+# ISD Project Prototype
 
 Interactive prototype for collaboration/workspace graph flows.
 
@@ -9,11 +9,11 @@ Interactive prototype for collaboration/workspace graph flows.
 2. Start the dev server:
    - `npm run dev`
 
-In dev mode, the app uses `/api/store` backed by `data/defaultData.json` through the Vite middleware in `vite.config.js`.
+In dev mode, the app uses `/api/store` backed by `data/runtimeStore.json` through the Vite middleware in `vite.config.js`. If `data/runtimeStore.json` does not exist, it is seeded from `data/defaultData.json`.
 
 ## Storage Modes
 
-- Default in dev (`npm run dev`): `api` mode (`/api/store` GET/PUT).
+- Default in dev (`npm run dev`): `api` mode (`/api/store` GET/PUT persisted to `data/runtimeStore.json`).
 - Default in production/static build: `local` mode (browser `localStorage`).
 - Local storage key for static sharing: `amytis_store_local_v1`.
 

@@ -2,7 +2,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { defineConfig } = require("vite");
 
-const STORE_PATH = path.resolve(__dirname, "data/defaultData.json");
+const SEED_STORE_PATH = path.resolve(__dirname, "data/defaultData.json");
+const RUNTIME_STORE_PATH = path.resolve(__dirname, "data/runtimeStore.json");
 
 function isValidStorePayload(payload) {
   return Boolean(
@@ -18,21 +19,39 @@ function isValidStorePayload(payload) {
   );
 }
 
-async function readStorePayload() {
-  const raw = await fs.readFile(STORE_PATH, "utf8");
+async function readStorePayloadFromFile(filePath) {
+  const raw = await fs.readFile(filePath, "utf8");
   return JSON.parse(raw);
 }
 
-async function writeStorePayload(payload) {
+async function writeStorePayloadToFile(filePath, payload) {
   const nextJson = `${JSON.stringify(payload, null, 2)}\n`;
-  const tempPath = `${STORE_PATH}.tmp`;
+  const tempPath = `${filePath}.tmp`;
   await fs.writeFile(tempPath, nextJson, "utf8");
   try {
-    await fs.rename(tempPath, STORE_PATH);
+    await fs.rename(tempPath, filePath);
   } catch (error) {
-    await fs.copyFile(tempPath, STORE_PATH);
+    await fs.copyFile(tempPath, filePath);
     await fs.rm(tempPath, { force: true });
   }
+}
+
+async function readStorePayload() {
+  try {
+    return await readStorePayloadFromFile(RUNTIME_STORE_PATH);
+  } catch (error) {
+    if (!error || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const seedPayload = await readStorePayloadFromFile(SEED_STORE_PATH);
+  await writeStorePayloadToFile(RUNTIME_STORE_PATH, seedPayload);
+  return seedPayload;
+}
+
+async function writeStorePayload(payload) {
+  await writeStorePayloadToFile(RUNTIME_STORE_PATH, payload);
 }
 
 function sendJson(res, statusCode, payload) {
@@ -63,12 +82,12 @@ function createStoreApiMiddleware() {
       try {
         const payload = await readStorePayload();
         if (!isValidStorePayload(payload)) {
-          sendJson(res, 500, { error: "Canonical store file has an invalid shape." });
+          sendJson(res, 500, { error: "Runtime store file has an invalid shape." });
           return;
         }
         sendJson(res, 200, payload);
       } catch (error) {
-        sendJson(res, 500, { error: "Failed to read canonical store file." });
+        sendJson(res, 500, { error: "Failed to read runtime store file." });
       }
       return;
     }
