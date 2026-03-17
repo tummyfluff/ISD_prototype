@@ -70,8 +70,6 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
 //   graphPos?: { x: number, y: number },
 //   expandedW?: number,
 //   expandedH?: number,
-//   expandedAspect?: number, // legacy runtime field
-//   expandedInnerWidthPx?: number // legacy runtime field
 // }
 
     const SVG_NS = "http://www.w3.org/2000/svg";
@@ -187,15 +185,6 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const STORE_MODE_SET = new Set([STORE_MODE_API, STORE_MODE_LOCAL]);
     const ADMIN_USER_ID = "user-admin";
     const ADMIN_USER_NAME = "Admin";
-    const LEGACY_ENTITY_LINK_BY_NODE_ID = Object.freeze({
-      org_evans_lab: { entityKind: "org", entityRefId: "org-evans-lab" },
-      org_genomics_core: { entityKind: "org", entityRefId: "org-genomics-core" },
-      person_alex: { entityKind: "user", entityRefId: "user-alex-patel" },
-      person_evan: { entityKind: "user", entityRefId: "user-evans" }
-    });
-    const LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID = Object.freeze({
-      portal_genomics_core: { kind: "org", refId: "org-genomics-core" }
-    });
     const REQUIRED_ORG_RECORDS = Object.freeze([]);
     const HANDOVER_PROJECTION_META_KEY = "handoverProjection";
     const HANDOVER_PROJECTION_WORKSPACE_NODE_IDS_KEY = "handoverProjectionNodeIds";
@@ -519,7 +508,6 @@ const {
   getPortalLinkedWorkspaceName
 } = createRecordsAndLabels({
   ADMIN_USER_ID,
-  legacyEntityLinkByNodeId: LEGACY_ENTITY_LINK_BY_NODE_ID,
   getUsers: () => users,
   getOrgs: () => orgs,
   getWorkspaceOptions: () => workspaceOptions,
@@ -558,6 +546,284 @@ function getInitialUserIdForBoot() {
       });
     }
 
+function toNonEmptyString(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed || "";
+}
+
+function hasPositiveFiniteNumber(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function isKnownEntityRef(entityKind, entityRefId, options = {}) {
+  if (!entityKind || !entityRefId) return false;
+  const userMap = options.userById instanceof Map ? options.userById : userById;
+  const orgMap = options.orgById instanceof Map ? options.orgById : orgById;
+  if (entityKind === "user") return userMap.has(entityRefId);
+  if (entityKind === "org") return orgMap.has(entityRefId);
+  return false;
+}
+
+function getCanonicalEntityIdentity(node) {
+  if (!node || normalizeNodeType(node.type) !== "entity") return null;
+  const entityKind = normalizeEntityKind(node.entityKind);
+  const entityRefId = toNonEmptyString(node.entityRefId);
+  if (!entityKind || !entityRefId) return null;
+  return { entityKind, entityRefId };
+}
+
+function getLegacyEntityIdentityFromMeta(node, options = {}) {
+  if (!node || typeof node !== "object" || normalizeNodeType(node.type) !== "entity") return null;
+  if (!node.meta || typeof node.meta !== "object") return null;
+  const candidates = [];
+  const legacyEntityMeta = node.meta.entity && typeof node.meta.entity === "object" ? node.meta.entity : null;
+  if (legacyEntityMeta) {
+    candidates.push({
+      entityKind: legacyEntityMeta.kind || legacyEntityMeta.entityKind,
+      entityRefId: legacyEntityMeta.refId || legacyEntityMeta.entityRefId
+    });
+  }
+  candidates.push({
+    entityKind: node.meta.entityKind,
+    entityRefId: node.meta.entityRefId
+  });
+  candidates.push({
+    entityKind: node.meta.kind,
+    entityRefId: node.meta.refId
+  });
+  const legacyUserId = toNonEmptyString(node.meta.userId);
+  if (legacyUserId) {
+    candidates.push({
+      entityKind: "user",
+      entityRefId: legacyUserId
+    });
+  }
+  const legacyOrgId = toNonEmptyString(node.meta.orgId);
+  if (legacyOrgId) {
+    candidates.push({
+      entityKind: "org",
+      entityRefId: legacyOrgId
+    });
+  }
+  for (const candidate of candidates) {
+    const entityKind = normalizeEntityKind(candidate.entityKind);
+    const entityRefId = toNonEmptyString(candidate.entityRefId);
+    if (!entityKind || !entityRefId) continue;
+    if (!isKnownEntityRef(entityKind, entityRefId, options)) continue;
+    return { entityKind, entityRefId };
+  }
+  return null;
+}
+
+function materializeLegacyEntityIdentityForNode(node, options = {}) {
+  if (!node || normalizeNodeType(node.type) !== "entity") return false;
+  if (getCanonicalEntityIdentity(node)) return false;
+  const legacyIdentity = getLegacyEntityIdentityFromMeta(node, options);
+  if (!legacyIdentity) return false;
+  let changed = false;
+  if (node.entityKind !== legacyIdentity.entityKind) {
+    node.entityKind = legacyIdentity.entityKind;
+    changed = true;
+  }
+  if (node.entityRefId !== legacyIdentity.entityRefId) {
+    node.entityRefId = legacyIdentity.entityRefId;
+    changed = true;
+  }
+  return changed;
+}
+
+function resolveLegacyHandoverCollaboratorFromTargetId(targetId, options = {}) {
+  const normalizedTargetId = toNonEmptyString(targetId);
+  if (!normalizedTargetId) return null;
+  const userMap = options.userById instanceof Map ? options.userById : userById;
+  const orgMap = options.orgById instanceof Map ? options.orgById : orgById;
+  if (userMap.has(normalizedTargetId)) {
+    return { kind: "user", refId: normalizedTargetId, shareWorkspace: false };
+  }
+  if (orgMap.has(normalizedTargetId)) {
+    return { kind: "org", refId: normalizedTargetId, shareWorkspace: false };
+  }
+  const nodeMap = options.nodeById instanceof Map
+    ? options.nodeById
+    : new Map((Array.isArray(options.nodeRecords) ? options.nodeRecords : allNodesRuntime).map((node) => [node.id, node]));
+  const targetNode = nodeMap.get(normalizedTargetId) || null;
+  const targetIdentity = getCanonicalEntityIdentity(targetNode);
+  if (!targetIdentity || !isKnownEntityRef(targetIdentity.entityKind, targetIdentity.entityRefId, options)) return null;
+  return {
+    kind: targetIdentity.entityKind,
+    refId: targetIdentity.entityRefId,
+    shareWorkspace: false
+  };
+}
+
+function materializeLegacyHandoverCollaboratorFromMetaTo(node, options = {}) {
+  if (!node || normalizeNodeType(node.type) !== "handover") return false;
+  const legacyTargetId = toNonEmptyString(node.meta?.to);
+  if (!legacyTargetId) return false;
+  const resolvedCollaborator = resolveLegacyHandoverCollaboratorFromTargetId(legacyTargetId, options);
+  if (!resolvedCollaborator) return false;
+  const existingCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
+  const existingSignatures = new Set();
+  existingCollaborators.forEach((collaborator) => {
+    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(collaborator);
+    if (!normalizedCollaborator) return;
+    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
+    if (signature) existingSignatures.add(signature);
+  });
+  const resolvedSignature = getHandoverCollaboratorSignature(resolvedCollaborator.kind, resolvedCollaborator.refId);
+  let changed = false;
+  if (resolvedSignature && !existingSignatures.has(resolvedSignature)) {
+    node.handoverCollaborators = [
+      ...existingCollaborators,
+      resolvedCollaborator
+    ];
+    changed = true;
+  }
+  if (node.meta && typeof node.meta === "object" && Object.prototype.hasOwnProperty.call(node.meta, "to")) {
+    delete node.meta.to;
+    changed = true;
+  }
+  return changed;
+}
+
+function isLegacyLocationSizeFallbackRequired(node) {
+  if (!node || normalizeNodeType(node.type) !== "location") return false;
+  if (hasPositiveFiniteNumber(node.expandedW) && hasPositiveFiniteNumber(node.expandedH)) return false;
+  return hasPositiveFiniteNumber(node.expandedInnerWidthPx);
+}
+
+function materializeLegacyLocationSizeForNode(node) {
+  if (!node || normalizeNodeType(node.type) !== "location") return false;
+  let changed = false;
+  if (isLegacyLocationSizeFallbackRequired(node)) {
+    const fallbackAspect = clamp(
+      EXPANDED_TARGET_CHILD_W / Math.max(1, EXPANDED_TARGET_CHILD_H),
+      MIN_EXPANDED_ASPECT,
+      MAX_EXPANDED_ASPECT
+    );
+    const legacyAspect = clamp(
+      hasPositiveFiniteNumber(node.expandedAspect) ? node.expandedAspect : fallbackAspect,
+      MIN_EXPANDED_ASPECT,
+      MAX_EXPANDED_ASPECT
+    );
+    const legacyInnerW = clamp(
+      node.expandedInnerWidthPx,
+      EXPANDED_INNER_MIN_W,
+      EXPANDED_INNER_MAX_W
+    );
+    const legacyInnerH = clamp(
+      legacyInnerW / legacyAspect,
+      EXPANDED_INNER_MIN_H,
+      EXPANDED_INNER_MAX_H
+    );
+    const nextExpandedW = clamp(
+      legacyInnerW + EXPANDED_CARD_HORIZONTAL_CHROME,
+      EXPANDED_CARD_MIN_W,
+      EXPANDED_CARD_MAX_W
+    );
+    const nextExpandedH = clamp(
+      legacyInnerH + EXPANDED_CARD_VERTICAL_CHROME,
+      EXPANDED_CARD_MIN_H,
+      EXPANDED_CARD_MAX_H
+    );
+    if (node.expandedW !== nextExpandedW) {
+      node.expandedW = nextExpandedW;
+      changed = true;
+    }
+    if (node.expandedH !== nextExpandedH) {
+      node.expandedH = nextExpandedH;
+      changed = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(node, "expandedAspect")) {
+    delete node.expandedAspect;
+    changed = true;
+  }
+  if (Object.prototype.hasOwnProperty.call(node, "expandedInnerWidthPx")) {
+    delete node.expandedInnerWidthPx;
+    changed = true;
+  }
+  return changed;
+}
+
+function getHandoverCollaboratorSignatureSet(node) {
+  const signatures = new Set();
+  (Array.isArray(node?.handoverCollaborators) ? node.handoverCollaborators : []).forEach((collaborator) => {
+    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(collaborator);
+    if (!normalizedCollaborator) return;
+    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
+    if (signature) signatures.add(signature);
+  });
+  return signatures;
+}
+
+function scanLegacyUsage(nodeRecords, options = {}) {
+  const records = Array.isArray(nodeRecords) ? nodeRecords : [];
+  const nodeMap = options.nodeById instanceof Map ? options.nodeById : new Map(records.map((node) => [node.id, node]));
+  const summary = {
+    nodeCount: records.length,
+    handoverMetaToPresentCount: 0,
+    handoverMetaToFallbackRequiredCount: 0,
+    handoverMetaToUnresolvedCount: 0,
+    entityMissingCanonicalLinkCount: 0,
+    locationLegacySizeFallbackRequiredCount: 0,
+    locationLegacySizeFieldPresentCount: 0
+  };
+  records.forEach((node) => {
+    const normalizedType = normalizeNodeType(node?.type);
+    if (normalizedType === "handover") {
+      const legacyTargetId = toNonEmptyString(node?.meta?.to);
+      if (legacyTargetId) {
+        summary.handoverMetaToPresentCount += 1;
+        const resolvedCollaborator = resolveLegacyHandoverCollaboratorFromTargetId(legacyTargetId, {
+          ...options,
+          nodeById: nodeMap
+        });
+        if (!resolvedCollaborator) {
+          summary.handoverMetaToUnresolvedCount += 1;
+        } else {
+          const existingSignatures = getHandoverCollaboratorSignatureSet(node);
+          const resolvedSignature = getHandoverCollaboratorSignature(resolvedCollaborator.kind, resolvedCollaborator.refId);
+          if (resolvedSignature && !existingSignatures.has(resolvedSignature)) {
+            summary.handoverMetaToFallbackRequiredCount += 1;
+          }
+        }
+      }
+    }
+    if (normalizedType === "entity" && !getCanonicalEntityIdentity(node)) {
+      summary.entityMissingCanonicalLinkCount += 1;
+    }
+    if (normalizedType === "location") {
+      if (hasPositiveFiniteNumber(node.expandedAspect) || hasPositiveFiniteNumber(node.expandedInnerWidthPx)) {
+        summary.locationLegacySizeFieldPresentCount += 1;
+      }
+      if (isLegacyLocationSizeFallbackRequired(node)) {
+        summary.locationLegacySizeFallbackRequiredCount += 1;
+      }
+    }
+  });
+  return summary;
+}
+
+function hasLegacyLocalStorePayload() {
+  try {
+    return window.localStorage.getItem(LEGACY_STORE_KEY) !== null;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function countRequiredLegacyFallbacks(summary) {
+  if (!summary || typeof summary !== "object") return 0;
+  return (
+    Number(summary.handoverMetaToFallbackRequiredCount || 0) +
+    Number(summary.handoverMetaToUnresolvedCount || 0) +
+    Number(summary.entityMissingCanonicalLinkCount || 0) +
+    Number(summary.locationLegacySizeFallbackRequiredCount || 0)
+  );
+}
+
     function initializeRuntimeDataFromStore(nextStore) {
       store = nextStore;
       const seededOrgRecords = seedRequiredOrgRecordsInStore(store);
@@ -583,6 +849,12 @@ function getInitialUserIdForBoot() {
       userById = new Map(users.map((user) => [user.id, user]));
       orgById = new Map(orgs.map((org) => [org.id, org]));
       void orgById;
+      const preNormalizationLegacyUsage = scanLegacyUsage(Array.from(store.nodesById.values()), {
+        userById,
+        orgById,
+        nodeById: store.nodesById
+      });
+      const legacyLocalStoreKeyPresent = hasLegacyLocalStorePayload();
 
       let migratedNodeData = false;
       const defaultNodeSummary = "Click to enter node description";
@@ -619,9 +891,15 @@ function getInitialUserIdForBoot() {
           if (normalizedCommentsResult.changed) {
             migratedNodeData = true;
           }
+          if (normalizedType === "location" && materializeLegacyLocationSizeForNode(runtimeNode)) {
+            migratedNodeData = true;
+          }
           if (normalizedType === "entity") {
-            runtimeNode.entityKind = normalizeEntityKind(node.entityKind);
-            runtimeNode.entityRefId = typeof node.entityRefId === "string" && node.entityRefId ? node.entityRefId : null;
+            if (materializeLegacyEntityIdentityForNode(runtimeNode, { userById, orgById })) {
+              migratedNodeData = true;
+            }
+            runtimeNode.entityKind = normalizeEntityKind(runtimeNode.entityKind);
+            runtimeNode.entityRefId = toNonEmptyString(runtimeNode.entityRefId) || null;
             if (normalizeEntityLinkFieldsForNode(runtimeNode)) {
               migratedNodeData = true;
             }
@@ -661,6 +939,19 @@ function getInitialUserIdForBoot() {
       }
       if (refreshAllHandoverDerivedState()) {
         migratedNodeData = true;
+      }
+      const postNormalizationLegacyUsage = scanLegacyUsage(allNodesRuntime, {
+        userById,
+        orgById
+      });
+      console.info("[legacy-fallback-audit]", {
+        phase: "initializeRuntimeDataFromStore",
+        legacyLocalStoreKeyPresent,
+        before: preNormalizationLegacyUsage,
+        after: postNormalizationLegacyUsage
+      });
+      if (countRequiredLegacyFallbacks(postNormalizationLegacyUsage) > 0) {
+        console.warn("[legacy-fallback-audit] Canonical normalization left unresolved legacy patterns.", postNormalizationLegacyUsage);
       }
       const migratedNotificationData = pruneNotificationStateByUser();
       if (seededOrgRecords || seededUserRecords || migratedNodeData || migratedNotificationData) {
@@ -1256,42 +1547,6 @@ function normalizeHandoverCollaboratorEntry(rawCollaborator) {
   };
 }
 
-function getLegacyHandoverCollaboratorForTargetId(targetId) {
-  if (typeof targetId !== "string" || !targetId) return null;
-  if (userById.has(targetId)) {
-    return { kind: "user", refId: targetId, shareWorkspace: false };
-  }
-  if (orgById.has(targetId)) {
-    return { kind: "org", refId: targetId, shareWorkspace: false };
-  }
-  if (Object.prototype.hasOwnProperty.call(LEGACY_ENTITY_LINK_BY_NODE_ID, targetId)) {
-    const legacyEntity = LEGACY_ENTITY_LINK_BY_NODE_ID[targetId];
-    return {
-      kind: legacyEntity.entityKind,
-      refId: legacyEntity.entityRefId,
-      shareWorkspace: false
-    };
-  }
-  if (Object.prototype.hasOwnProperty.call(LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID, targetId)) {
-    const legacyCollaborator = LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID[targetId];
-    return {
-      kind: legacyCollaborator.kind,
-      refId: legacyCollaborator.refId,
-      shareWorkspace: false
-    };
-  }
-  const targetNode = allNodesRuntime.find((candidateNode) => candidateNode.id === targetId) || null;
-  if (targetNode?.type === "entity") {
-    const collaborator = normalizeHandoverCollaboratorEntry({
-      kind: targetNode.entityKind,
-      refId: targetNode.entityRefId,
-      shareWorkspace: false
-    });
-    if (collaborator) return collaborator;
-  }
-  return null;
-}
-
 function normalizeHandoverCollaboratorsForNode(node) {
   if (!node || node.type !== "handover") return false;
   const nextCollaborators = [];
@@ -1305,15 +1560,6 @@ function normalizeHandoverCollaboratorsForNode(node) {
     seenCollaborators.add(signature);
     nextCollaborators.push(normalizedCollaborator);
   });
-  const legacyTargetId = typeof node.meta?.to === "string" ? node.meta.to : "";
-  const legacyCollaborator = getLegacyHandoverCollaboratorForTargetId(legacyTargetId);
-  if (legacyCollaborator) {
-    const legacySignature = getHandoverCollaboratorSignature(legacyCollaborator.kind, legacyCollaborator.refId);
-    if (legacySignature && !seenCollaborators.has(legacySignature)) {
-      seenCollaborators.add(legacySignature);
-      nextCollaborators.push(legacyCollaborator);
-    }
-  }
   const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
   const changed = JSON.stringify(currentCollaborators) !== JSON.stringify(nextCollaborators);
   node.handoverCollaborators = nextCollaborators;
@@ -1323,6 +1569,13 @@ function normalizeHandoverCollaboratorsForNode(node) {
 function normalizeHandoverFieldsForNode(node) {
   if (!node || node.type !== "handover") return false;
   let changed = false;
+  if (materializeLegacyHandoverCollaboratorFromMetaTo(node, {
+    userById,
+    orgById,
+    nodeRecords: allNodesRuntime
+  })) {
+    changed = true;
+  }
   const nextStatus = normalizeHandoverStatus(node.status);
   if (node.status !== nextStatus) {
     node.status = nextStatus;
@@ -6179,6 +6432,9 @@ function createRuntimeNodeFromClipboardSnapshot(snapshot, newNodeId) {
   if (nodeType === "process") {
     nextNode.status = normalizeProcessStatus(base.status);
   }
+  if (nodeType === "location") {
+    materializeLegacyLocationSizeForNode(nextNode);
+  }
   if (nodeType === "handover") {
     nextNode.status = normalizeHandoverStatus(base.status);
     nextNode.handoverCollaborators = Array.isArray(base.handoverCollaborators)
@@ -8006,6 +8262,8 @@ function toPersistableNode(node) {
   delete clone.owner;
   delete clone.linkedNodeIds;
   delete clone.handoverNodeIds;
+  delete clone.expandedAspect;
+  delete clone.expandedInnerWidthPx;
   return clone;
 }
 
@@ -10798,9 +11056,6 @@ function onViewportMouseDown(event) {
       );
       resizeNode.expandedW = nextCardWidth;
       resizeNode.expandedH = nextCardHeight;
-      // Keep legacy fields synchronized for transition-only compatibility.
-      resizeNode.expandedAspect = lockedAspect;
-      resizeNode.expandedInnerWidthPx = nextInnerWidth;
 
       const currentFrame = lastVisibleNodeFrames.get(resizeNode.id);
       const frameLeft = Number.isFinite(currentFrame?.x) ? currentFrame.x : 0;
@@ -12802,6 +13057,9 @@ function onViewportMouseDown(event) {
           changed = true;
         }
         if (node.type === "location") {
+          if (materializeLegacyLocationSizeForNode(node)) {
+            changed = true;
+          }
           const nextKind = node.kind || "generic";
           if (node.kind !== nextKind) {
             node.kind = nextKind;
@@ -12821,6 +13079,9 @@ function onViewportMouseDown(event) {
           }
         }
         if (node.type === "entity") {
+          if (materializeLegacyEntityIdentityForNode(node)) {
+            changed = true;
+          }
           if (normalizeEntityLinkFieldsForNode(node)) {
             changed = true;
           }
@@ -13369,39 +13630,6 @@ function onViewportMouseDown(event) {
         EXPANDED_CARD_MIN_H,
         EXPANDED_CARD_MAX_H
       );
-
-      // Backward-compat shim: migrate legacy expandedInnerWidthPx/expandedAspect to expandedW/H once.
-      if (
-        (!Number.isFinite(locationNode.expandedW) || locationNode.expandedW <= 0 ||
-          !Number.isFinite(locationNode.expandedH) || locationNode.expandedH <= 0) &&
-        Number.isFinite(locationNode.expandedInnerWidthPx) && locationNode.expandedInnerWidthPx > 0
-      ) {
-        const legacyAspect = clamp(
-          Number.isFinite(locationNode.expandedAspect) && locationNode.expandedAspect > 0
-            ? locationNode.expandedAspect
-            : (defaultInnerWidthPx / Math.max(1, defaultInnerHeightPx)),
-          MIN_EXPANDED_ASPECT,
-          MAX_EXPANDED_ASPECT
-        );
-        const legacyInnerW = clamp(
-          locationNode.expandedInnerWidthPx,
-          EXPANDED_INNER_MIN_W,
-          EXPANDED_INNER_MAX_W
-        );
-        let legacyInnerH = legacyInnerW / legacyAspect;
-        if (legacyInnerH < EXPANDED_INNER_MIN_H) legacyInnerH = EXPANDED_INNER_MIN_H;
-        if (legacyInnerH > EXPANDED_INNER_MAX_H) legacyInnerH = EXPANDED_INNER_MAX_H;
-        locationNode.expandedW = clamp(
-          legacyInnerW + EXPANDED_CARD_HORIZONTAL_CHROME,
-          EXPANDED_CARD_MIN_W,
-          EXPANDED_CARD_MAX_W
-        );
-        locationNode.expandedH = clamp(
-          legacyInnerH + EXPANDED_CARD_VERTICAL_CHROME,
-          EXPANDED_CARD_MIN_H,
-          EXPANDED_CARD_MAX_H
-        );
-      }
 
       // First expansion initialization: content-aware defaults, persisted per location.
       if (!Number.isFinite(locationNode.expandedW) || locationNode.expandedW <= 0) {
