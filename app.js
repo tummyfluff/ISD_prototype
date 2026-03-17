@@ -26,7 +26,6 @@ if (!window.d3 || !window.d3.forceSimulation) {
   console.error("D3 force not loaded");
 }
 
-const CURRENT_USER = "Dr Hannah Lewis";
 const HANDOVER_OBJECT_ROLES = ["input", "output", "reference"];
 const HANDOVER_OBJECT_ROLE_LABELS = {
   input: "Input",
@@ -202,7 +201,6 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
       org_evans_lab: { entityKind: "org", entityRefId: "org-evans-lab" },
       org_genomics_core: { entityKind: "org", entityRefId: "org-genomics-core" },
       person_alex: { entityKind: "user", entityRefId: "user-alex-patel" },
-      person_hannah: { entityKind: "user", entityRefId: "user-hannah-lewis" },
       person_evan: { entityKind: "user", entityRefId: "user-evans" }
     });
     const LEGACY_HANDOVER_COLLABORATOR_BY_TARGET_ID = Object.freeze({
@@ -533,7 +531,6 @@ const {
   getLinkableWorkspaceOptionsForCurrentUser,
   getPortalLinkedWorkspaceName
 } = createRecordsAndLabels({
-  CURRENT_USER,
   ADMIN_USER_ID,
   legacyEntityLinkByNodeId: LEGACY_ENTITY_LINK_BY_NODE_ID,
   getUsers: () => users,
@@ -547,6 +544,17 @@ const {
   getCurrentUserId: () => currentUserId,
   getCurrentWorkspaceId: () => currentWorkspaceId
 });
+
+function getInitialUserIdForBoot() {
+  const nonAdminUsers = users.filter((userRecord) => !!userRecord?.id && !isAdminUserId(userRecord.id));
+  const nonAdminOwner = nonAdminUsers.find((userRecord) =>
+    workspaces.some((workspaceRecord) => workspaceRecord?.ownerId === userRecord.id)
+  );
+  if (nonAdminOwner?.id) return nonAdminOwner.id;
+  if (nonAdminUsers[0]?.id) return nonAdminUsers[0].id;
+  if (users[0]?.id) return users[0].id;
+  return null;
+}
 
     function enforceCollabUniqueness(workspaceRecords) {
       const seenCollabByOwner = new Set();
@@ -677,13 +685,7 @@ const {
       }
       reconcileLegacyPortalGraphPositions();
 
-      if (userById.has("user-hannah-lewis")) {
-        currentUserId = "user-hannah-lewis";
-      } else if (users.length) {
-        currentUserId = users[0].id;
-      } else {
-        currentUserId = null;
-      }
+      currentUserId = getInitialUserIdForBoot();
       const initialWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
       currentWorkspaceId = initialWorkspaceOptions[0]?.id || null;
       currentWorkspaceKind = normalizeWorkspaceKind(initialWorkspaceOptions[0]?.kind);
@@ -2321,8 +2323,13 @@ function getTaskAssigneeOptions(node = null) {
       });
     return options;
   }
-  const owners = [...new Set(nodes.map((nodeRecord) => nodeRecord.owner))];
-  if (!owners.includes(CURRENT_USER)) owners.push(CURRENT_USER);
+  const owners = [...new Set(
+    nodes
+      .map((nodeRecord) => String(nodeRecord?.owner || "").trim())
+      .filter(Boolean)
+  )];
+  const currentUserName = String(getCurrentUserRecord()?.name || "").trim();
+  if (currentUserName && !owners.includes(currentUserName)) owners.push(currentUserName);
   return owners.sort((a, b) => a.localeCompare(b));
 }
 
@@ -17166,10 +17173,12 @@ function onViewportMouseDown(event) {
       if (!message) return;
       const selectedNode = getSelectedNode();
       if (!selectedNode) return;
+      const currentUserName = String(getCurrentUserRecord()?.name || "").trim();
+      const authorLabel = currentUserName || currentUserId || "Unknown";
 
       selectedNode.comments.push({
         id: generateCommentId(),
-        author: getCurrentUserName() || CURRENT_USER,
+        author: authorLabel,
         text: message,
         timestamp: new Date().toISOString(),
         isNew: true

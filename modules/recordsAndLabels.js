@@ -106,7 +106,6 @@ export function createRecordsAndLabels(deps) {
 
   function getCurrentUserTaskAssignmentLabels() {
     const labels = new Set();
-    if (deps.CURRENT_USER) labels.add(deps.CURRENT_USER);
     const currentUser = getCurrentUserRecord();
     if (currentUser?.name) labels.add(currentUser.name);
     const currentUserId = deps.getCurrentUserId();
@@ -121,7 +120,6 @@ export function createRecordsAndLabels(deps) {
 
   function getCurrentUserCommentAuthorLabels() {
     const labels = new Set();
-    if (deps.CURRENT_USER) labels.add(deps.CURRENT_USER);
     const currentUserName = getCurrentUserName();
     if (currentUserName) labels.add(currentUserName);
     const currentUserId = deps.getCurrentUserId();
