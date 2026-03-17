@@ -143,14 +143,6 @@ export function createRecordsAndLabels(deps) {
     return String(node.label || node.title || "").trim() || fallback;
   }
 
-  function getLegacyEntityLinkForNode(node) {
-    if (!node || typeof node.id !== "string") return null;
-    if (node.meta && typeof node.meta === "object" && node.meta.suppressLegacyEntityLink) {
-      return null;
-    }
-    return deps.legacyEntityLinkByNodeId[node.id] || null;
-  }
-
   function getEntityLinkRecord(entityKind, entityRefId) {
     const normalizedKind = normalizeEntityKind(entityKind);
     if (!normalizedKind || !entityRefId) return null;
@@ -197,11 +189,10 @@ export function createRecordsAndLabels(deps) {
 
   function normalizeEntityLinkFieldsForNode(node) {
     if (!node || node.type !== "entity") return false;
-    const legacyLink = getLegacyEntityLinkForNode(node);
-    const nextEntityKind = normalizeEntityKind(node.entityKind) || legacyLink?.entityKind || null;
-    const nextEntityRefId = typeof node.entityRefId === "string" && node.entityRefId
+    const nextEntityKind = normalizeEntityKind(node.entityKind) || null;
+    const nextEntityRefId = nextEntityKind && typeof node.entityRefId === "string" && node.entityRefId
       ? node.entityRefId
-      : (legacyLink?.entityRefId || null);
+      : null;
     let changed = false;
     if (node.entityKind !== nextEntityKind) {
       node.entityKind = nextEntityKind;
