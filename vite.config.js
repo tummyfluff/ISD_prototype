@@ -30,7 +30,7 @@ async function writeStorePayloadToFile(filePath, payload) {
   await fs.writeFile(tempPath, nextJson, "utf8");
   try {
     await fs.rename(tempPath, filePath);
-  } catch (error) {
+  } catch (_error) {
     await fs.copyFile(tempPath, filePath);
     await fs.rm(tempPath, { force: true });
   }
@@ -86,7 +86,7 @@ function createStoreApiMiddleware() {
           return;
         }
         sendJson(res, 200, payload);
-      } catch (error) {
+      } catch (_error) {
         sendJson(res, 500, { error: "Failed to read runtime store file." });
       }
       return;
@@ -101,7 +101,7 @@ function createStoreApiMiddleware() {
         }
         await writeStorePayload(payload);
         sendJson(res, 200, { ok: true });
-      } catch (error) {
+      } catch (_error) {
         sendJson(res, 500, { error: "Failed to write canonical store file." });
       }
       return;

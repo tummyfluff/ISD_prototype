@@ -49,12 +49,6 @@ export function normalizeHandoverStatus(rawStatus) {
   return "Draft";
 }
 
-export function getNextProcessStatus(status) {
-  const normalized = normalizeProcessStatus(status);
-  const index = PROCESS_STATUSES.indexOf(normalized);
-  return PROCESS_STATUSES[(index + 1) % PROCESS_STATUSES.length];
-}
-
 export function normalizeEntityKind(rawKind) {
   const kind = String(rawKind || "").trim().toLowerCase();
   if (kind === "user" || kind === "person") return "user";
@@ -101,7 +95,7 @@ export function getTypeShort(type) {
   return map[type] || type.toUpperCase();
 }
 
-export function getTypeSortIndex(type) {
+function getTypeSortIndex(type) {
   const index = TYPE_ORDER.indexOf(type);
   return index >= 0 ? index : TYPE_ORDER.length;
 }

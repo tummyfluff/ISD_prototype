@@ -1240,8 +1240,7 @@
     }
 
     .workspace-panel > h2,
-    .workspace-panel > .muted,
-    .workspace-panel > .canvas-header {
+    .workspace-panel > .muted {
       display: none;
     }
 
@@ -1511,63 +1510,6 @@
       display: flex;
       align-items: center;
       gap: 6px;
-    }
-
-    .canvas-header {
-      display: none;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .focus-back {
-      border: 1px solid var(--border);
-      background: #f8fafc;
-      border-radius: 8px;
-      padding: 5px 10px;
-      font-size: 0.8rem;
-      cursor: pointer;
-    }
-
-    .focus-back:disabled {
-      opacity: 0.45;
-      cursor: default;
-    }
-
-    .breadcrumb {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 6px;
-      font-size: 0.8rem;
-      color: #475569;
-      min-height: 28px;
-    }
-
-    .crumb-btn {
-      border: 1px solid #d1d9e6;
-      background: #f8fafc;
-      color: #1e3a8a;
-      border-radius: 999px;
-      padding: 3px 9px;
-      font-size: 0.76rem;
-      cursor: pointer;
-    }
-
-    .crumb-current {
-      border: 1px solid #93c5fd;
-      background: #eaf2ff;
-      border-radius: 999px;
-      padding: 3px 9px;
-      font-size: 0.76rem;
-      font-weight: 600;
-      color: #1e3a8a;
-    }
-
-    .crumb-sep {
-      color: #94a3b8;
-      font-size: 0.78rem;
     }
 
     #viewport {
@@ -3256,51 +3198,6 @@
       font-weight: 700;
       pointer-events: none;
       letter-spacing: 0.2px;
-    }
-
-    .focus-frame {
-      fill: #f8fbff;
-      stroke: #b6c4d8;
-      stroke-width: 2;
-      rx: 12;
-      ry: 12;
-    }
-
-    .focus-title {
-      fill: #334155;
-      font-size: 14px;
-      font-weight: 700;
-      pointer-events: none;
-    }
-
-    .focus-empty {
-      fill: #64748b;
-      font-size: 13px;
-      pointer-events: none;
-      text-anchor: middle;
-    }
-
-    .focus-child-area {
-      fill: #ffffff;
-      stroke: #d6deea;
-      stroke-width: 1.2;
-    }
-
-    .focus-divider {
-      stroke: #d4dce8;
-      stroke-width: 1.2;
-    }
-
-    .focus-direct-title {
-      fill: #475569;
-      font-size: 12px;
-      font-weight: 700;
-      pointer-events: none;
-    }
-
-    .focus-link-edge {
-      stroke: #8a9ab0;
-      stroke-width: 1.2;
     }
 
     .child-location-group {
