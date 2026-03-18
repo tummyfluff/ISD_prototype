@@ -11,6 +11,18 @@ Interactive prototype for collaboration/workspace graph flows.
 
 In dev mode, the app uses `/api/store` backed by `data/runtimeStore.json` through the Vite middleware in `vite.config.js`. If `data/runtimeStore.json` does not exist, it is seeded from `data/defaultData.json`.
 
+## Code Structure
+
+- `app.js`: orchestration entrypoint (state containers, dependency wiring, DOM/event wiring, boot sequence).
+- `modules/storeBootstrap.js`: initial store mode resolution, initial payload loading, and base store shaping.
+- `modules/legacyNormalization.js`: legacy-shape detection/materialization and fallback audit helpers.
+- `modules/taskCommentDomain.js`: task/comment normalization and task-linked-object utilities.
+- `modules/handoverDomain.js`: handover collaborator/object normalization helpers.
+- `modules/workspaceGraphOps.js`: graph/workspace data operations (edge/node linkage and index-safe mutation helpers).
+- `modules/uiWorkspaceMenu.js`: workspace/user menu trigger and panel rendering.
+- `modules/uiDetails.js`: details pane rendering and status/task/comment editor UI behavior.
+- `modules/uiModals.js`: portal/entity/collaborator/handover/admin/confirmation modal rendering and actions.
+
 ## Quality Checks
 
 - Run lint only:

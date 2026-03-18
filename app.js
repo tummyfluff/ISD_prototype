@@ -17,6 +17,14 @@ import {
   compareNodesStable
 } from "./modules/nodeNormalization.js";
 import { createRecordsAndLabels } from "./modules/recordsAndLabels.js";
+import { createStoreBootstrap } from "./modules/storeBootstrap.js";
+import { createLegacyNormalization } from "./modules/legacyNormalization.js";
+import { createHandoverDomain } from "./modules/handoverDomain.js";
+import { createTaskCommentDomain } from "./modules/taskCommentDomain.js";
+import { createWorkspaceGraphOps } from "./modules/workspaceGraphOps.js";
+import { createUiWorkspaceMenu } from "./modules/uiWorkspaceMenu.js";
+import { createUiDetails } from "./modules/uiDetails.js";
+import { createUiModals } from "./modules/uiModals.js";
 import defaultStorePayload from "./data/defaultData.json";
 
 const d3 = window.d3;
@@ -125,6 +133,8 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const EXPANDED_TARGET_CHILD_H = COLLAPSED_CARD_HEIGHT_BY_TYPE.location;
     const EXPANDED_CARD_HORIZONTAL_CHROME = 20;
     const EXPANDED_CARD_VERTICAL_CHROME = 72;
+    const MIN_EXPANDED_ASPECT = 0.5;
+    const MAX_EXPANDED_ASPECT = 3;
     const HYBRID_LANE_X = {
       location: 0,
       process: 350,
@@ -199,173 +209,25 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     const GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_X = 36;
     const GRAPH_CLIPBOARD_PASTE_OFFSET_WORLD_Y = 26;
 
-    function extractEntityArray(data, key) {
-      if (!data || typeof data !== "object") return [];
-      const direct = data[key];
-      if (Array.isArray(direct)) return direct;
-      if (direct instanceof Map) return Array.from(direct.values());
-      if (direct && typeof direct === "object") return Object.values(direct);
-      const byId = data[`${key}ById`];
-      if (byId instanceof Map) return Array.from(byId.values());
-      if (byId && typeof byId === "object") return Object.values(byId);
-      return [];
-    }
-
-    function isValidStorePayloadShape(payload) {
-      return Boolean(
-        payload
-          && typeof payload === "object"
-          && payload.meta
-          && typeof payload.meta === "object"
-          && Array.isArray(payload.users)
-          && Array.isArray(payload.orgs)
-          && Array.isArray(payload.nodes)
-          && Array.isArray(payload.edges)
-          && Array.isArray(payload.workspaces)
-      );
-    }
-
-    function getQueryParams() {
-      try {
-        return new URLSearchParams(window.location?.search || "");
-      } catch (_error) {
-        return new URLSearchParams();
-      }
-    }
-
-    function getStoreModeOverrideFromQuery() {
-      const queryValue = getQueryParams().get(STORE_QUERY_PARAM);
-      if (!queryValue) return null;
-      const normalized = String(queryValue).trim().toLowerCase();
-      return STORE_MODE_SET.has(normalized) ? normalized : null;
-    }
-
-    function shouldResetStoreFromQuery() {
-      const queryValue = getQueryParams().get(STORE_RESET_QUERY_PARAM);
-      if (queryValue == null) return false;
-      const normalized = String(queryValue).trim().toLowerCase();
-      return normalized === "" || normalized === "1" || normalized === "true" || normalized === "yes";
-    }
-
-    function resolveStoreMode() {
-      const override = getStoreModeOverrideFromQuery();
-      if (override) return override;
-      const isDevMode = Boolean(import.meta.env && import.meta.env.DEV);
-      return isDevMode ? STORE_MODE_API : STORE_MODE_LOCAL;
-    }
-
-    const activeStoreMode = resolveStoreMode();
-
-    function getDefaultStoreSeedPayload() {
-      const snapshot = clonePlainData(defaultStorePayload);
-      if (!isValidStorePayloadShape(snapshot)) {
-        throw new Error("Bundled default store payload has an invalid shape.");
-      }
-      return snapshot;
-    }
-
-    async function loadInitialDataFromApi() {
-      const response = await fetch(STORE_API_ENDPOINT, {
-        method: "GET",
-        cache: "no-store"
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to load canonical store: ${response.status} ${response.statusText}`);
-      }
-      return await response.json();
-    }
-
-    function readStorePayloadFromLocalStorage() {
-      const rawPayload = window.localStorage.getItem(STORE_LOCAL_KEY);
-      if (!rawPayload) return null;
-      const parsed = JSON.parse(rawPayload);
-      if (!isValidStorePayloadShape(parsed)) {
-        throw new Error("Browser local store payload has an invalid shape.");
-      }
-      return parsed;
-    }
-
-    function writeStorePayloadToLocalStorage(payload) {
-      if (!isValidStorePayloadShape(payload)) {
-        throw new Error("Refusing to persist an invalid store payload.");
-      }
-      window.localStorage.setItem(STORE_LOCAL_KEY, JSON.stringify(payload));
-    }
-
-    function clearShareLocalStore() {
-      window.localStorage.removeItem(STORE_LOCAL_KEY);
-    }
-
-    function loadInitialDataFromLocalStorage() {
-      if (shouldResetStoreFromQuery()) {
-        clearShareLocalStore();
-      }
-
-      try {
-        const existingPayload = readStorePayloadFromLocalStorage();
-        if (existingPayload) return existingPayload;
-      } catch (error) {
-        console.warn("Failed to read browser local store payload. Re-seeding from bundled defaults.", error);
-      }
-
-      const seedPayload = getDefaultStoreSeedPayload();
-      try {
-        writeStorePayloadToLocalStorage(seedPayload);
-      } catch (error) {
-        console.warn("Failed to seed browser local store payload.", error);
-      }
-      return seedPayload;
-    }
-
-    function getBootLoadErrorMessage() {
-      if (activeStoreMode === STORE_MODE_LOCAL) {
-        return "Failed to load the browser local store payload.";
-      }
-      return "Failed to load the canonical store from /api/store. Run the app via the Vite server.";
-    }
-
-    async function loadInitialData() {
-      if (activeStoreMode === STORE_MODE_LOCAL) {
-        return loadInitialDataFromLocalStorage();
-      }
-      return await loadInitialDataFromApi();
-    }
-
-    function buildStore(data) {
-      const users = extractEntityArray(data, "users")
-        .filter((entry) => entry && typeof entry.id === "string")
-        .map((entry) => ({ ...entry }));
-      const orgs = extractEntityArray(data, "orgs")
-        .filter((entry) => entry && typeof entry.id === "string")
-        .map((entry) => ({ ...entry }));
-      const nodes = extractEntityArray(data, "nodes")
-        .filter((entry) => entry && typeof entry.id === "string")
-        .map((entry) => ({ ...entry }));
-      const edges = extractEntityArray(data, "edges")
-        .filter((entry) => entry && typeof entry.id === "string")
-        .map((entry) => ({ ...entry }));
-      const workspaces = extractEntityArray(data, "workspaces")
-        .filter((entry) => entry && typeof entry.id === "string")
-        .map((entry) => ({ ...entry }));
-      const meta = data && typeof data === "object" && data.meta && typeof data.meta === "object"
-        ? { ...data.meta }
-        : {};
-
-      return {
-        users,
-        orgs,
-        nodes,
-        edges,
-        workspaces,
-        meta,
-        usersById: new Map(users.map((entry) => [entry.id, entry])),
-        orgsById: new Map(orgs.map((entry) => [entry.id, entry])),
-        nodesById: new Map(nodes.map((entry) => [entry.id, entry])),
-        edgesById: new Map(edges.map((entry) => [entry.id, entry])),
-        workspacesById: new Map(workspaces.map((entry) => [entry.id, entry])),
-        workspaceOrder: workspaces.map((workspace) => workspace.id)
-      };
-    }
+const {
+  activeStoreMode,
+  extractEntityArray,
+  writeStorePayloadToLocalStorage,
+  getBootLoadErrorMessage,
+  loadInitialData,
+  buildStore
+} = createStoreBootstrap({
+  defaultStorePayload,
+  clonePlainData,
+  STORE_LOCAL_KEY,
+  STORE_API_ENDPOINT,
+  STORE_QUERY_PARAM,
+  STORE_RESET_QUERY_PARAM,
+  STORE_MODE_API,
+  STORE_MODE_LOCAL,
+  STORE_MODE_SET,
+  importMetaEnv: import.meta.env
+});
 
     let store = null;
     let users = [];
@@ -393,6 +255,65 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
   let workspaceDraftName = "";
   let workspaceRenameId = null;
   let workspaceRenameDraft = "";
+  const workspaceMenuUiState = {};
+  Object.defineProperties(workspaceMenuUiState, {
+    currentWorkspaceId: {
+      enumerable: true,
+      get: () => currentWorkspaceId,
+      set: (value) => {
+        currentWorkspaceId = value;
+      }
+    },
+    workspaceMenuOpen: {
+      enumerable: true,
+      get: () => workspaceMenuOpen,
+      set: (value) => {
+        workspaceMenuOpen = !!value;
+      }
+    },
+    userMenuOpen: {
+      enumerable: true,
+      get: () => userMenuOpen,
+      set: (value) => {
+        userMenuOpen = !!value;
+      }
+    },
+    currentUserId: {
+      enumerable: true,
+      get: () => currentUserId,
+      set: (value) => {
+        currentUserId = value;
+      }
+    },
+    workspaceRenameId: {
+      enumerable: true,
+      get: () => workspaceRenameId,
+      set: (value) => {
+        workspaceRenameId = value;
+      }
+    },
+    workspaceRenameDraft: {
+      enumerable: true,
+      get: () => workspaceRenameDraft,
+      set: (value) => {
+        workspaceRenameDraft = typeof value === "string" ? value : "";
+      }
+    },
+    isCreatingWorkspace: {
+      enumerable: true,
+      get: () => isCreatingWorkspace,
+      set: (value) => {
+        isCreatingWorkspace = !!value;
+      }
+    },
+    workspaceDraftName: {
+      enumerable: true,
+      get: () => workspaceDraftName,
+      set: (value) => {
+        workspaceDraftName = typeof value === "string" ? value : "";
+      }
+    }
+  });
   let createNodeMenuOpen = false;
   let createNodeMenuMode = "create";
   let createNodeMenuNodeId = null;
@@ -464,6 +385,86 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     confirmTone: "delete",
     onConfirm: null
   };
+  const modalUiState = {};
+  Object.defineProperties(modalUiState, {
+    portalLinkModalState: {
+      enumerable: true,
+      get: () => portalLinkModalState,
+      set: (value) => {
+        portalLinkModalState = value;
+      }
+    },
+    entityLinkModalState: {
+      enumerable: true,
+      get: () => entityLinkModalState,
+      set: (value) => {
+        entityLinkModalState = value;
+      }
+    },
+    collaboratorPickerModalState: {
+      enumerable: true,
+      get: () => collaboratorPickerModalState,
+      set: (value) => {
+        collaboratorPickerModalState = value;
+      }
+    },
+    handoverObjectPickerModalState: {
+      enumerable: true,
+      get: () => handoverObjectPickerModalState,
+      set: (value) => {
+        handoverObjectPickerModalState = value;
+      }
+    },
+    adminOrgModalState: {
+      enumerable: true,
+      get: () => adminOrgModalState,
+      set: (value) => {
+        adminOrgModalState = value;
+      }
+    },
+    adminUserModalState: {
+      enumerable: true,
+      get: () => adminUserModalState,
+      set: (value) => {
+        adminUserModalState = value;
+      }
+    },
+    confirmationModalState: {
+      enumerable: true,
+      get: () => confirmationModalState,
+      set: (value) => {
+        confirmationModalState = value;
+      }
+    },
+    workspaceMenuOpen: {
+      enumerable: true,
+      get: () => workspaceMenuOpen,
+      set: (value) => {
+        workspaceMenuOpen = !!value;
+      }
+    },
+    userMenuOpen: {
+      enumerable: true,
+      get: () => userMenuOpen,
+      set: (value) => {
+        userMenuOpen = !!value;
+      }
+    },
+    currentWorkspaceId: {
+      enumerable: true,
+      get: () => currentWorkspaceId,
+      set: (value) => {
+        currentWorkspaceId = value;
+      }
+    },
+    currentUserId: {
+      enumerable: true,
+      get: () => currentUserId,
+      set: (value) => {
+        currentUserId = value;
+      }
+    }
+  });
   let detailsTaskComposerState = {
     nodeId: null,
     text: "",
@@ -479,6 +480,58 @@ const HANDOVER_OBJECT_EDGE_KIND_BY_ROLE = {
     linkedObjectIds: [],
     slashRange: null
   };
+  const detailsUiState = {};
+  Object.defineProperties(detailsUiState, {
+    currentUserId: {
+      enumerable: true,
+      get: () => currentUserId,
+      set: (value) => {
+        currentUserId = value;
+      }
+    },
+    detailsTitleEditNodeId: {
+      enumerable: true,
+      get: () => detailsTitleEditNodeId,
+      set: (value) => {
+        detailsTitleEditNodeId = value;
+      }
+    },
+    detailsTitleDraft: {
+      enumerable: true,
+      get: () => detailsTitleDraft,
+      set: (value) => {
+        detailsTitleDraft = typeof value === "string" ? value : "";
+      }
+    },
+    detailsSummaryEditNodeId: {
+      enumerable: true,
+      get: () => detailsSummaryEditNodeId,
+      set: (value) => {
+        detailsSummaryEditNodeId = value;
+      }
+    },
+    detailsSummaryDraft: {
+      enumerable: true,
+      get: () => detailsSummaryDraft,
+      set: (value) => {
+        detailsSummaryDraft = typeof value === "string" ? value : "";
+      }
+    },
+    detailsTaskComposerState: {
+      enumerable: true,
+      get: () => detailsTaskComposerState,
+      set: (value) => {
+        detailsTaskComposerState = value;
+      }
+    },
+    detailsTaskEditState: {
+      enumerable: true,
+      get: () => detailsTaskEditState,
+      set: (value) => {
+        detailsTaskEditState = value;
+      }
+    }
+  });
 
 const {
   getWorkspaceRecordById,
@@ -546,283 +599,39 @@ function getInitialUserIdForBoot() {
       });
     }
 
-function toNonEmptyString(value) {
-  if (typeof value !== "string") return "";
-  const trimmed = value.trim();
-  return trimmed || "";
-}
-
-function hasPositiveFiniteNumber(value) {
-  return Number.isFinite(value) && value > 0;
-}
-
-function isKnownEntityRef(entityKind, entityRefId, options = {}) {
-  if (!entityKind || !entityRefId) return false;
-  const userMap = options.userById instanceof Map ? options.userById : userById;
-  const orgMap = options.orgById instanceof Map ? options.orgById : orgById;
-  if (entityKind === "user") return userMap.has(entityRefId);
-  if (entityKind === "org") return orgMap.has(entityRefId);
-  return false;
-}
-
-function getCanonicalEntityIdentity(node) {
-  if (!node || normalizeNodeType(node.type) !== "entity") return null;
-  const entityKind = normalizeEntityKind(node.entityKind);
-  const entityRefId = toNonEmptyString(node.entityRefId);
-  if (!entityKind || !entityRefId) return null;
-  return { entityKind, entityRefId };
-}
-
-function getLegacyEntityIdentityFromMeta(node, options = {}) {
-  if (!node || typeof node !== "object" || normalizeNodeType(node.type) !== "entity") return null;
-  if (!node.meta || typeof node.meta !== "object") return null;
-  const candidates = [];
-  const legacyEntityMeta = node.meta.entity && typeof node.meta.entity === "object" ? node.meta.entity : null;
-  if (legacyEntityMeta) {
-    candidates.push({
-      entityKind: legacyEntityMeta.kind || legacyEntityMeta.entityKind,
-      entityRefId: legacyEntityMeta.refId || legacyEntityMeta.entityRefId
-    });
-  }
-  candidates.push({
-    entityKind: node.meta.entityKind,
-    entityRefId: node.meta.entityRefId
-  });
-  candidates.push({
-    entityKind: node.meta.kind,
-    entityRefId: node.meta.refId
-  });
-  const legacyUserId = toNonEmptyString(node.meta.userId);
-  if (legacyUserId) {
-    candidates.push({
-      entityKind: "user",
-      entityRefId: legacyUserId
-    });
-  }
-  const legacyOrgId = toNonEmptyString(node.meta.orgId);
-  if (legacyOrgId) {
-    candidates.push({
-      entityKind: "org",
-      entityRefId: legacyOrgId
-    });
-  }
-  for (const candidate of candidates) {
-    const entityKind = normalizeEntityKind(candidate.entityKind);
-    const entityRefId = toNonEmptyString(candidate.entityRefId);
-    if (!entityKind || !entityRefId) continue;
-    if (!isKnownEntityRef(entityKind, entityRefId, options)) continue;
-    return { entityKind, entityRefId };
-  }
-  return null;
-}
-
-function materializeLegacyEntityIdentityForNode(node, options = {}) {
-  if (!node || normalizeNodeType(node.type) !== "entity") return false;
-  if (getCanonicalEntityIdentity(node)) return false;
-  const legacyIdentity = getLegacyEntityIdentityFromMeta(node, options);
-  if (!legacyIdentity) return false;
-  let changed = false;
-  if (node.entityKind !== legacyIdentity.entityKind) {
-    node.entityKind = legacyIdentity.entityKind;
-    changed = true;
-  }
-  if (node.entityRefId !== legacyIdentity.entityRefId) {
-    node.entityRefId = legacyIdentity.entityRefId;
-    changed = true;
-  }
-  return changed;
-}
-
-function resolveLegacyHandoverCollaboratorFromTargetId(targetId, options = {}) {
-  const normalizedTargetId = toNonEmptyString(targetId);
-  if (!normalizedTargetId) return null;
-  const userMap = options.userById instanceof Map ? options.userById : userById;
-  const orgMap = options.orgById instanceof Map ? options.orgById : orgById;
-  if (userMap.has(normalizedTargetId)) {
-    return { kind: "user", refId: normalizedTargetId, shareWorkspace: false };
-  }
-  if (orgMap.has(normalizedTargetId)) {
-    return { kind: "org", refId: normalizedTargetId, shareWorkspace: false };
-  }
-  const nodeMap = options.nodeById instanceof Map
-    ? options.nodeById
-    : new Map((Array.isArray(options.nodeRecords) ? options.nodeRecords : allNodesRuntime).map((node) => [node.id, node]));
-  const targetNode = nodeMap.get(normalizedTargetId) || null;
-  const targetIdentity = getCanonicalEntityIdentity(targetNode);
-  if (!targetIdentity || !isKnownEntityRef(targetIdentity.entityKind, targetIdentity.entityRefId, options)) return null;
-  return {
-    kind: targetIdentity.entityKind,
-    refId: targetIdentity.entityRefId,
-    shareWorkspace: false
-  };
-}
-
-function materializeLegacyHandoverCollaboratorFromMetaTo(node, options = {}) {
-  if (!node || normalizeNodeType(node.type) !== "handover") return false;
-  const legacyTargetId = toNonEmptyString(node.meta?.to);
-  if (!legacyTargetId) return false;
-  const resolvedCollaborator = resolveLegacyHandoverCollaboratorFromTargetId(legacyTargetId, options);
-  if (!resolvedCollaborator) return false;
-  const existingCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
-  const existingSignatures = new Set();
-  existingCollaborators.forEach((collaborator) => {
-    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(collaborator);
-    if (!normalizedCollaborator) return;
-    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
-    if (signature) existingSignatures.add(signature);
-  });
-  const resolvedSignature = getHandoverCollaboratorSignature(resolvedCollaborator.kind, resolvedCollaborator.refId);
-  let changed = false;
-  if (resolvedSignature && !existingSignatures.has(resolvedSignature)) {
-    node.handoverCollaborators = [
-      ...existingCollaborators,
-      resolvedCollaborator
-    ];
-    changed = true;
-  }
-  if (node.meta && typeof node.meta === "object" && Object.prototype.hasOwnProperty.call(node.meta, "to")) {
-    delete node.meta.to;
-    changed = true;
-  }
-  return changed;
-}
-
-function isLegacyLocationSizeFallbackRequired(node) {
-  if (!node || normalizeNodeType(node.type) !== "location") return false;
-  if (hasPositiveFiniteNumber(node.expandedW) && hasPositiveFiniteNumber(node.expandedH)) return false;
-  return hasPositiveFiniteNumber(node.expandedInnerWidthPx);
-}
-
-function materializeLegacyLocationSizeForNode(node) {
-  if (!node || normalizeNodeType(node.type) !== "location") return false;
-  let changed = false;
-  if (isLegacyLocationSizeFallbackRequired(node)) {
-    const fallbackAspect = clamp(
-      EXPANDED_TARGET_CHILD_W / Math.max(1, EXPANDED_TARGET_CHILD_H),
-      MIN_EXPANDED_ASPECT,
-      MAX_EXPANDED_ASPECT
-    );
-    const legacyAspect = clamp(
-      hasPositiveFiniteNumber(node.expandedAspect) ? node.expandedAspect : fallbackAspect,
-      MIN_EXPANDED_ASPECT,
-      MAX_EXPANDED_ASPECT
-    );
-    const legacyInnerW = clamp(
-      node.expandedInnerWidthPx,
-      EXPANDED_INNER_MIN_W,
-      EXPANDED_INNER_MAX_W
-    );
-    const legacyInnerH = clamp(
-      legacyInnerW / legacyAspect,
-      EXPANDED_INNER_MIN_H,
-      EXPANDED_INNER_MAX_H
-    );
-    const nextExpandedW = clamp(
-      legacyInnerW + EXPANDED_CARD_HORIZONTAL_CHROME,
-      EXPANDED_CARD_MIN_W,
-      EXPANDED_CARD_MAX_W
-    );
-    const nextExpandedH = clamp(
-      legacyInnerH + EXPANDED_CARD_VERTICAL_CHROME,
-      EXPANDED_CARD_MIN_H,
-      EXPANDED_CARD_MAX_H
-    );
-    if (node.expandedW !== nextExpandedW) {
-      node.expandedW = nextExpandedW;
-      changed = true;
-    }
-    if (node.expandedH !== nextExpandedH) {
-      node.expandedH = nextExpandedH;
-      changed = true;
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(node, "expandedAspect")) {
-    delete node.expandedAspect;
-    changed = true;
-  }
-  if (Object.prototype.hasOwnProperty.call(node, "expandedInnerWidthPx")) {
-    delete node.expandedInnerWidthPx;
-    changed = true;
-  }
-  return changed;
-}
-
-function getHandoverCollaboratorSignatureSet(node) {
-  const signatures = new Set();
-  (Array.isArray(node?.handoverCollaborators) ? node.handoverCollaborators : []).forEach((collaborator) => {
-    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(collaborator);
-    if (!normalizedCollaborator) return;
-    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
-    if (signature) signatures.add(signature);
-  });
-  return signatures;
-}
-
-function scanLegacyUsage(nodeRecords, options = {}) {
-  const records = Array.isArray(nodeRecords) ? nodeRecords : [];
-  const nodeMap = options.nodeById instanceof Map ? options.nodeById : new Map(records.map((node) => [node.id, node]));
-  const summary = {
-    nodeCount: records.length,
-    handoverMetaToPresentCount: 0,
-    handoverMetaToFallbackRequiredCount: 0,
-    handoverMetaToUnresolvedCount: 0,
-    entityMissingCanonicalLinkCount: 0,
-    locationLegacySizeFallbackRequiredCount: 0,
-    locationLegacySizeFieldPresentCount: 0
-  };
-  records.forEach((node) => {
-    const normalizedType = normalizeNodeType(node?.type);
-    if (normalizedType === "handover") {
-      const legacyTargetId = toNonEmptyString(node?.meta?.to);
-      if (legacyTargetId) {
-        summary.handoverMetaToPresentCount += 1;
-        const resolvedCollaborator = resolveLegacyHandoverCollaboratorFromTargetId(legacyTargetId, {
-          ...options,
-          nodeById: nodeMap
-        });
-        if (!resolvedCollaborator) {
-          summary.handoverMetaToUnresolvedCount += 1;
-        } else {
-          const existingSignatures = getHandoverCollaboratorSignatureSet(node);
-          const resolvedSignature = getHandoverCollaboratorSignature(resolvedCollaborator.kind, resolvedCollaborator.refId);
-          if (resolvedSignature && !existingSignatures.has(resolvedSignature)) {
-            summary.handoverMetaToFallbackRequiredCount += 1;
-          }
-        }
-      }
-    }
-    if (normalizedType === "entity" && !getCanonicalEntityIdentity(node)) {
-      summary.entityMissingCanonicalLinkCount += 1;
-    }
-    if (normalizedType === "location") {
-      if (hasPositiveFiniteNumber(node.expandedAspect) || hasPositiveFiniteNumber(node.expandedInnerWidthPx)) {
-        summary.locationLegacySizeFieldPresentCount += 1;
-      }
-      if (isLegacyLocationSizeFallbackRequired(node)) {
-        summary.locationLegacySizeFallbackRequiredCount += 1;
-      }
-    }
-  });
-  return summary;
-}
-
-function hasLegacyLocalStorePayload() {
-  try {
-    return window.localStorage.getItem(LEGACY_STORE_KEY) !== null;
-  } catch (_error) {
-    return false;
-  }
-}
-
-function countRequiredLegacyFallbacks(summary) {
-  if (!summary || typeof summary !== "object") return 0;
-  return (
-    Number(summary.handoverMetaToFallbackRequiredCount || 0) +
-    Number(summary.handoverMetaToUnresolvedCount || 0) +
-    Number(summary.entityMissingCanonicalLinkCount || 0) +
-    Number(summary.locationLegacySizeFallbackRequiredCount || 0)
-  );
-}
+const {
+  toNonEmptyString,
+  materializeLegacyEntityIdentityForNode,
+  materializeLegacyHandoverCollaboratorFromMetaTo,
+  materializeLegacyLocationSizeForNode,
+  scanLegacyUsage,
+  hasLegacyLocalStorePayload,
+  countRequiredLegacyFallbacks
+} = createLegacyNormalization({
+  normalizeNodeType,
+  normalizeEntityKind,
+  getUserById: () => userById,
+  getOrgById: () => orgById,
+  getNodeRecords: () => allNodesRuntime,
+  getNormalizeHandoverCollaboratorEntry: () => normalizeHandoverCollaboratorEntry,
+  getHandoverCollaboratorSignature: () => getHandoverCollaboratorSignature,
+  LEGACY_STORE_KEY,
+  clamp,
+  EXPANDED_TARGET_CHILD_W,
+  EXPANDED_TARGET_CHILD_H,
+  MIN_EXPANDED_ASPECT,
+  MAX_EXPANDED_ASPECT,
+  EXPANDED_INNER_MIN_W,
+  EXPANDED_INNER_MAX_W,
+  EXPANDED_INNER_MIN_H,
+  EXPANDED_INNER_MAX_H,
+  EXPANDED_CARD_HORIZONTAL_CHROME,
+  EXPANDED_CARD_VERTICAL_CHROME,
+  EXPANDED_CARD_MIN_W,
+  EXPANDED_CARD_MAX_W,
+  EXPANDED_CARD_MIN_H,
+  EXPANDED_CARD_MAX_H
+});
 
     function initializeRuntimeDataFromStore(nextStore) {
       store = nextStore;
@@ -1068,85 +877,21 @@ function setProjectionEdgeMeta(edgeId, meta) {
   currentProjectionEdgeMetaById.set(edgeId, { ...meta });
 }
 
-function buildEdgeId(sourceId, targetId) {
-  let candidate = `edge-${sourceId}-${targetId}`;
-  while (edgeById.has(candidate)) {
-    edgeRuntimeCounter += 1;
-    candidate = `edge-${sourceId}-${targetId}-${edgeRuntimeCounter}`;
-  }
-  return candidate;
-}
-
-function getOutgoingEdges(nodeId, kindFilter = null) {
-  const edgeIds = outgoingEdgeIdsBySourceId.get(nodeId) || [];
-  const list = edgeIds.map((edgeId) => edgeById.get(edgeId)).filter(Boolean);
-  if (!kindFilter) return list;
-  const filterSet = new Set(Array.isArray(kindFilter) ? kindFilter : [kindFilter]);
-  return list.filter((edge) => filterSet.has(edge.kind));
-}
-
-function getOutgoingNodeIds(nodeId, kindFilter = null) {
-  const seen = new Set();
-  const ids = [];
-  getOutgoingEdges(nodeId, kindFilter).forEach((edge) => {
-    if (!seen.has(edge.targetId)) {
-      seen.add(edge.targetId);
-      ids.push(edge.targetId);
-    }
-  });
-  return ids;
-}
-
-function replaceOutgoingEdges(nodeId, targetIds, kindResolver = inferEdgeKindForPair) {
-  const sourceNode = nodeById.get(nodeId);
-  if (!sourceNode) return;
-
-  const dedupedTargetIds = [];
-  const seenTargets = new Set();
-  (Array.isArray(targetIds) ? targetIds : []).forEach((targetId) => {
-    if (seenTargets.has(targetId)) return;
-    if (!nodeById.has(targetId)) return;
-    if (targetId === nodeId) return;
-    seenTargets.add(targetId);
-    dedupedTargetIds.push(targetId);
-  });
-
-  for (let i = edges.length - 1; i >= 0; i -= 1) {
-    if (edges[i].sourceId === nodeId) {
-      edges.splice(i, 1);
-    }
-  }
-
-  dedupedTargetIds.forEach((targetId) => {
-    const targetNode = nodeById.get(targetId);
-    const kind = typeof kindResolver === "function"
-      ? kindResolver(sourceNode, targetNode)
-      : inferEdgeKindForPair(sourceNode, targetNode);
-    edges.push({
-      id: buildEdgeId(nodeId, targetId),
-      sourceId: nodeId,
-      targetId,
-      kind
-    });
-  });
-
-  rebuildEdgeIndexes();
-}
-
-function attachLinkedNodeAccessors() {
-  nodes.forEach((node) => {
-    Object.defineProperty(node, "linkedNodeIds", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        return getOutgoingNodeIds(node.id);
-      },
-      set(nextTargetIds) {
-        replaceOutgoingEdges(node.id, nextTargetIds, inferEdgeKindForPair);
-      }
-    });
-  });
-}
+const {
+  getOutgoingEdges,
+  attachLinkedNodeAccessors
+} = createWorkspaceGraphOps({
+  getEdgeById: () => edgeById,
+  getOutgoingEdgeIdsBySourceId: () => outgoingEdgeIdsBySourceId,
+  getNodeById: () => nodeById,
+  getEdges: () => edges,
+  getEdgeRuntimeCounter: () => edgeRuntimeCounter,
+  setEdgeRuntimeCounter: (value) => {
+    edgeRuntimeCounter = value;
+  },
+  inferEdgeKindForPair,
+  rebuildEdgeIndexes
+});
 
 const state = {
       selectedNodeId: "exp-culture-check-b",
@@ -1526,135 +1271,21 @@ function pruneNotificationStateByUser() {
   return changed;
 }
 
-function getHandoverCollaboratorSignature(kind, refId) {
-  const normalizedKind = normalizeEntityKind(kind);
-  return normalizedKind && refId ? `${normalizedKind}:${refId}` : "";
-}
-
-function normalizeHandoverCollaboratorEntry(rawCollaborator) {
-  if (!rawCollaborator || typeof rawCollaborator !== "object") return null;
-  const kind = normalizeEntityKind(rawCollaborator.kind || rawCollaborator.entityKind);
-  const refId = typeof rawCollaborator.refId === "string" && rawCollaborator.refId
-    ? rawCollaborator.refId
-    : (typeof rawCollaborator.entityRefId === "string" && rawCollaborator.entityRefId ? rawCollaborator.entityRefId : "");
-  if (!kind || !refId) return null;
-  if (kind === "user" && !userById.has(refId)) return null;
-  if (kind === "org" && !orgById.has(refId)) return null;
-  return {
-    kind,
-    refId,
-    shareWorkspace: !!rawCollaborator.shareWorkspace
-  };
-}
-
-function normalizeHandoverCollaboratorsForNode(node) {
-  if (!node || node.type !== "handover") return false;
-  const nextCollaborators = [];
-  const seenCollaborators = new Set();
-  const rawCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
-  rawCollaborators.forEach((rawCollaborator) => {
-    const normalizedCollaborator = normalizeHandoverCollaboratorEntry(rawCollaborator);
-    if (!normalizedCollaborator) return;
-    const signature = getHandoverCollaboratorSignature(normalizedCollaborator.kind, normalizedCollaborator.refId);
-    if (!signature || seenCollaborators.has(signature)) return;
-    seenCollaborators.add(signature);
-    nextCollaborators.push(normalizedCollaborator);
-  });
-  const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
-  const changed = JSON.stringify(currentCollaborators) !== JSON.stringify(nextCollaborators);
-  node.handoverCollaborators = nextCollaborators;
-  return changed;
-}
-
-function normalizeHandoverFieldsForNode(node) {
-  if (!node || node.type !== "handover") return false;
-  let changed = false;
-  if (materializeLegacyHandoverCollaboratorFromMetaTo(node, {
-    userById,
-    orgById,
-    nodeRecords: allNodesRuntime
-  })) {
-    changed = true;
-  }
-  const nextStatus = normalizeHandoverStatus(node.status);
-  if (node.status !== nextStatus) {
-    node.status = nextStatus;
-    changed = true;
-  }
-  if (node.locationId !== null) {
-    node.locationId = null;
-    changed = true;
-  }
-  const rawHandoverObjects = Array.isArray(node.handoverObjects)
-    ? node.handoverObjects
-    : (
-      Array.isArray(node.handoverNodeIds)
-        ? node.handoverNodeIds.map((handoverObjectId) => ({ id: handoverObjectId, role: "reference" }))
-        : []
-    );
-  const seenObjectIds = new Set();
-  const nextHandoverObjects = rawHandoverObjects
-    .map((handoverObject) => {
-      if (typeof handoverObject === "string") {
-        return {
-          id: handoverObject,
-          role: "reference"
-        };
-      }
-      if (!handoverObject || typeof handoverObject !== "object") return null;
-      return {
-        id: typeof handoverObject.id === "string" ? handoverObject.id : "",
-        role: normalizeHandoverObjectRole(handoverObject.role)
-      };
-    })
-    .filter((handoverObject) => {
-      if (!handoverObject?.id || handoverObject.id === node.id || seenObjectIds.has(handoverObject.id)) {
-        return false;
-      }
-      seenObjectIds.add(handoverObject.id);
-      return true;
-    });
-  const normalizedHandoverObjects = nextHandoverObjects;
-  if (JSON.stringify(Array.isArray(node.handoverObjects) ? node.handoverObjects : []) !== JSON.stringify(normalizedHandoverObjects)) {
-    node.handoverObjects = normalizedHandoverObjects;
-    changed = true;
-  } else if (!Array.isArray(node.handoverObjects)) {
-    node.handoverObjects = normalizedHandoverObjects;
-    changed = true;
-  }
-  if (normalizeHandoverCollaboratorsForNode(node)) {
-    changed = true;
-  }
-  {
-    const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
-    const nextCollaborators = currentCollaborators.map((collaborator) => {
-      if (normalizeEntityKind(collaborator?.kind) !== "org" || !collaborator?.shareWorkspace) return collaborator;
-      changed = true;
-      return {
-        ...collaborator,
-        shareWorkspace: false
-      };
-    });
-    node.handoverCollaborators = nextCollaborators;
-  }
-  if (isCollabWorkspaceOnlyHandover(node)) {
-    const currentCollaborators = Array.isArray(node.handoverCollaborators) ? node.handoverCollaborators : [];
-    const nextCollaborators = currentCollaborators.map((collaborator) => {
-      if (!collaborator?.shareWorkspace) return collaborator;
-      changed = true;
-      return {
-        ...collaborator,
-        shareWorkspace: false
-      };
-    });
-    node.handoverCollaborators = nextCollaborators;
-  }
-  return changed;
-}
-
-function normalizeHandoverObjectRole(role) {
-  return HANDOVER_OBJECT_ROLES.includes(role) ? role : "reference";
-}
+const {
+  getHandoverCollaboratorSignature,
+  normalizeHandoverCollaboratorEntry,
+  normalizeHandoverObjectRole,
+  normalizeHandoverFieldsForNode
+} = createHandoverDomain({
+  normalizeEntityKind,
+  normalizeHandoverStatus,
+  HANDOVER_OBJECT_ROLES,
+  getUserById: () => userById,
+  getOrgById: () => orgById,
+  getAllNodesRuntime: () => allNodesRuntime,
+  materializeLegacyHandoverCollaboratorFromMetaTo,
+  isCollabWorkspaceOnlyHandover
+});
 
 function getCurrentWorkspaceRecord() {
   if (!currentWorkspaceId) return null;
@@ -2017,95 +1648,18 @@ function generateCommentId() {
   return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function hashCommentIdentitySeed(seed) {
-  const value = String(seed || "");
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash) + value.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function buildDeterministicCommentId(nodeId, comment, index = 0) {
-  const author = typeof comment?.author === "string" ? comment.author.trim() : "";
-  const text = typeof comment?.text === "string" ? comment.text.trim() : "";
-  const timestamp = typeof comment?.timestamp === "string" ? comment.timestamp.trim() : "";
-  const seed = `${nodeId || ""}|${timestamp}|${author}|${text}|${index}`;
-  const hashedSeed = hashCommentIdentitySeed(seed).toString(36);
-  return `comment-${hashedSeed}`;
-}
-
-function normalizeCommentRecord(comment, options = {}) {
-  const preferredId = typeof options.preferredId === "string" && options.preferredId
-    ? options.preferredId
-    : null;
-  const nextId = typeof comment?.id === "string" && comment.id
-    ? comment.id
-    : (preferredId || generateCommentId());
-  return {
-    id: nextId,
-    author: typeof comment?.author === "string" ? comment.author : "",
-    text: typeof comment?.text === "string" ? comment.text : "",
-    timestamp: typeof comment?.timestamp === "string" && comment.timestamp
-      ? comment.timestamp
-      : new Date().toISOString(),
-    isNew: comment?.isNew !== false
-  };
-}
-
-function normalizeCommentRecords(comments, nodeId = "") {
-  const sourceComments = Array.isArray(comments) ? comments : [];
-  const takenCommentIds = new Set();
-  let changed = !Array.isArray(comments);
-  const normalizedComments = sourceComments.map((comment, index) => {
-    const rawId = typeof comment?.id === "string" && comment.id ? comment.id : "";
-    let preferredId = rawId || buildDeterministicCommentId(nodeId, comment, index);
-    while (takenCommentIds.has(preferredId)) {
-      preferredId = `${preferredId}-${index.toString(36)}`;
-    }
-    const normalizedComment = normalizeCommentRecord(comment, { preferredId });
-    takenCommentIds.add(normalizedComment.id);
-    if (
-      !rawId ||
-      normalizedComment.id !== rawId ||
-      normalizedComment.author !== (typeof comment?.author === "string" ? comment.author : "") ||
-      normalizedComment.text !== (typeof comment?.text === "string" ? comment.text : "") ||
-      normalizedComment.timestamp !== (typeof comment?.timestamp === "string" && comment.timestamp ? comment.timestamp : "") ||
-      normalizedComment.isNew !== (comment?.isNew !== false)
-    ) {
-      changed = true;
-    }
-    return normalizedComment;
-  });
-  return {
-    comments: normalizedComments,
-    changed
-  };
-}
-
-function normalizeTaskRecord(task) {
-  const normalizedTask = {
-    id: typeof task?.id === "string" && task.id ? task.id : generateTaskId(),
-    text: typeof task?.text === "string" ? task.text : "",
-    done: !!task?.done,
-    assignedTo: typeof task?.assignedTo === "string" ? task.assignedTo : ""
-  };
-  if (typeof task?.taskGroupId === "string" && task.taskGroupId) {
-    normalizedTask.taskGroupId = task.taskGroupId;
-  }
-  if (typeof task?.originNodeId === "string" && task.originNodeId) {
-    normalizedTask.originNodeId = task.originNodeId;
-  }
-  const linkedObjectIds = [...new Set(
-    (Array.isArray(task?.linkedObjectIds) ? task.linkedObjectIds : [])
-      .filter((nodeId) => typeof nodeId === "string" && nodeId)
-  )];
-  if (linkedObjectIds.length) {
-    normalizedTask.linkedObjectIds = linkedObjectIds;
-  }
-  return normalizedTask;
-}
+const {
+  normalizeCommentRecord,
+  normalizeCommentRecords,
+  normalizeTaskRecord,
+  normalizeTaskLinkedObjectIds
+} = createTaskCommentDomain({
+  generateCommentId,
+  generateTaskId,
+  getHandoverObjectCandidates,
+  getNodeById,
+  compareNodesByDisplayLabel
+});
 
 function findTaskRecord(nodeId, taskId, options = {}) {
   const targetNode = options.searchAllNodes ? getAnyNodeById(nodeId) : getNodeById(nodeId);
@@ -2153,19 +1707,6 @@ function getTaskAssigneeOptionsForContext(node, task = null) {
     return getTaskAssigneeOptions(handoverContextNode);
   }
   return getTaskAssigneeOptions(node);
-}
-
-function normalizeTaskLinkedObjectIds(handoverNode, linkedObjectIds) {
-  if (!handoverNode || handoverNode.type !== "handover") return [];
-  const validObjectIds = new Set(getHandoverObjectCandidates(handoverNode).map((candidate) => candidate.node.id));
-  return [...new Set(
-    (Array.isArray(linkedObjectIds) ? linkedObjectIds : [])
-      .filter((nodeId) => typeof nodeId === "string" && validObjectIds.has(nodeId))
-  )].sort((leftNodeId, rightNodeId) => {
-    const leftNode = getNodeById(leftNodeId);
-    const rightNode = getNodeById(rightNodeId);
-    return compareNodesByDisplayLabel(leftNode, rightNode);
-  });
 }
 
 function syncSeenStateForTask(task) {
@@ -6819,1024 +6360,6 @@ function cutGraphSelectionWithSummary() {
   };
 }
 
-function renderPortalLinkModal() {
-  if (!portalLinkModalOverlayEl || !portalLinkModalEl || !portalLinkModalSelectEl || !portalLinkModalConfirmBtnEl) return;
-  const isOpen = !!portalLinkModalState.open;
-  portalLinkModalOverlayEl.classList.toggle("is-open", isOpen);
-  portalLinkModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const portalNode = getNodeById(portalLinkModalState.nodeId);
-  if (!portalNode || portalNode.type !== "portal") {
-    portalLinkModalState.open = false;
-    portalLinkModalState.nodeId = null;
-    portalLinkModalState.selectedWorkspaceId = "";
-    portalLinkModalState.flow = "edit";
-    portalLinkModalOverlayEl.classList.remove("is-open");
-    portalLinkModalOverlayEl.setAttribute("aria-hidden", "true");
-    return;
-  }
-
-  const linkableWorkspaces = getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId);
-  const linkedWorkspaceId = typeof portalNode.linkedWorkspaceId === "string" ? portalNode.linkedWorkspaceId : "";
-  let selectedWorkspaceId = portalLinkModalState.selectedWorkspaceId || "";
-  if (!linkableWorkspaces.some((workspace) => workspace.id === selectedWorkspaceId)) {
-    if (linkedWorkspaceId && linkableWorkspaces.some((workspace) => workspace.id === linkedWorkspaceId)) {
-      selectedWorkspaceId = linkedWorkspaceId;
-    } else {
-      selectedWorkspaceId = linkableWorkspaces[0]?.id || "";
-    }
-    portalLinkModalState.selectedWorkspaceId = selectedWorkspaceId;
-  }
-
-  portalLinkModalSelectEl.innerHTML = "";
-  if (!linkableWorkspaces.length) {
-    const optionEl = document.createElement("option");
-    optionEl.value = "";
-    optionEl.textContent = "No destination workspaces available";
-    portalLinkModalSelectEl.appendChild(optionEl);
-    portalLinkModalSelectEl.value = "";
-    portalLinkModalSelectEl.disabled = true;
-    portalLinkModalConfirmBtnEl.disabled = true;
-    portalLinkModalHintEl.textContent = "No other workspaces are currently available for this user.";
-  } else {
-    linkableWorkspaces.forEach((workspace) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = workspace.id;
-      optionEl.textContent = workspace.name || workspace.id;
-      portalLinkModalSelectEl.appendChild(optionEl);
-    });
-    portalLinkModalSelectEl.disabled = false;
-    portalLinkModalSelectEl.value = selectedWorkspaceId;
-    portalLinkModalConfirmBtnEl.disabled = !selectedWorkspaceId;
-    portalLinkModalHintEl.textContent = "Select a destination workspace.";
-  }
-}
-
-function openPortalLinkModal(nodeId, options = {}) {
-  const node = getNodeById(nodeId);
-  if (!node || node.type !== "portal") return false;
-  selectSingleNode(node.id);
-  cancelEdgeCreateInteractions();
-  closeCreateNodeMenu();
-  workspaceMenuOpen = false;
-  userMenuOpen = false;
-  renderWorkspaceMenu();
-  const linkableWorkspaces = getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId);
-  const existingLinkedWorkspaceId = typeof node.linkedWorkspaceId === "string" ? node.linkedWorkspaceId : "";
-  let selectedWorkspaceId = "";
-  if (existingLinkedWorkspaceId && linkableWorkspaces.some((workspace) => workspace.id === existingLinkedWorkspaceId)) {
-    selectedWorkspaceId = existingLinkedWorkspaceId;
-  } else {
-    selectedWorkspaceId = linkableWorkspaces[0]?.id || "";
-  }
-  portalLinkModalState = {
-    open: true,
-    nodeId: node.id,
-    selectedWorkspaceId,
-    flow: options.flow || "edit"
-  };
-  renderPortalLinkModal();
-  requestAnimationFrame(() => {
-    if (!portalLinkModalState.open) return;
-    if (!portalLinkModalSelectEl.disabled) {
-      portalLinkModalSelectEl.focus();
-      return;
-    }
-    portalLinkModalCloseBtnEl.focus();
-  });
-  return true;
-}
-
-function closePortalLinkModal(options = {}) {
-  const keepNode = options.keepNode !== false;
-  const modalNodeId = portalLinkModalState.nodeId;
-  portalLinkModalState = {
-    open: false,
-    nodeId: null,
-    selectedWorkspaceId: "",
-    flow: "edit"
-  };
-  renderPortalLinkModal();
-  if (!keepNode && modalNodeId) {
-    deleteNodeFromCurrentWorkspace(modalNodeId);
-  }
-}
-
-function confirmPortalLinkModal() {
-  if (!portalLinkModalState.open) return;
-  const node = getNodeById(portalLinkModalState.nodeId);
-  if (!node || node.type !== "portal") {
-    closePortalLinkModal({ keepNode: true });
-    return;
-  }
-  const selectedWorkspaceId = String(portalLinkModalState.selectedWorkspaceId || "");
-  const linkableWorkspaceIds = new Set(
-    getLinkableWorkspaceOptionsForCurrentUser(currentWorkspaceId).map((workspace) => workspace.id)
-  );
-  if (!selectedWorkspaceId || !linkableWorkspaceIds.has(selectedWorkspaceId)) {
-    return;
-  }
-  node.linkedWorkspaceId = selectedWorkspaceId;
-  node.title = "";
-  node.label = "";
-  syncNodeRuntimeAndStore();
-  persistStoreToLocalStorage();
-  closePortalLinkModal({ keepNode: true });
-  renderAll();
-}
-
-function cancelPortalLinkModalAndDeleteNode() {
-  if (!portalLinkModalState.open) return;
-  const nodeId = portalLinkModalState.nodeId;
-  closePortalLinkModal({ keepNode: true });
-  if (!nodeId) return;
-  const deleted = deleteNodeFromCurrentWorkspace(nodeId);
-  if (!deleted) return;
-  closeCreateNodeMenu();
-  renderAll();
-}
-
-function applyEntityLinkToNode(node, entityKind, entityRefId) {
-  if (!node || node.type !== "entity") return false;
-  const normalizedKind = normalizeEntityKind(entityKind);
-  const displayName = getEntityDisplayName(normalizedKind, entityRefId);
-  if (!normalizedKind || !entityRefId || !displayName) return false;
-  let changed = false;
-  if (node.entityKind !== normalizedKind) {
-    node.entityKind = normalizedKind;
-    changed = true;
-  }
-  if (node.entityRefId !== entityRefId) {
-    node.entityRefId = entityRefId;
-    changed = true;
-  }
-  if (node.meta && typeof node.meta === "object" && node.meta.suppressLegacyEntityLink) {
-    delete node.meta.suppressLegacyEntityLink;
-    if (!Object.keys(node.meta).length) {
-      delete node.meta;
-    }
-    changed = true;
-  }
-  if (applyDerivedEntityIdentity(node)) {
-    changed = true;
-  }
-  return changed;
-}
-
-function renderEntityLinkModal() {
-  if (
-    !entityLinkModalOverlayEl ||
-    !entityLinkModalEl ||
-    !entityLinkModalKindSelectEl ||
-    !entityLinkModalRefSelectEl ||
-    !entityLinkModalConfirmBtnEl
-  ) {
-    return;
-  }
-  const isOpen = !!entityLinkModalState.open;
-  entityLinkModalOverlayEl.classList.toggle("is-open", isOpen);
-  entityLinkModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const entityNode = getNodeById(entityLinkModalState.nodeId);
-  if (!entityNode || entityNode.type !== "entity") {
-    entityLinkModalState = {
-      open: false,
-      nodeId: null,
-      selectedEntityKind: "user",
-      selectedEntityRefId: "",
-      flow: "edit"
-    };
-    entityLinkModalOverlayEl.classList.remove("is-open");
-    entityLinkModalOverlayEl.setAttribute("aria-hidden", "true");
-    return;
-  }
-
-  const selectedEntityKind = normalizeEntityKind(entityLinkModalState.selectedEntityKind) || "user";
-  const entityOptions = getEntityOptionsForKind(selectedEntityKind);
-  let selectedEntityRefId = entityLinkModalState.selectedEntityRefId || "";
-  if (!entityOptions.some((option) => option.id === selectedEntityRefId)) {
-    selectedEntityRefId = entityOptions[0]?.id || "";
-    entityLinkModalState.selectedEntityRefId = selectedEntityRefId;
-  }
-  entityLinkModalState.selectedEntityKind = selectedEntityKind;
-
-  entityLinkModalKindSelectEl.innerHTML = "";
-  [
-    { value: "user", label: "User" },
-    { value: "org", label: "Organisation" }
-  ].forEach((option) => {
-    const optionEl = document.createElement("option");
-    optionEl.value = option.value;
-    optionEl.textContent = option.label;
-    entityLinkModalKindSelectEl.appendChild(optionEl);
-  });
-  entityLinkModalKindSelectEl.value = selectedEntityKind;
-
-  entityLinkModalRefSelectEl.innerHTML = "";
-  if (!entityOptions.length) {
-    const optionEl = document.createElement("option");
-    optionEl.value = "";
-    optionEl.textContent = selectedEntityKind === "org" ? "No organisations available" : "No users available";
-    entityLinkModalRefSelectEl.appendChild(optionEl);
-    entityLinkModalRefSelectEl.value = "";
-    entityLinkModalRefSelectEl.disabled = true;
-    entityLinkModalConfirmBtnEl.disabled = true;
-    entityLinkModalHintEl.textContent = selectedEntityKind === "org"
-      ? "No organisations are currently available."
-      : "No users are currently available.";
-  } else {
-    entityOptions.forEach((option) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = option.id;
-      optionEl.textContent = option.label;
-      entityLinkModalRefSelectEl.appendChild(optionEl);
-    });
-    entityLinkModalRefSelectEl.disabled = false;
-    entityLinkModalRefSelectEl.value = selectedEntityRefId;
-    entityLinkModalConfirmBtnEl.disabled = !selectedEntityRefId;
-    entityLinkModalHintEl.textContent = "Select an existing user or organisation to link.";
-  }
-}
-
-function openEntityLinkModal(nodeId, options = {}) {
-  const node = getNodeById(nodeId);
-  if (!node || node.type !== "entity") return false;
-  selectSingleNode(node.id);
-  cancelEdgeCreateInteractions();
-  closeCreateNodeMenu();
-  workspaceMenuOpen = false;
-  userMenuOpen = false;
-  renderWorkspaceMenu();
-  const initialSelection = getInitialEntitySelectionForNode(node);
-  entityLinkModalState = {
-    open: true,
-    nodeId: node.id,
-    selectedEntityKind: initialSelection.entityKind,
-    selectedEntityRefId: initialSelection.entityRefId,
-    flow: options.flow || "edit"
-  };
-  renderEntityLinkModal();
-  requestAnimationFrame(() => {
-    if (!entityLinkModalState.open) return;
-    if (!entityLinkModalRefSelectEl.disabled) {
-      entityLinkModalRefSelectEl.focus();
-      return;
-    }
-    entityLinkModalKindSelectEl.focus();
-  });
-  return true;
-}
-
-function closeEntityLinkModal(options = {}) {
-  const keepNode = options.keepNode !== false;
-  const modalNodeId = entityLinkModalState.nodeId;
-  entityLinkModalState = {
-    open: false,
-    nodeId: null,
-    selectedEntityKind: "user",
-    selectedEntityRefId: "",
-    flow: "edit"
-  };
-  renderEntityLinkModal();
-  if (!keepNode && modalNodeId) {
-    deleteNodeFromCurrentWorkspace(modalNodeId);
-  }
-}
-
-function cancelEntityLinkModal() {
-  if (entityLinkModalState.flow === "create") {
-    cancelEntityLinkModalAndDeleteNode();
-    return;
-  }
-  closeEntityLinkModal({ keepNode: true });
-}
-
-function confirmEntityLinkModal() {
-  if (!entityLinkModalState.open) return;
-  const node = getNodeById(entityLinkModalState.nodeId);
-  if (!node || node.type !== "entity") {
-    closeEntityLinkModal({ keepNode: true });
-    return;
-  }
-  const selectedEntityKind = normalizeEntityKind(entityLinkModalState.selectedEntityKind);
-  const selectedEntityRefId = String(entityLinkModalState.selectedEntityRefId || "");
-  const optionIds = new Set(getEntityOptionsForKind(selectedEntityKind).map((option) => option.id));
-  if (!selectedEntityKind || !selectedEntityRefId || !optionIds.has(selectedEntityRefId)) {
-    return;
-  }
-  const changed = applyEntityLinkToNode(node, selectedEntityKind, selectedEntityRefId);
-  if (changed) {
-    syncNodeRuntimeAndStore();
-    persistStoreToLocalStorage();
-  }
-  closeEntityLinkModal({ keepNode: true });
-  renderAll();
-}
-
-function cancelEntityLinkModalAndDeleteNode() {
-  if (!entityLinkModalState.open) return;
-  const nodeId = entityLinkModalState.nodeId;
-  closeEntityLinkModal({ keepNode: true });
-  if (!nodeId) return;
-  const deleted = deleteNodeFromCurrentWorkspace(nodeId);
-  if (!deleted) return;
-  closeCreateNodeMenu();
-  renderAll();
-}
-
-function renderCollaboratorPickerModal() {
-  if (
-    !collaboratorPickerModalOverlayEl ||
-    !collaboratorPickerModalEl ||
-    !collaboratorPickerModalBodyEl ||
-    !collaboratorPickerModalConfirmBtnEl
-  ) {
-    return;
-  }
-  const isOpen = !!collaboratorPickerModalState.open;
-  collaboratorPickerModalOverlayEl.classList.toggle("is-open", isOpen);
-  collaboratorPickerModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const handoverNode = getNodeById(collaboratorPickerModalState.nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
-    collaboratorPickerModalState = {
-      open: false,
-      nodeId: null,
-      selectedCollaboratorKeys: []
-    };
-    collaboratorPickerModalOverlayEl.classList.remove("is-open");
-    collaboratorPickerModalOverlayEl.setAttribute("aria-hidden", "true");
-    return;
-  }
-
-  const groups = getCollaboratorPickerGroups(handoverNode);
-  const validKeys = new Set(groups.flatMap((group) => group.options.map((option) => option.key)));
-  collaboratorPickerModalState.selectedCollaboratorKeys = collaboratorPickerModalState.selectedCollaboratorKeys
-    .filter((key) => validKeys.has(key));
-
-  collaboratorPickerModalBodyEl.innerHTML = "";
-  collaboratorPickerModalConfirmBtnEl.disabled = collaboratorPickerModalState.selectedCollaboratorKeys.length === 0;
-  collaboratorPickerModalHintEl.textContent = groups.length
-    ? "Select one or more users or organisations."
-    : "All available collaborators have already been added.";
-
-  if (!groups.length) {
-    const emptyState = document.createElement("p");
-    emptyState.className = "picker-modal-empty";
-    emptyState.textContent = "No additional collaborators are available.";
-    collaboratorPickerModalBodyEl.appendChild(emptyState);
-    collaboratorPickerModalConfirmBtnEl.disabled = true;
-    return;
-  }
-
-  groups.forEach((group) => {
-    const groupEl = document.createElement("section");
-    groupEl.className = "picker-modal-group";
-    const titleEl = document.createElement("h4");
-    titleEl.className = "picker-modal-group-title";
-    titleEl.textContent = group.label;
-    groupEl.appendChild(titleEl);
-    group.options.forEach((option) => {
-      const optionLabelEl = document.createElement("label");
-      optionLabelEl.className = "picker-modal-option";
-      const checkboxEl = document.createElement("input");
-      checkboxEl.type = "checkbox";
-      checkboxEl.checked = collaboratorPickerModalState.selectedCollaboratorKeys.includes(option.key);
-      checkboxEl.addEventListener("change", () => {
-        if (checkboxEl.checked) {
-          if (!collaboratorPickerModalState.selectedCollaboratorKeys.includes(option.key)) {
-            collaboratorPickerModalState.selectedCollaboratorKeys = [
-              ...collaboratorPickerModalState.selectedCollaboratorKeys,
-              option.key
-            ];
-          }
-        } else {
-          collaboratorPickerModalState.selectedCollaboratorKeys = collaboratorPickerModalState.selectedCollaboratorKeys
-            .filter((selectedKey) => selectedKey !== option.key);
-        }
-        renderCollaboratorPickerModal();
-      });
-      const textWrapEl = document.createElement("span");
-      textWrapEl.className = "picker-modal-option-text";
-      textWrapEl.textContent = option.label;
-      optionLabelEl.appendChild(checkboxEl);
-      optionLabelEl.appendChild(textWrapEl);
-      groupEl.appendChild(optionLabelEl);
-    });
-    collaboratorPickerModalBodyEl.appendChild(groupEl);
-  });
-}
-
-function openCollaboratorPickerModal(nodeId) {
-  const handoverNode = getNodeById(nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) return false;
-  collaboratorPickerModalState = {
-    open: true,
-    nodeId: handoverNode.id,
-    selectedCollaboratorKeys: []
-  };
-  renderCollaboratorPickerModal();
-  requestAnimationFrame(() => {
-    if (!collaboratorPickerModalState.open) return;
-    const firstInput = collaboratorPickerModalBodyEl.querySelector("input[type=\"checkbox\"]");
-    if (firstInput) {
-      firstInput.focus();
-      return;
-    }
-    collaboratorPickerModalCloseBtnEl.focus();
-  });
-  return true;
-}
-
-function closeCollaboratorPickerModal() {
-  collaboratorPickerModalState = {
-    open: false,
-    nodeId: null,
-    selectedCollaboratorKeys: []
-  };
-  renderCollaboratorPickerModal();
-}
-
-function confirmCollaboratorPickerModal() {
-  if (!collaboratorPickerModalState.open) return;
-  const handoverNode = getNodeById(collaboratorPickerModalState.nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
-    closeCollaboratorPickerModal();
-    return;
-  }
-  const optionByKey = new Map(
-    getCollaboratorPickerGroups(handoverNode)
-      .flatMap((group) => group.options)
-      .map((option) => [option.key, option])
-  );
-  let changed = false;
-  collaboratorPickerModalState.selectedCollaboratorKeys.forEach((selectedKey) => {
-    const option = optionByKey.get(selectedKey);
-    if (!option) return;
-    if (addHandoverCollaborator(handoverNode.id, option.kind, option.refId)) {
-      changed = true;
-    }
-  });
-  closeCollaboratorPickerModal();
-  if (changed) {
-    renderAll();
-    return;
-  }
-  renderDetailsPane();
-}
-
-function renderHandoverObjectPickerModal() {
-  if (
-    !handoverObjectPickerModalOverlayEl ||
-    !handoverObjectPickerModalEl ||
-    !handoverObjectPickerModalBodyEl ||
-    !handoverObjectPickerModalConfirmBtnEl
-  ) {
-    return;
-  }
-  const isOpen = !!handoverObjectPickerModalState.open;
-  handoverObjectPickerModalOverlayEl.classList.toggle("is-open", isOpen);
-  handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const handoverNode = getNodeById(handoverObjectPickerModalState.nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
-    handoverObjectPickerModalState = {
-      open: false,
-      nodeId: null,
-      selectedNodeIds: [],
-      selectedRole: "reference"
-    };
-    handoverObjectPickerModalOverlayEl.classList.remove("is-open");
-    handoverObjectPickerModalOverlayEl.setAttribute("aria-hidden", "true");
-    return;
-  }
-
-  const options = getHandoverObjectPickerOptions(
-    handoverNode,
-    normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole)
-  );
-  const validNodeIds = new Set(options.map((option) => option.id));
-  handoverObjectPickerModalState.selectedNodeIds = handoverObjectPickerModalState.selectedNodeIds
-    .filter((nodeId) => validNodeIds.has(nodeId));
-
-  handoverObjectPickerModalBodyEl.innerHTML = "";
-  handoverObjectPickerModalConfirmBtnEl.disabled = handoverObjectPickerModalState.selectedNodeIds.length === 0;
-  handoverObjectPickerModalHintEl.textContent = options.length
-    ? "Select one or more objects to add explicitly."
-    : "No additional objects are currently available.";
-
-  if (!options.length) {
-    const roleWrapEl = document.createElement("div");
-    roleWrapEl.className = "picker-modal-group";
-    const roleTitleEl = document.createElement("h4");
-    roleTitleEl.className = "picker-modal-group-title";
-    roleTitleEl.textContent = "Role";
-    const roleSelectEl = document.createElement("select");
-    roleSelectEl.className = "portal-link-modal-select";
-    HANDOVER_OBJECT_ROLES.forEach((role) => {
-      const optionEl = document.createElement("option");
-      optionEl.value = role;
-      optionEl.textContent = HANDOVER_OBJECT_ROLE_LABELS[role];
-      roleSelectEl.appendChild(optionEl);
-    });
-    roleSelectEl.value = normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole);
-    roleSelectEl.disabled = true;
-    roleWrapEl.appendChild(roleTitleEl);
-    roleWrapEl.appendChild(roleSelectEl);
-    handoverObjectPickerModalBodyEl.appendChild(roleWrapEl);
-    const emptyState = document.createElement("p");
-    emptyState.className = "picker-modal-empty";
-    emptyState.textContent = "No additional objects can be added right now.";
-    handoverObjectPickerModalBodyEl.appendChild(emptyState);
-    handoverObjectPickerModalConfirmBtnEl.disabled = true;
-    return;
-  }
-
-  const roleGroupEl = document.createElement("section");
-  roleGroupEl.className = "picker-modal-group";
-  const roleTitleEl = document.createElement("h4");
-  roleTitleEl.className = "picker-modal-group-title";
-  roleTitleEl.textContent = "Role";
-  const roleSelectEl = document.createElement("select");
-  roleSelectEl.className = "portal-link-modal-select";
-  HANDOVER_OBJECT_ROLES.forEach((role) => {
-    const optionEl = document.createElement("option");
-    optionEl.value = role;
-    optionEl.textContent = HANDOVER_OBJECT_ROLE_LABELS[role];
-    roleSelectEl.appendChild(optionEl);
-  });
-  roleSelectEl.value = normalizeHandoverObjectRole(handoverObjectPickerModalState.selectedRole);
-  roleSelectEl.addEventListener("change", () => {
-    handoverObjectPickerModalState.selectedRole = normalizeHandoverObjectRole(roleSelectEl.value);
-    renderHandoverObjectPickerModal();
-  });
-  roleGroupEl.appendChild(roleTitleEl);
-  roleGroupEl.appendChild(roleSelectEl);
-  handoverObjectPickerModalBodyEl.appendChild(roleGroupEl);
-
-  const groupEl = document.createElement("section");
-  groupEl.className = "picker-modal-group";
-  const titleEl = document.createElement("h4");
-  titleEl.className = "picker-modal-group-title";
-  titleEl.textContent = "Objects";
-  groupEl.appendChild(titleEl);
-  options.forEach((optionNode) => {
-    const optionLabelEl = document.createElement("label");
-    optionLabelEl.className = "picker-modal-option";
-    const checkboxEl = document.createElement("input");
-    checkboxEl.type = "checkbox";
-    checkboxEl.checked = handoverObjectPickerModalState.selectedNodeIds.includes(optionNode.id);
-    checkboxEl.addEventListener("change", () => {
-      if (checkboxEl.checked) {
-        if (!handoverObjectPickerModalState.selectedNodeIds.includes(optionNode.id)) {
-          handoverObjectPickerModalState.selectedNodeIds = [
-            ...handoverObjectPickerModalState.selectedNodeIds,
-            optionNode.id
-          ];
-        }
-      } else {
-        handoverObjectPickerModalState.selectedNodeIds = handoverObjectPickerModalState.selectedNodeIds
-          .filter((selectedNodeId) => selectedNodeId !== optionNode.id);
-      }
-      renderHandoverObjectPickerModal();
-    });
-    const textWrapEl = document.createElement("span");
-    textWrapEl.className = "picker-modal-option-text";
-    textWrapEl.textContent = `${getNodeDisplayTitle(optionNode, { fallback: getNodeTitleFallback(optionNode) })} (${optionNode.type})`;
-    optionLabelEl.appendChild(checkboxEl);
-    optionLabelEl.appendChild(textWrapEl);
-    groupEl.appendChild(optionLabelEl);
-  });
-  handoverObjectPickerModalBodyEl.appendChild(groupEl);
-}
-
-function openHandoverObjectPickerModal(nodeId) {
-  const handoverNode = getNodeById(nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) return false;
-  handoverObjectPickerModalState = {
-    open: true,
-    nodeId: handoverNode.id,
-    selectedNodeIds: [],
-    selectedRole: "reference"
-  };
-  renderHandoverObjectPickerModal();
-  requestAnimationFrame(() => {
-    if (!handoverObjectPickerModalState.open) return;
-    const firstInput = handoverObjectPickerModalBodyEl.querySelector("input[type=\"checkbox\"]");
-    if (firstInput) {
-      firstInput.focus();
-      return;
-    }
-    handoverObjectPickerModalCloseBtnEl.focus();
-  });
-  return true;
-}
-
-function closeHandoverObjectPickerModal() {
-  handoverObjectPickerModalState = {
-    open: false,
-    nodeId: null,
-    selectedNodeIds: [],
-    selectedRole: "reference"
-  };
-  renderHandoverObjectPickerModal();
-}
-
-function confirmHandoverObjectPickerModal() {
-  if (!handoverObjectPickerModalState.open) return;
-  const handoverNode = getNodeById(handoverObjectPickerModalState.nodeId);
-  if (!handoverNode || handoverNode.type !== "handover" || !isNodeOwnedByCurrentUser(handoverNode)) {
-    closeHandoverObjectPickerModal();
-    return;
-  }
-  const changed = addHandoverObjectIds(
-    handoverNode.id,
-    handoverObjectPickerModalState.selectedNodeIds,
-    handoverObjectPickerModalState.selectedRole
-  );
-  closeHandoverObjectPickerModal();
-  if (changed) {
-    renderAll();
-    return;
-  }
-  renderDetailsPane();
-}
-
-function openConfirmationModal({ title, message, confirmLabel = "Delete", confirmTone = "delete", onConfirm = null }) {
-  confirmationModalState = {
-    open: true,
-    title: String(title || "Confirm action"),
-    message: String(message || ""),
-    confirmLabel: String(confirmLabel || "Delete"),
-    confirmTone,
-    onConfirm: typeof onConfirm === "function" ? onConfirm : null
-  };
-  renderConfirmationModal();
-  requestAnimationFrame(() => {
-    if (!confirmationModalState.open) return;
-    confirmationModalConfirmBtnEl.focus();
-  });
-}
-
-function closeConfirmationModal() {
-  resetConfirmationModalState();
-  renderConfirmationModal();
-}
-
-function confirmConfirmationModal() {
-  if (!confirmationModalState.open) return;
-  const handler = confirmationModalState.onConfirm;
-  closeConfirmationModal();
-  if (typeof handler === "function") {
-    handler();
-  }
-}
-
-function renderConfirmationModal() {
-  if (!confirmationModalOverlayEl || !confirmationModalEl) return;
-  const isOpen = !!confirmationModalState.open;
-  confirmationModalOverlayEl.classList.toggle("is-open", isOpen);
-  confirmationModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-  confirmationModalTitleEl.textContent = confirmationModalState.title || "Confirm action";
-  confirmationModalMessageEl.textContent = confirmationModalState.message || "";
-  confirmationModalConfirmBtnEl.textContent = confirmationModalState.confirmLabel || "Delete";
-  confirmationModalConfirmBtnEl.classList.toggle("is-danger", confirmationModalState.confirmTone === "delete");
-}
-
-function openAdminOrgModal() {
-  if (!isAdminMode()) return false;
-  adminOrgModalState.open = true;
-  adminOrgModalState.renameOrgId = null;
-  adminOrgModalState.renameDraft = "";
-  renderAdminOrgModal();
-  requestAnimationFrame(() => {
-    if (!adminOrgModalState.open) return;
-    adminOrgModalInputEl.focus();
-  });
-  return true;
-}
-
-function closeAdminOrgModal() {
-  resetAdminOrgModalState();
-  renderAdminOrgModal();
-}
-
-function renderAdminOrgModal() {
-  if (!adminOrgModalOverlayEl || !adminOrgModalBodyEl || !adminOrgModalInputEl) return;
-  const isOpen = !!adminOrgModalState.open && isAdminMode();
-  adminOrgModalOverlayEl.classList.toggle("is-open", isOpen);
-  adminOrgModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const sortedOrgs = getSortedOrgsForMenu();
-  adminOrgModalInputEl.value = adminOrgModalState.draftName;
-  adminOrgModalInputEl.onkeydown = (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    event.stopPropagation();
-    const trimmedName = String(adminOrgModalState.draftName || adminOrgModalInputEl.value || "").trim();
-    if (!trimmedName) return;
-    const nextOrgId = generateOrgId(trimmedName);
-    orgs.push({ id: nextOrgId, name: trimmedName });
-    syncOrgsRuntimeAndStore();
-    adminOrgModalState.draftName = "";
-    persistStoreToLocalStorage();
-    renderAdminOrgModal();
-    renderAll();
-    requestAnimationFrame(() => adminOrgModalInputEl.focus());
-  };
-
-  adminOrgModalBodyEl.innerHTML = "";
-  if (!sortedOrgs.length) {
-    const emptyState = document.createElement("p");
-    emptyState.className = "picker-modal-empty";
-    emptyState.textContent = "No organisations yet.";
-    adminOrgModalBodyEl.appendChild(emptyState);
-    return;
-  }
-
-  sortedOrgs.forEach((orgRecord) => {
-    const rowEl = document.createElement("div");
-    rowEl.className = "workspace-menu-row admin-editor-row";
-    const isRenaming = adminOrgModalState.renameOrgId === orgRecord.id;
-    if (isRenaming) {
-      const inputEl = document.createElement("input");
-      inputEl.type = "text";
-      inputEl.className = "workspace-rename-input";
-      inputEl.maxLength = 80;
-      inputEl.value = adminOrgModalState.renameDraft;
-      inputEl.addEventListener("input", () => {
-        adminOrgModalState.renameDraft = inputEl.value;
-      });
-      inputEl.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          event.stopPropagation();
-          if (renameOrganisationRecord(orgRecord.id, adminOrgModalState.renameDraft)) {
-            adminOrgModalState.renameOrgId = null;
-            adminOrgModalState.renameDraft = "";
-            renderAll();
-          } else {
-            renderAdminOrgModal();
-          }
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          adminOrgModalState.renameOrgId = null;
-          adminOrgModalState.renameDraft = "";
-          renderAdminOrgModal();
-        }
-      });
-      inputEl.addEventListener("blur", () => {
-        if (adminOrgModalState.renameOrgId !== orgRecord.id) return;
-        adminOrgModalState.renameOrgId = null;
-        adminOrgModalState.renameDraft = "";
-        renderAdminOrgModal();
-      });
-      rowEl.appendChild(inputEl);
-      requestAnimationFrame(() => {
-        if (!inputEl.isConnected) return;
-        inputEl.focus();
-        inputEl.select();
-      });
-    } else {
-      const labelEl = document.createElement("div");
-      labelEl.className = "workspace-menu-item admin-editor-label";
-      labelEl.textContent = orgRecord.name || orgRecord.id;
-      rowEl.appendChild(labelEl);
-      const actionsEl = document.createElement("div");
-      actionsEl.className = "workspace-menu-item-actions";
-      const renameBtnEl = document.createElement("button");
-      renameBtnEl.type = "button";
-      renameBtnEl.className = "workspace-row-icon-btn rename";
-      renameBtnEl.setAttribute("aria-label", `Rename organisation ${orgRecord.name || orgRecord.id}`);
-      renameBtnEl.textContent = "✎";
-      renameBtnEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        adminOrgModalState.renameOrgId = orgRecord.id;
-        adminOrgModalState.renameDraft = orgRecord.name || "";
-        renderAdminOrgModal();
-      });
-      actionsEl.appendChild(renameBtnEl);
-      const deleteBtnEl = document.createElement("button");
-      deleteBtnEl.type = "button";
-      deleteBtnEl.className = "workspace-row-icon-btn delete";
-      deleteBtnEl.setAttribute("aria-label", `Delete organisation ${orgRecord.name || orgRecord.id}`);
-      deleteBtnEl.textContent = "✕";
-      deleteBtnEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openConfirmationModal({
-          title: "Delete organisation?",
-          message: `Deleting "${orgRecord.name || orgRecord.id}" will delete all its workspaces, nodes, and edges unless they are still shared elsewhere.`,
-          confirmLabel: "Delete organisation",
-          confirmTone: "delete",
-          onConfirm: () => {
-            if (!deleteOrganisationRecordById(orgRecord.id)) return;
-            if (adminUserModalState.selectedOrgId === orgRecord.id) {
-              adminUserModalState.selectedOrgId = "";
-            }
-            renderAll();
-            renderAdminOrgModal();
-            renderAdminUserModal();
-          }
-        });
-      });
-      actionsEl.appendChild(deleteBtnEl);
-      rowEl.appendChild(actionsEl);
-    }
-    adminOrgModalBodyEl.appendChild(rowEl);
-  });
-}
-
-function openAdminUserModal() {
-  if (!isAdminMode()) return false;
-  if (!adminUserModalState.selectedOrgId || !orgById.has(adminUserModalState.selectedOrgId)) {
-    adminUserModalState.selectedOrgId = getSortedOrgsForMenu()[0]?.id || "";
-  }
-  adminUserModalState.open = true;
-  adminUserModalState.renameUserId = null;
-  adminUserModalState.renameDraft = "";
-  renderAdminUserModal();
-  requestAnimationFrame(() => {
-    if (!adminUserModalState.open) return;
-    if (!adminUserModalOrgSelectEl.disabled) {
-      adminUserModalOrgSelectEl.focus();
-    }
-  });
-  return true;
-}
-
-function closeAdminUserModal() {
-  resetAdminUserModalState();
-  renderAdminUserModal();
-}
-
-function renderAdminUserModal() {
-  if (!adminUserModalOverlayEl || !adminUserModalBodyEl || !adminUserModalInputEl || !adminUserModalOrgSelectEl) return;
-  const isOpen = !!adminUserModalState.open && isAdminMode();
-  adminUserModalOverlayEl.classList.toggle("is-open", isOpen);
-  adminUserModalOverlayEl.setAttribute("aria-hidden", String(!isOpen));
-  if (!isOpen) return;
-
-  const sortedOrgs = getSortedOrgsForMenu();
-  if (!adminUserModalState.selectedOrgId || !sortedOrgs.some((orgRecord) => orgRecord.id === adminUserModalState.selectedOrgId)) {
-    adminUserModalState.selectedOrgId = sortedOrgs[0]?.id || "";
-  }
-
-  adminUserModalOrgSelectEl.innerHTML = "";
-  sortedOrgs.forEach((orgRecord) => {
-    const optionEl = document.createElement("option");
-    optionEl.value = orgRecord.id;
-    optionEl.textContent = orgRecord.name || orgRecord.id;
-    adminUserModalOrgSelectEl.appendChild(optionEl);
-  });
-  adminUserModalOrgSelectEl.disabled = sortedOrgs.length === 0;
-  adminUserModalOrgSelectEl.value = adminUserModalState.selectedOrgId;
-
-  adminUserModalInputEl.value = adminUserModalState.draftName;
-  adminUserModalInputEl.disabled = !adminUserModalState.selectedOrgId;
-  adminUserModalInputEl.onkeydown = (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    event.stopPropagation();
-    const trimmedName = String(adminUserModalState.draftName || adminUserModalInputEl.value || "").trim();
-    if (!trimmedName || !adminUserModalState.selectedOrgId) return;
-    const nextUserId = generateUserId(trimmedName);
-    users.push({
-      id: nextUserId,
-      name: trimmedName,
-      orgId: adminUserModalState.selectedOrgId
-    });
-    syncUsersRuntimeAndStore();
-    adminUserModalState.draftName = "";
-    persistStoreToLocalStorage();
-    renderAdminUserModal();
-    renderAll();
-    requestAnimationFrame(() => adminUserModalInputEl.focus());
-  };
-
-  adminUserModalBodyEl.innerHTML = "";
-  if (!sortedOrgs.length) {
-    const emptyState = document.createElement("p");
-    emptyState.className = "picker-modal-empty";
-    emptyState.textContent = "Create an organisation first.";
-    adminUserModalBodyEl.appendChild(emptyState);
-    return;
-  }
-
-  const visibleUsers = getSortedUsersForMenu().filter((userRecord) => {
-    if (isAdminUserId(userRecord.id)) return false;
-    return userRecord.orgId === adminUserModalState.selectedOrgId;
-  });
-  if (!visibleUsers.length) {
-    const emptyState = document.createElement("p");
-    emptyState.className = "picker-modal-empty";
-    emptyState.textContent = "No users in this organisation yet.";
-    adminUserModalBodyEl.appendChild(emptyState);
-    return;
-  }
-
-  visibleUsers.forEach((userRecord) => {
-    const rowEl = document.createElement("div");
-    rowEl.className = "workspace-menu-row admin-editor-row";
-    const isRenaming = adminUserModalState.renameUserId === userRecord.id;
-    if (isRenaming) {
-      const inputEl = document.createElement("input");
-      inputEl.type = "text";
-      inputEl.className = "workspace-rename-input";
-      inputEl.maxLength = 80;
-      inputEl.value = adminUserModalState.renameDraft;
-      inputEl.addEventListener("input", () => {
-        adminUserModalState.renameDraft = inputEl.value;
-      });
-      inputEl.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          event.stopPropagation();
-          if (renameUserRecord(userRecord.id, adminUserModalState.renameDraft)) {
-            adminUserModalState.renameUserId = null;
-            adminUserModalState.renameDraft = "";
-            renderAll();
-          } else {
-            renderAdminUserModal();
-          }
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          adminUserModalState.renameUserId = null;
-          adminUserModalState.renameDraft = "";
-          renderAdminUserModal();
-        }
-      });
-      inputEl.addEventListener("blur", () => {
-        if (adminUserModalState.renameUserId !== userRecord.id) return;
-        adminUserModalState.renameUserId = null;
-        adminUserModalState.renameDraft = "";
-        renderAdminUserModal();
-      });
-      rowEl.appendChild(inputEl);
-      requestAnimationFrame(() => {
-        if (!inputEl.isConnected) return;
-        inputEl.focus();
-        inputEl.select();
-      });
-    } else {
-      const labelEl = document.createElement("div");
-      labelEl.className = "workspace-menu-item admin-editor-label";
-      labelEl.textContent = userRecord.name || userRecord.id;
-      rowEl.appendChild(labelEl);
-      const actionsEl = document.createElement("div");
-      actionsEl.className = "workspace-menu-item-actions";
-      const renameBtnEl = document.createElement("button");
-      renameBtnEl.type = "button";
-      renameBtnEl.className = "workspace-row-icon-btn rename";
-      renameBtnEl.setAttribute("aria-label", `Rename user ${userRecord.name || userRecord.id}`);
-      renameBtnEl.textContent = "✎";
-      renameBtnEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        adminUserModalState.renameUserId = userRecord.id;
-        adminUserModalState.renameDraft = userRecord.name || "";
-        renderAdminUserModal();
-      });
-      actionsEl.appendChild(renameBtnEl);
-      const deleteBtnEl = document.createElement("button");
-      deleteBtnEl.type = "button";
-      deleteBtnEl.className = "workspace-row-icon-btn delete";
-      deleteBtnEl.setAttribute("aria-label", `Delete user ${userRecord.name || userRecord.id}`);
-      deleteBtnEl.textContent = "✕";
-      deleteBtnEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openConfirmationModal({
-          title: "Delete user?",
-          message: `Deleting "${userRecord.name || userRecord.id}" will delete all of their workspaces, nodes, and edges unless they are still shared elsewhere.`,
-          confirmLabel: "Delete user",
-          confirmTone: "delete",
-          onConfirm: () => {
-            if (!deleteUserRecordById(userRecord.id)) return;
-            renderAll();
-            renderAdminUserModal();
-          }
-        });
-      });
-      actionsEl.appendChild(deleteBtnEl);
-      rowEl.appendChild(actionsEl);
-    }
-    adminUserModalBodyEl.appendChild(rowEl);
-  });
-}
 
 function navigateToWorkspaceById(workspaceId, options = {}) {
   if (typeof workspaceId !== "string" || !workspaceId) return false;
@@ -8933,7 +7456,7 @@ function rebuildVisibleWorkspaceGraph(workspaceRecord) {
   edges = [...authoredEdges, ...overlayEdges];
   edgeRuntimeCounter = 0;
   rebuildEdgeIndexes();
-  attachLinkedNodeAccessors();
+  attachLinkedNodeAccessors(nodes);
 }
 
 function applyWorkspaceData(workspaceId, options = {}) {
@@ -8983,8 +7506,6 @@ function applyWorkspaceData(workspaceId, options = {}) {
     const HANDOVER_PORTAL_BADGE_OVERLAP_RADIUS_RATIO = 0.32;
     const HANDOVER_PORTAL_BADGE_HIT_PADDING_PX = 3;
     const RESIZE_HANDLE_SIZE = 12;
-    const MIN_EXPANDED_ASPECT = 0.5;
-    const MAX_EXPANDED_ASPECT = 3;
     const LOCATION_DOUBLE_CLICK_MS = 280;
     let isPanning = false;
     let lastPanClientX = 0;
@@ -9486,6 +8007,118 @@ function applyWorkspaceData(workspaceId, options = {}) {
     confirmationModalEl.appendChild(confirmationModalActionsEl);
     confirmationModalOverlayEl.appendChild(confirmationModalEl);
     document.body.appendChild(confirmationModalOverlayEl);
+    const {
+      renderPortalLinkModal,
+      openPortalLinkModal,
+      closePortalLinkModal,
+      confirmPortalLinkModal,
+      cancelPortalLinkModalAndDeleteNode,
+      renderEntityLinkModal,
+      openEntityLinkModal,
+      closeEntityLinkModal,
+      cancelEntityLinkModal,
+      confirmEntityLinkModal,
+      renderCollaboratorPickerModal,
+      openCollaboratorPickerModal,
+      closeCollaboratorPickerModal,
+      confirmCollaboratorPickerModal,
+      renderHandoverObjectPickerModal,
+      openHandoverObjectPickerModal,
+      closeHandoverObjectPickerModal,
+      confirmHandoverObjectPickerModal,
+      openConfirmationModal,
+      closeConfirmationModal,
+      confirmConfirmationModal,
+      renderConfirmationModal,
+      openAdminOrgModal,
+      closeAdminOrgModal,
+      renderAdminOrgModal,
+      openAdminUserModal,
+      closeAdminUserModal,
+      renderAdminUserModal
+    } = createUiModals({
+      state: modalUiState,
+      getOrgs: () => orgs,
+      getUsers: () => users,
+      getOrgById: () => orgById,
+      portalLinkModalOverlayEl,
+      portalLinkModalEl,
+      portalLinkModalSelectEl,
+      portalLinkModalConfirmBtnEl,
+      portalLinkModalHintEl,
+      portalLinkModalCloseBtnEl,
+      entityLinkModalOverlayEl,
+      entityLinkModalEl,
+      entityLinkModalKindSelectEl,
+      entityLinkModalRefSelectEl,
+      entityLinkModalConfirmBtnEl,
+      entityLinkModalHintEl,
+      collaboratorPickerModalOverlayEl,
+      collaboratorPickerModalEl,
+      collaboratorPickerModalBodyEl,
+      collaboratorPickerModalConfirmBtnEl,
+      collaboratorPickerModalHintEl,
+      collaboratorPickerModalCloseBtnEl,
+      handoverObjectPickerModalOverlayEl,
+      handoverObjectPickerModalEl,
+      handoverObjectPickerModalBodyEl,
+      handoverObjectPickerModalConfirmBtnEl,
+      handoverObjectPickerModalHintEl,
+      handoverObjectPickerModalCloseBtnEl,
+      confirmationModalOverlayEl,
+      confirmationModalEl,
+      confirmationModalTitleEl,
+      confirmationModalMessageEl,
+      confirmationModalConfirmBtnEl,
+      adminOrgModalOverlayEl,
+      adminOrgModalBodyEl,
+      adminOrgModalInputEl,
+      adminUserModalOverlayEl,
+      adminUserModalBodyEl,
+      adminUserModalInputEl,
+      adminUserModalOrgSelectEl,
+      getNodeById,
+      getLinkableWorkspaceOptionsForCurrentUser,
+      selectSingleNode,
+      cancelEdgeCreateInteractions,
+      closeCreateNodeMenu,
+      renderWorkspaceMenu: (...args) => renderWorkspaceMenu(...args),
+      deleteNodeFromCurrentWorkspace,
+      syncNodeRuntimeAndStore,
+      persistStoreToLocalStorage,
+      renderAll,
+      normalizeEntityKind,
+      getEntityDisplayName,
+      applyDerivedEntityIdentity,
+      getEntityOptionsForKind,
+      getInitialEntitySelectionForNode,
+      isNodeOwnedByCurrentUser,
+      getCollaboratorPickerGroups,
+      addHandoverCollaborator,
+      getHandoverObjectPickerOptions,
+      normalizeHandoverObjectRole,
+      HANDOVER_OBJECT_ROLES,
+      HANDOVER_OBJECT_ROLE_LABELS,
+      getNodeDisplayTitle,
+      getNodeTitleFallback,
+      addHandoverObjectIds,
+      renderDetailsPane: (...args) => renderDetailsPane(...args),
+      resetConfirmationModalState,
+      isAdminMode,
+      resetAdminOrgModalState,
+      getSortedOrgsForMenu,
+      generateOrgId,
+      syncOrgsRuntimeAndStore,
+      renameOrganisationRecord,
+      deleteOrganisationRecordById,
+      resetAdminUserModalState,
+      getSortedUsersForMenu,
+      generateUserId,
+      syncUsersRuntimeAndStore,
+      isAdminUserId,
+      renameUserRecord,
+      deleteUserRecordById
+    });
     portalLinkModalEl.addEventListener("mousedown", (event) => {
       event.stopPropagation();
     });
@@ -10089,400 +8722,39 @@ function applyWorkspaceData(workspaceId, options = {}) {
       }
     }
 
-    function getOwnerInitial(ownerName) {
-      const normalized = String(ownerName || "").trim();
-      if (!normalized) return "?";
-      const firstLetterMatch = normalized.match(/[A-Za-z0-9]/);
-      if (!firstLetterMatch) return "?";
-      return firstLetterMatch[0].toUpperCase();
-    }
-
-    function getWorkspaceMenuTriggerDisplayData() {
-      const currentWorkspaceRecord = getCurrentWorkspaceRecord();
-      const currentWorkspaceOption = getWorkspaceOptionById(currentWorkspaceId) || null;
-      const workspaceName = String(
-        currentWorkspaceOption?.name
-        || currentWorkspaceRecord?.name
-        || "No workspace"
-      ).trim() || "No workspace";
-      const ownerId = currentWorkspaceOption?.ownerId || currentWorkspaceRecord?.ownerId || null;
-      const ownerRecord = ownerId ? userById.get(ownerId) || null : null;
-      const ownerName = String(ownerRecord?.name || "").trim() || "Unknown owner";
-      const ownerInitial = ownerRecord ? getOwnerInitial(ownerName) : "?";
-      const ariaLabel = `Workspace: ${workspaceName}. Owner: ${ownerName}. Open workspace menu.`;
-      const title = `${workspaceName} · Owner: ${ownerName}`;
-      return {
-        workspaceName,
-        ownerInitial,
-        ariaLabel,
-        title
-      };
-    }
-
-    function renderWorkspaceMenuTrigger() {
-      if (!workspaceMenuBtnEl) return;
-      const triggerData = getWorkspaceMenuTriggerDisplayData();
-      workspaceMenuBtnEl.setAttribute("aria-label", triggerData.ariaLabel);
-      workspaceMenuBtnEl.setAttribute("title", triggerData.title);
-      workspaceMenuBtnEl.setAttribute("aria-expanded", String(workspaceMenuOpen));
-      if (workspaceMenuBtnAvatarEl) {
-        workspaceMenuBtnAvatarEl.textContent = triggerData.ownerInitial;
-      } else {
-        workspaceMenuBtnEl.dataset.ownerInitial = triggerData.ownerInitial;
-      }
-      if (workspaceMenuBtnNameEl) {
-        workspaceMenuBtnNameEl.textContent = triggerData.workspaceName;
-      }
-      if (workspaceMenuBtnChevronEl) {
-        workspaceMenuBtnChevronEl.textContent = "▼";
-      }
-    }
-
-    function renderWorkspaceMenu() {
-      if (!workspaceMenuBtnEl || !workspaceMenuPanelEl) return;
-      let createInputEl = null;
-      let renameInputEl = null;
-      const currentUserName = getCurrentUserName();
-      renderWorkspaceMenuTrigger();
-      workspaceMenuPanelEl.classList.toggle("is-open", workspaceMenuOpen);
-      workspaceMenuPanelEl.setAttribute("aria-label", `Workspace and user list. Current user: ${currentUserName}`);
-      workspaceMenuPanelEl.innerHTML = "";
-
-      const userSelectEl = document.createElement("div");
-      userSelectEl.className = "workspace-user-select";
-      const userToggleEl = document.createElement("button");
-      userToggleEl.type = "button";
-      userToggleEl.className = "workspace-user-toggle";
-      userToggleEl.setAttribute("aria-label", "Select user");
-      userToggleEl.setAttribute("aria-expanded", String(userMenuOpen));
-
-      const userToggleNameEl = document.createElement("span");
-      userToggleNameEl.className = "workspace-user-toggle-name";
-      userToggleNameEl.textContent = `User: ${currentUserName}`;
-      userToggleEl.appendChild(userToggleNameEl);
-
-      const userToggleChevronEl = document.createElement("span");
-      userToggleChevronEl.className = "workspace-user-chevron";
-      userToggleChevronEl.textContent = "▼";
-      userToggleEl.appendChild(userToggleChevronEl);
-
-      userToggleEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        userMenuOpen = !userMenuOpen;
-        renderWorkspaceMenu();
-      });
-      userSelectEl.appendChild(userToggleEl);
-
-      if (userMenuOpen) {
-        const userDropdownEl = document.createElement("div");
-        userDropdownEl.className = "workspace-user-dropdown";
-        const sortedUsers = getSortedUsersForMenu();
-        if (!sortedUsers.length) {
-          const emptyUsersEl = document.createElement("div");
-          emptyUsersEl.className = "workspace-menu-empty";
-          emptyUsersEl.textContent = "No users";
-          userDropdownEl.appendChild(emptyUsersEl);
-        } else {
-          sortedUsers.forEach((user) => {
-            const userItemEl = document.createElement("button");
-            userItemEl.type = "button";
-            userItemEl.className = "workspace-user-item";
-            const isActiveUser = user.id === currentUserId;
-            if (isActiveUser) {
-              userItemEl.classList.add("is-active");
-            }
-
-            const userNameEl = document.createElement("span");
-            userNameEl.className = "workspace-user-name";
-            userNameEl.textContent = user.name || user.id;
-            userItemEl.appendChild(userNameEl);
-
-            const orgName = user.orgId && orgById.get(user.orgId) ? orgById.get(user.orgId).name : "";
-            if (orgName) {
-              const userOrgEl = document.createElement("span");
-              userOrgEl.className = "workspace-user-org";
-              userOrgEl.textContent = orgName;
-              userItemEl.appendChild(userOrgEl);
-            }
-
-            userItemEl.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              rememberCurrentWorkspaceViewport({ persist: true });
-              currentUserId = user.id;
-              setCurrentWorkspaceForCurrentUser();
-              invalidateActiveWorkspaceView({ autoFit: "if-missing", clearAppliedWorkspaceId: true });
-              userMenuOpen = false;
-              resetWorkspaceCreateState();
-              resetWorkspaceRenameState();
-              closeAdminOrgModal();
-              closeAdminUserModal();
-              closeConfirmationModal();
-              renderAll();
-            });
-            userDropdownEl.appendChild(userItemEl);
-          });
-        }
-        userSelectEl.appendChild(userDropdownEl);
-      }
-      workspaceMenuPanelEl.appendChild(userSelectEl);
-
-      if (isAdminMode()) {
-        const adminActionsEl = document.createElement("div");
-        adminActionsEl.className = "workspace-workspace-list";
-
-        const orgActionRowEl = document.createElement("div");
-        orgActionRowEl.className = "workspace-menu-row";
-        const orgActionBtnEl = document.createElement("button");
-        orgActionBtnEl.type = "button";
-        orgActionBtnEl.className = "workspace-menu-item admin-menu-action";
-        orgActionBtnEl.textContent = "Edit Organisations";
-        orgActionBtnEl.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openAdminOrgModal();
-        });
-        orgActionRowEl.appendChild(orgActionBtnEl);
-        adminActionsEl.appendChild(orgActionRowEl);
-
-        const userActionRowEl = document.createElement("div");
-        userActionRowEl.className = "workspace-menu-row";
-        const userActionBtnEl = document.createElement("button");
-        userActionBtnEl.type = "button";
-        userActionBtnEl.className = "workspace-menu-item admin-menu-action";
-        userActionBtnEl.textContent = "Edit Users";
-        userActionBtnEl.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openAdminUserModal();
-        });
-        userActionRowEl.appendChild(userActionBtnEl);
-        adminActionsEl.appendChild(userActionRowEl);
-
-        workspaceMenuPanelEl.appendChild(adminActionsEl);
-        return;
-      }
-
-      const workspaceListEl = document.createElement("div");
-      workspaceListEl.className = "workspace-workspace-list";
-      const visibleWorkspaceOptions = getWorkspaceOptionsForCurrentUser();
-      if (!visibleWorkspaceOptions.length) {
-        const noWorkspacesEl = document.createElement("div");
-        noWorkspacesEl.className = "workspace-menu-empty";
-        noWorkspacesEl.textContent = "No workspaces";
-        workspaceListEl.appendChild(noWorkspacesEl);
-      } else {
-        visibleWorkspaceOptions.forEach((workspace) => {
-          const rowEl = document.createElement("div");
-          rowEl.className = "workspace-menu-row";
-          const isActive = workspace.id === currentWorkspaceId;
-          const isSharedWorkspace = workspace.access === "shared";
-          const isRenaming = !isSharedWorkspace && workspaceRenameId === workspace.id;
-          if (isActive) {
-            rowEl.classList.add("is-active");
-          }
-
-          if (isRenaming) {
-            const renameInput = document.createElement("input");
-            renameInput.type = "text";
-            renameInput.className = "workspace-rename-input";
-            renameInput.placeholder = "Workspace name";
-            renameInput.value = workspaceRenameDraft;
-            renameInput.maxLength = 80;
-            renameInput.addEventListener("click", (event) => {
-              event.stopPropagation();
-            });
-            renameInput.addEventListener("input", () => {
-              workspaceRenameDraft = renameInput.value;
-            });
-            renameInput.addEventListener("keydown", (event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                event.stopPropagation();
-                const renamed = renameWorkspace(workspace.id, workspaceRenameDraft);
-                if (renamed) {
-                  resetWorkspaceRenameState();
-                }
-                renderWorkspaceMenu();
-                return;
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-                resetWorkspaceRenameState();
-                renderWorkspaceMenu();
-              }
-            });
-            renameInput.addEventListener("blur", () => {
-              if (workspaceRenameId !== workspace.id) return;
-              resetWorkspaceRenameState();
-              renderWorkspaceMenu();
-            });
-            rowEl.appendChild(renameInput);
-            renameInputEl = renameInput;
-          } else {
-             const item = document.createElement("button");
-             item.type = "button";
-             item.role = "menuitemradio";
-              item.className = "workspace-menu-item";
-              item.setAttribute("aria-checked", String(isActive));
-
-              const labelWrapEl = document.createElement("span");
-              labelWrapEl.className = "workspace-menu-item-text";
-              const labelEl = document.createElement("span");
-              labelEl.className = "workspace-menu-item-label";
-              labelEl.textContent = workspace.name || workspace.id;
-              labelWrapEl.appendChild(labelEl);
-              if (workspace.sharedByLabel) {
-                const secondaryLabelEl = document.createElement("span");
-                secondaryLabelEl.className = "workspace-menu-item-subtitle";
-                secondaryLabelEl.textContent = workspace.sharedByLabel;
-                labelWrapEl.appendChild(secondaryLabelEl);
-              }
-              item.appendChild(labelWrapEl);
-
-            item.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              navigateToWorkspaceById(workspace.id);
-            });
-            rowEl.appendChild(item);
-          }
-
-          if (isActive && !isRenaming && !isSharedWorkspace) {
-            const actionsEl = document.createElement("div");
-            actionsEl.className = "workspace-menu-item-actions";
-
-            const renameBtnEl = document.createElement("button");
-            renameBtnEl.type = "button";
-            renameBtnEl.className = "workspace-row-icon-btn rename";
-            renameBtnEl.setAttribute("aria-label", `Rename workspace ${workspace.name || workspace.id}`);
-            renameBtnEl.textContent = "✎";
-            renameBtnEl.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              resetWorkspaceCreateState();
-              workspaceRenameId = workspace.id;
-              workspaceRenameDraft = workspace.name || workspace.id || "";
-              renderWorkspaceMenu();
-            });
-            actionsEl.appendChild(renameBtnEl);
-
-            const deleteBtnEl = document.createElement("button");
-            deleteBtnEl.type = "button";
-            deleteBtnEl.className = "workspace-row-icon-btn delete";
-            deleteBtnEl.setAttribute("aria-label", `Delete workspace ${workspace.name || workspace.id}`);
-            deleteBtnEl.textContent = "✕";
-            deleteBtnEl.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const workspaceName = workspace.name || workspace.id || "workspace";
-              const confirmed = window.confirm(`Delete workspace "${workspaceName}"?`);
-              if (!confirmed) return;
-              const deleted = deleteWorkspace(workspace.id);
-              if (!deleted) return;
-              if (workspaceRenameId === workspace.id) {
-                resetWorkspaceRenameState();
-              }
-              resetWorkspaceCreateState();
-              renderAll();
-            });
-            actionsEl.appendChild(deleteBtnEl);
-
-            rowEl.appendChild(actionsEl);
-          }
-
-          workspaceListEl.appendChild(rowEl);
-        });
-      }
-      workspaceMenuPanelEl.appendChild(workspaceListEl);
-
-      const createWrapEl = document.createElement("div");
-      createWrapEl.className = "workspace-create-wrap";
-
-      if (!currentUserId) {
-        const createBtnEl = document.createElement("button");
-        createBtnEl.type = "button";
-        createBtnEl.className = "workspace-create-btn";
-        createBtnEl.textContent = "+ Workspace";
-        createBtnEl.disabled = true;
-        createWrapEl.appendChild(createBtnEl);
-
-        const createHintEl = document.createElement("div");
-        createHintEl.className = "workspace-create-hint";
-        createHintEl.textContent = "Select a user to create a workspace.";
-        createWrapEl.appendChild(createHintEl);
-      } else if (!isCreatingWorkspace) {
-        const createBtnEl = document.createElement("button");
-        createBtnEl.type = "button";
-        createBtnEl.className = "workspace-create-btn";
-        createBtnEl.textContent = "+ Workspace";
-        createBtnEl.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          resetWorkspaceRenameState();
-          isCreatingWorkspace = true;
-          workspaceDraftName = "";
-          renderWorkspaceMenu();
-        });
-        createWrapEl.appendChild(createBtnEl);
-      } else {
-        const nameInputEl = document.createElement("input");
-        nameInputEl.type = "text";
-        nameInputEl.className = "workspace-create-input";
-        nameInputEl.placeholder = "Workspace name";
-        nameInputEl.value = workspaceDraftName;
-        nameInputEl.maxLength = 80;
-        nameInputEl.addEventListener("click", (event) => {
-          event.stopPropagation();
-        });
-        nameInputEl.addEventListener("input", () => {
-          workspaceDraftName = nameInputEl.value;
-        });
-        nameInputEl.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            event.stopPropagation();
-            const createdWorkspace = createWorkspaceForCurrentUser(workspaceDraftName);
-            if (createdWorkspace) {
-              resetWorkspaceCreateState();
-              renderAll();
-            }
-            return;
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            resetWorkspaceCreateState();
-            renderWorkspaceMenu();
-          }
-        });
-        nameInputEl.addEventListener("blur", () => {
-          resetWorkspaceCreateState();
-          renderWorkspaceMenu();
-        });
-        createWrapEl.appendChild(nameInputEl);
-        createInputEl = nameInputEl;
-      }
-
-      workspaceMenuPanelEl.appendChild(createWrapEl);
-
-      if (createInputEl) {
-        requestAnimationFrame(() => {
-          if (!createInputEl.isConnected) return;
-          createInputEl.focus();
-          createInputEl.select();
-        });
-      }
-      if (renameInputEl) {
-        requestAnimationFrame(() => {
-          if (!renameInputEl.isConnected) return;
-          renameInputEl.focus();
-          renameInputEl.select();
-        });
-      }
-    }
+    const { renderWorkspaceMenu } = createUiWorkspaceMenu({
+      state: workspaceMenuUiState,
+      getDom: () => ({
+        workspaceMenuBtnEl,
+        workspaceMenuBtnAvatarEl,
+        workspaceMenuBtnNameEl,
+        workspaceMenuBtnChevronEl,
+        workspaceMenuPanelEl
+      }),
+      getCurrentWorkspaceRecord,
+      getWorkspaceOptionById,
+      getUserById: () => userById,
+      getCurrentUserName,
+      getSortedUsersForMenu,
+      getOrgById: () => orgById,
+      rememberCurrentWorkspaceViewport,
+      setCurrentWorkspaceForCurrentUser,
+      invalidateActiveWorkspaceView,
+      resetWorkspaceCreateState,
+      resetWorkspaceRenameState,
+      closeAdminOrgModal,
+      closeAdminUserModal,
+      closeConfirmationModal,
+      renderAll,
+      isAdminMode,
+      openAdminOrgModal,
+      openAdminUserModal,
+      getWorkspaceOptionsForCurrentUser,
+      navigateToWorkspaceById,
+      renameWorkspace,
+      deleteWorkspace,
+      createWorkspaceForCurrentUser
+    });
 
     function applyCameraTransform() {
       if (!worldEl) return;
@@ -15147,1073 +13419,74 @@ function onViewportMouseDown(event) {
       }
     }
 
-    function beginDetailsTitleInteraction(node) {
-      if (!node) return;
-      if (node.type === "portal" || node.type === "entity") {
-        requestNodeEdit(node.id);
-        return;
-      }
-      if (!canInlineEditNodeTitle(node)) return;
-      detailsTitleEditNodeId = node.id;
-      detailsTitleDraft = node.title || node.label || "";
-      renderDetailsPane();
-      requestAnimationFrame(() => {
-        const titleInput = detailsPaneEl.querySelector(".details-title-edit-input");
-        if (titleInput) {
-          titleInput.focus();
-          titleInput.select();
-        }
-      });
-    }
-
-    function cancelDetailsTitleEdit() {
-      detailsTitleEditNodeId = null;
-      detailsTitleDraft = "";
-      renderDetailsPane();
-    }
-
-    function commitDetailsTitleEdit(nodeId) {
-      if (!nodeId || detailsTitleEditNodeId !== nodeId) return;
-      const nextTitle = detailsTitleDraft;
-      resetDetailsEditState();
-      setNodeTitleById(nodeId, nextTitle);
-      renderAll();
-    }
-
-    function beginDetailsSummaryEdit(node) {
-      if (!node || !isNodeOwnedByCurrentUser(node)) return;
-      detailsSummaryEditNodeId = node.id;
-      detailsSummaryDraft = typeof node.summary === "string" ? node.summary : "";
-      renderDetailsPane();
-      requestAnimationFrame(() => {
-        const summaryInput = detailsPaneEl.querySelector(".details-summary-textarea");
-        if (summaryInput) {
-          summaryInput.focus();
-          summaryInput.selectionStart = summaryInput.value.length;
-          summaryInput.selectionEnd = summaryInput.value.length;
-        }
-      });
-    }
-
-    function cancelDetailsSummaryEdit() {
-      detailsSummaryEditNodeId = null;
-      detailsSummaryDraft = "";
-      renderDetailsPane();
-    }
-
-    function commitDetailsSummaryEdit(nodeId) {
-      if (!nodeId || detailsSummaryEditNodeId !== nodeId) return;
-      const nextSummary = detailsSummaryDraft;
-      detailsSummaryEditNodeId = null;
-      detailsSummaryDraft = "";
-      setNodeSummaryById(nodeId, nextSummary);
-      renderAll();
-    }
-
-    function createReadonlyGraphStatusPill(statusValue) {
-      const status = document.createElement("span");
-      status.className = `node-card-status ${getStatusClass(statusValue)}`.trim();
-      status.textContent = statusValue;
-      return status;
-    }
-
-    function createStatusControlForNode(node, context = "details") {
-      if (!node) return null;
-      const statusValue = getNodeStatusValue(node);
-      if (!statusValue) return null;
-      const editableStatuses = getStatusOptionsForNode(node);
-      if (!editableStatuses.length) {
-        if (context === "graph") {
-          return createReadonlyGraphStatusPill(statusValue);
-        }
-        return createStatusPill(statusValue, ["details-status-pill"]);
-      }
-      const statusSelect = document.createElement("select");
-      statusSelect.className = context === "graph"
-        ? `node-card-status node-card-status-select ${getStatusClass(statusValue)}`.trim()
-        : `details-status-select status-pill ${getStatusClass(statusValue)}`.trim();
-      if (context === "details") {
-        statusSelect.setAttribute("aria-label", "Status");
-      }
-      if (!editableStatuses.includes(statusValue)) {
-        const currentOptionEl = document.createElement("option");
-        currentOptionEl.value = statusValue;
-        currentOptionEl.textContent = statusValue;
-        currentOptionEl.disabled = true;
-        statusSelect.appendChild(currentOptionEl);
-      }
-      editableStatuses.forEach((statusOption) => {
-        const optionEl = document.createElement("option");
-        optionEl.value = statusOption;
-        optionEl.textContent = statusOption;
-        statusSelect.appendChild(optionEl);
-      });
-      statusSelect.value = statusValue;
-      const statusClassNames = [...new Set([...PROCESS_STATUSES, ...HANDOVER_STATUSES].map((statusOption) => getStatusClass(statusOption)))];
-      const syncStatusClass = () => {
-        statusSelect.classList.remove(...statusClassNames);
-        statusSelect.classList.add(getStatusClass(statusSelect.value));
-      };
-      syncStatusClass();
-      statusSelect.addEventListener("mousedown", (event) => event.stopPropagation());
-      statusSelect.addEventListener("click", (event) => event.stopPropagation());
-      statusSelect.addEventListener("change", (event) => {
-        const nextStatus = event.target.value;
-        syncStatusClass();
-        if (node.type === "process") {
-          setProcessStatusById(node.id, nextStatus);
-        } else if (node.type === "handover") {
-          setHandoverStatusById(node.id, nextStatus);
-        }
-        renderAll();
-      });
-      return statusSelect;
-    }
-
-    function buildDetailsSection(sectionClassName = "") {
-      const section = document.createElement("section");
-      section.className = `details-section${sectionClassName ? ` ${sectionClassName}` : ""}`;
-      return section;
-    }
-
-    function buildDetailsHeaderSection(selectedNode) {
-      const section = buildDetailsSection("details-section-header");
-      const header = document.createElement("div");
-      header.className = "details-header";
-      const titleRow = document.createElement("div");
-      titleRow.className = "details-title-row";
-      const titleColumn = document.createElement("div");
-      titleColumn.className = "details-title-column";
-
-      if (detailsTitleEditNodeId === selectedNode.id && canInlineEditNodeTitle(selectedNode)) {
-        const titleInput = document.createElement("input");
-        titleInput.type = "text";
-        titleInput.className = "details-title-edit-input";
-        titleInput.value = detailsTitleDraft;
-        titleInput.placeholder = getNodeTitleFallback(selectedNode);
-        titleInput.maxLength = 120;
-        titleInput.addEventListener("input", () => {
-          detailsTitleDraft = titleInput.value;
-        });
-        titleInput.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commitDetailsTitleEdit(selectedNode.id);
-            return;
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            cancelDetailsTitleEdit();
-          }
-        });
-        titleInput.addEventListener("blur", () => {
-          commitDetailsTitleEdit(selectedNode.id);
-        });
-        titleColumn.appendChild(titleInput);
-      } else {
-        const isInteractiveTitle = canInlineEditNodeTitle(selectedNode) || selectedNode.type === "portal" || selectedNode.type === "entity";
-        const titleEl = document.createElement(isInteractiveTitle ? "button" : "h2");
-        if (isInteractiveTitle) {
-          titleEl.type = "button";
-          titleEl.addEventListener("click", () => beginDetailsTitleInteraction(selectedNode));
-        }
-        titleEl.className = `details-title-display${isInteractiveTitle ? " is-interactive" : ""}`;
-        titleEl.textContent = getNodeDisplayTitle(selectedNode, { fallback: getNodeTitleFallback(selectedNode) });
-        titleColumn.appendChild(titleEl);
-      }
-
-      titleRow.appendChild(titleColumn);
-      const statusControl = createStatusControlForNode(selectedNode, "details");
-      if (statusControl) {
-        const statusWrap = document.createElement("div");
-        statusWrap.className = "details-status-wrap";
-        statusWrap.appendChild(statusControl);
-        titleRow.appendChild(statusWrap);
-      }
-      header.appendChild(titleRow);
-
-      const ownerLine = document.createElement("p");
-      ownerLine.className = "details-owner-line";
-      ownerLine.textContent = getOwnerDisplayName(selectedNode) || "Unknown";
-      header.appendChild(ownerLine);
-      const contextLabel = getNodeDetailsHeaderContextLabel(selectedNode);
-      if (contextLabel) {
-        const contextLine = document.createElement("p");
-        contextLine.className = "details-header-context-line";
-        contextLine.textContent = `Context: ${contextLabel}`;
-        header.appendChild(contextLine);
-      }
-      section.appendChild(header);
-      return section;
-    }
-
-    function buildDetailsDescriptionSection(selectedNode) {
-      const section = buildDetailsSection("details-section-description");
-      const descriptionWrap = document.createElement("div");
-      descriptionWrap.className = "details-description-wrap";
-
-      if (detailsSummaryEditNodeId === selectedNode.id && isNodeOwnedByCurrentUser(selectedNode)) {
-        const descriptionForm = document.createElement("form");
-        descriptionForm.className = "details-description-form";
-        const summaryInput = document.createElement("textarea");
-        summaryInput.className = "details-summary-textarea";
-        summaryInput.rows = 5;
-        summaryInput.placeholder = "Add a description";
-        summaryInput.value = detailsSummaryDraft;
-        summaryInput.addEventListener("input", () => {
-          detailsSummaryDraft = summaryInput.value;
-        });
-        summaryInput.addEventListener("keydown", (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            cancelDetailsSummaryEdit();
-            return;
-          }
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-            event.preventDefault();
-            commitDetailsSummaryEdit(selectedNode.id);
-          }
-        });
-
-        const actionRow = document.createElement("div");
-        actionRow.className = "details-inline-actions";
-        const saveBtn = document.createElement("button");
-        saveBtn.type = "submit";
-        saveBtn.className = "details-inline-btn";
-        saveBtn.textContent = "Save";
-        const cancelBtn = document.createElement("button");
-        cancelBtn.type = "button";
-        cancelBtn.className = "details-inline-btn is-secondary";
-        cancelBtn.textContent = "Cancel";
-        cancelBtn.addEventListener("click", () => {
-          cancelDetailsSummaryEdit();
-        });
-        actionRow.appendChild(saveBtn);
-        actionRow.appendChild(cancelBtn);
-        descriptionForm.appendChild(summaryInput);
-        descriptionForm.appendChild(actionRow);
-        descriptionForm.addEventListener("submit", (event) => {
-          event.preventDefault();
-          commitDetailsSummaryEdit(selectedNode.id);
-        });
-        descriptionWrap.appendChild(descriptionForm);
-      } else {
-        const summaryText = String(selectedNode.summary || "").trim();
-        const descriptionEl = document.createElement(isNodeOwnedByCurrentUser(selectedNode) ? "button" : "p");
-        if (descriptionEl.tagName === "BUTTON") {
-          descriptionEl.type = "button";
-          descriptionEl.addEventListener("click", () => beginDetailsSummaryEdit(selectedNode));
-        }
-        descriptionEl.className = `details-description-text${isNodeOwnedByCurrentUser(selectedNode) ? " is-editable" : ""}${summaryText ? "" : " is-empty"}`;
-        descriptionEl.textContent = summaryText || (isNodeOwnedByCurrentUser(selectedNode) ? "Add a description" : "No description provided.");
-        descriptionWrap.appendChild(descriptionEl);
-      }
-
-      section.appendChild(descriptionWrap);
-      return section;
-    }
-
-    function buildDetailsContextSection(selectedNode) {
-      const contextRows = [];
-      if (selectedNode.type === "location") {
-        contextRows.push({ label: "Kind", text: selectedNode.kind || "generic" });
-        const parentId = buildParentMap().get(selectedNode.id) || null;
-        if (parentId) {
-          const parentNode = getNodeById(parentId);
-          if (parentNode) {
-            const parentBtn = document.createElement("button");
-            parentBtn.type = "button";
-            parentBtn.className = "inline-link";
-            parentBtn.textContent = getNodeDisplayTitle(parentNode, { fallback: getNodeTitleFallback(parentNode) });
-            parentBtn.addEventListener("click", () => selectNode(parentNode.id));
-            contextRows.push({ label: "Parent location", node: parentBtn });
-          } else {
-            contextRows.push({ label: "Parent location", text: "Top-level location" });
-          }
-        } else {
-          contextRows.push({ label: "Parent location", text: "Top-level location" });
-        }
-      }
-      if (selectedNode.type === "process") {
-        if (selectedNode.locationId) {
-          const locationNode = getNodeById(selectedNode.locationId);
-          if (locationNode) {
-            const locationBtn = document.createElement("button");
-            locationBtn.type = "button";
-            locationBtn.className = "inline-link";
-            locationBtn.textContent = getNodeDisplayTitle(locationNode, { fallback: getNodeTitleFallback(locationNode) });
-            locationBtn.addEventListener("click", () => selectNode(locationNode.id));
-            contextRows.push({ label: "Location", node: locationBtn });
-          } else {
-            contextRows.push({ label: "Location", text: "No location" });
-          }
-        } else {
-          contextRows.push({ label: "Location", text: "No location" });
-        }
-      }
-
-      if (!contextRows.length) return null;
-
-      const section = buildDetailsSection("details-section-context");
-      const contextList = document.createElement("div");
-      contextList.className = "details-context-list";
-      contextRows.forEach((rowData) => {
-        const row = document.createElement("div");
-        row.className = "details-context-row";
-        const label = document.createElement("div");
-        label.className = "details-context-label";
-        label.textContent = rowData.label;
-        const value = document.createElement("div");
-        value.className = "details-context-value";
-        if (rowData.node) {
-          value.appendChild(rowData.node);
-        } else {
-          value.textContent = rowData.text;
-        }
-        row.appendChild(label);
-        row.appendChild(value);
-        contextList.appendChild(row);
-      });
-      section.appendChild(contextList);
-      return section;
-    }
-
-    function buildLocationChildrenSection(selectedNode) {
-      const section = buildDetailsSection("details-section-location-children");
-      const title = document.createElement("h4");
-      title.className = "section-title";
-      title.textContent = "Child locations";
-      section.appendChild(title);
-      const children = getChildLocations(selectedNode.id);
-      if (!children.length) {
-        const none = document.createElement("p");
-        none.className = "muted";
-        none.textContent = "No child locations.";
-        section.appendChild(none);
-        return section;
-      }
-      const childWrap = document.createElement("div");
-      childWrap.className = "chip-list";
-      children.forEach((childNode) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "chip-btn";
-        chip.textContent = `${getNodeDisplayTitle(childNode, { fallback: getNodeTitleFallback(childNode) })} (${childNode.kind || "generic"})`;
-        chip.addEventListener("click", () => selectNode(childNode.id));
-        childWrap.appendChild(chip);
-      });
-      section.appendChild(childWrap);
-      return section;
-    }
-
-    function buildHandoverCollaboratorsSection(selectedNode) {
-      const section = buildDetailsSection("details-section-collaborators");
-      const sectionHeader = document.createElement("div");
-      sectionHeader.className = "section-header";
-      const title = document.createElement("h4");
-      title.className = "section-title";
-      title.textContent = "Collaborators";
-      sectionHeader.appendChild(title);
-      if (isNodeOwnedByCurrentUser(selectedNode)) {
-        const addBtn = document.createElement("button");
-        addBtn.type = "button";
-        addBtn.className = "section-add-btn";
-        addBtn.textContent = "+";
-        addBtn.title = "Add collaborators";
-        addBtn.setAttribute("aria-label", "Add collaborators");
-        addBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openCollaboratorPickerModal(selectedNode.id);
-        });
-        sectionHeader.appendChild(addBtn);
-      } else {
-        const directUserCollaborator = getDirectUserCollaboratorEntryForNode(selectedNode, currentUserId);
-        if (directUserCollaborator) {
-          const leaveBtn = document.createElement("button");
-          leaveBtn.type = "button";
-          leaveBtn.className = "inline-link";
-          leaveBtn.textContent = "Leave handover";
-          leaveBtn.setAttribute("aria-label", "Leave handover");
-          leaveBtn.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openConfirmationModal({
-              title: "Leave handover",
-              message: "Are you sure? This removes you as a collaborator across workspaces.",
-              confirmLabel: "Leave handover",
-              confirmTone: "delete",
-              onConfirm: () => {
-                if (!removeCurrentUserFromHandover(selectedNode.id)) return;
-                renderAll();
-              }
-            });
-          });
-          sectionHeader.appendChild(leaveBtn);
-        }
-      }
-      section.appendChild(sectionHeader);
-
-      const collaborators = getResolvedHandoverCollaborators(selectedNode);
-      if (!collaborators.length) {
-        const none = document.createElement("p");
-        none.className = "muted";
-        none.textContent = "No collaborators yet.";
-        section.appendChild(none);
-        return section;
-      }
-
-      const collaboratorList = document.createElement("div");
-      collaboratorList.className = "collaborator-list";
-      collaborators
-        .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }))
-        .forEach((collaborator) => {
-          const row = document.createElement("div");
-          row.className = "collaborator-row";
-          const label = document.createElement("div");
-          label.className = "collaborator-label";
-          label.textContent = collaborator.label;
-          row.appendChild(label);
-          if (isNodeOwnedByCurrentUser(selectedNode)) {
-            const actions = document.createElement("div");
-            actions.className = "collaborator-actions";
-            const shareBtn = document.createElement("button");
-            shareBtn.type = "button";
-            shareBtn.className = `collaborator-icon-btn${collaborator.shareWorkspace ? " is-active" : ""}`;
-            shareBtn.textContent = "↗";
-            const shareUnsupportedKind = collaborator.kind !== "user";
-            const shareDisabled = isCollabWorkspaceOnlyHandover(selectedNode) || shareUnsupportedKind;
-            const shareDisabledTitle = shareUnsupportedKind
-              ? "Workspace sharing is available for direct user collaborators only"
-              : "Collaboration-workspace handovers cannot share workspaces";
-            shareBtn.title = shareDisabled ? shareDisabledTitle : "share workspace";
-            shareBtn.setAttribute("aria-label", shareDisabled ? "share workspace unavailable" : "share workspace");
-            shareBtn.disabled = shareDisabled;
-            if (shareDisabled) {
-              shareBtn.classList.add("is-disabled");
-            } else {
-              shareBtn.addEventListener("click", () => {
-                if (!toggleHandoverCollaboratorShare(selectedNode.id, collaborator.kind, collaborator.refId)) return;
-                renderDetailsPane();
-              });
-            }
-            const removeBtn = document.createElement("button");
-            removeBtn.type = "button";
-            removeBtn.className = "collaborator-remove-btn";
-            removeBtn.textContent = "×";
-            removeBtn.title = "Remove collaborator";
-            removeBtn.setAttribute("aria-label", "Remove collaborator");
-            removeBtn.addEventListener("click", () => {
-              if (!removeHandoverCollaborator(selectedNode.id, collaborator.kind, collaborator.refId)) return;
-              renderDetailsPane();
-            });
-            actions.appendChild(shareBtn);
-            actions.appendChild(removeBtn);
-            row.appendChild(actions);
-          }
-          collaboratorList.appendChild(row);
-        });
-      section.appendChild(collaboratorList);
-      return section;
-    }
-
-    function buildHandoverObjectsSection(selectedNode) {
-      const section = buildDetailsSection("details-section-handover-objects");
-      const sectionHeader = document.createElement("div");
-      sectionHeader.className = "section-header";
-      const title = document.createElement("h4");
-      title.className = "section-title";
-      title.textContent = "Handover Objects";
-      sectionHeader.appendChild(title);
-      if (isNodeOwnedByCurrentUser(selectedNode)) {
-        const addBtn = document.createElement("button");
-        addBtn.type = "button";
-        addBtn.className = "section-add-btn";
-        addBtn.textContent = "+";
-        addBtn.title = "Add handover objects";
-        addBtn.setAttribute("aria-label", "Add handover objects");
-        addBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openHandoverObjectPickerModal(selectedNode.id);
-        });
-        sectionHeader.appendChild(addBtn);
-      }
-      section.appendChild(sectionHeader);
-
-      const handoverObjects = getHandoverObjects(selectedNode)
-        .map((handoverObject) => {
-          const objectNode = getAnyNodeById(handoverObject.id);
-          return objectNode ? { handoverObject, node: objectNode } : null;
-        })
-        .filter(Boolean)
-        .sort((left, right) => compareNodesByDisplayLabel(left.node, right.node));
-      if (!handoverObjects.length) {
-        const none = document.createElement("p");
-        none.className = "muted";
-        none.textContent = "No handover objects yet.";
-        section.appendChild(none);
-        return section;
-      }
-
-      const list = document.createElement("div");
-      list.className = "handover-object-pill-list";
-      handoverObjects.forEach(({ node, handoverObject }) => {
-        const pill = document.createElement("div");
-        pill.className = "handover-object-pill";
-
-        const objectBtn = document.createElement("button");
-        objectBtn.type = "button";
-        objectBtn.className = "handover-object-pill-main";
-        objectBtn.addEventListener("click", () => selectNode(node.id));
-
-        const title = document.createElement("span");
-        title.className = "handover-object-pill-title";
-        title.textContent = getNodeDisplayTitle(node, { fallback: getNodeTitleFallback(node) });
-        const owner = document.createElement("span");
-        owner.className = "handover-object-pill-owner";
-        owner.textContent = getNodeOwnerShortLabel(node) || "Unknown";
-
-        objectBtn.appendChild(title);
-        objectBtn.appendChild(owner);
-        pill.appendChild(objectBtn);
-
-        if (isNodeOwnedByCurrentUser(selectedNode)) {
-          const roleSelect = document.createElement("select");
-          roleSelect.className = "handover-object-role-pill";
-          HANDOVER_OBJECT_ROLES.forEach((candidateRole) => {
-            const option = document.createElement("option");
-            option.value = candidateRole;
-            option.textContent = HANDOVER_OBJECT_ROLE_LABELS[candidateRole];
-            roleSelect.appendChild(option);
-          });
-          roleSelect.value = handoverObject.role;
-          roleSelect.addEventListener("change", () => {
-            if (!setHandoverObjectRole(selectedNode.id, handoverObject.id, roleSelect.value)) return;
-            renderAll();
-          });
-          pill.appendChild(roleSelect);
-        } else {
-          const roleLabel = document.createElement("span");
-          roleLabel.className = "handover-object-role-pill is-readonly";
-          roleLabel.textContent = HANDOVER_OBJECT_ROLE_LABELS[handoverObject.role];
-          pill.appendChild(roleLabel);
-        }
-        list.appendChild(pill);
-      });
-      section.appendChild(list);
-      return section;
-    }
-
-    function canManageTaskInDetails(node) {
-      if (!node) return false;
-      if (node.type === "handover") {
-        return canCurrentUserManageHandoverTasks(node);
-      }
-      return true;
-    }
-
-    function resetDetailsTaskEditState() {
-      detailsTaskEditState = {
-        nodeId: null,
-        taskId: null,
-        text: "",
-        assignedTo: "",
-        linkedObjectIds: [],
-        slashRange: null
-      };
-    }
-
-    function ensureDetailsTaskComposerState(node) {
-      if (!node) return;
-      if (detailsTaskComposerState.nodeId !== node.id) {
-        detailsTaskComposerState = createTaskDraftState(node);
-        return;
-      }
-      const assigneeOptions = getTaskAssigneeOptionsForContext(node);
-      detailsTaskComposerState.assignedTo = assigneeOptions.includes(detailsTaskComposerState.assignedTo)
-        ? detailsTaskComposerState.assignedTo
-        : (assigneeOptions[0] || "");
-      const handoverContextNode = getTaskHandoverContextNode(node);
-      if (handoverContextNode) {
-        detailsTaskComposerState.linkedObjectIds = normalizeTaskLinkedObjectIds(handoverContextNode, detailsTaskComposerState.linkedObjectIds);
-      } else {
-        detailsTaskComposerState.linkedObjectIds = [];
-        detailsTaskComposerState.slashRange = null;
-      }
-    }
-
-    function persistDetailsTaskChanges() {
-      syncNodeRuntimeAndStore();
-      persistStoreToLocalStorage();
-      renderDetailsPane();
-      renderNotifications();
-    }
-
-    function beginDetailsTaskEdit(node, task) {
-      detailsTaskEditState = createTaskDraftState(node, task);
-      renderDetailsPane();
-      requestAnimationFrame(() => {
-        const editorInput = detailsPaneEl.querySelector(`.task-editor-input[data-task-id="${task.id}"]`);
-        if (editorInput) {
-          editorInput.focus();
-          editorInput.select();
-        }
-      });
-    }
-
-    function cancelDetailsTaskEdit() {
-      resetDetailsTaskEditState();
-      renderDetailsPane();
-    }
-
-    function commitDetailsTaskEdit(node, task) {
-      if (!node || !task || detailsTaskEditState.nodeId !== node.id || detailsTaskEditState.taskId !== task.id) return;
-      const changed = saveTaskDraft(node, detailsTaskEditState, task);
-      resetDetailsTaskEditState();
-      if (!changed) {
-        renderDetailsPane();
-        return;
-      }
-      persistDetailsTaskChanges();
-    }
-
-    function buildTaskEditor(node, draftState, options = {}) {
-      const form = document.createElement("form");
-      form.className = `task-editor-form${options.inline ? " is-inline" : ""}`;
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "task-editor-input";
-      input.maxLength = 180;
-      input.placeholder = options.placeholder || "Task description";
-      input.value = draftState.text || "";
-      if (options.taskId) {
-        input.dataset.taskId = options.taskId;
-      }
-
-      const assigneeSelect = document.createElement("select");
-      assigneeSelect.className = "task-editor-select";
-      const assigneeOptions = getTaskAssigneeOptionsForContext(node, options.task || null);
-      if (!assigneeOptions.includes(draftState.assignedTo)) {
-        draftState.assignedTo = assigneeOptions[0] || "";
-      }
-      assigneeOptions.forEach((assigneeLabel) => {
-        const option = document.createElement("option");
-        option.value = assigneeLabel;
-        option.textContent = assigneeLabel;
-        assigneeSelect.appendChild(option);
-      });
-      assigneeSelect.value = draftState.assignedTo;
-      assigneeSelect.addEventListener("change", () => {
-        draftState.assignedTo = assigneeSelect.value;
-      });
-
-      const linkedObjectChips = document.createElement("div");
-      linkedObjectChips.className = "task-linked-chip-list";
-      const slashMenu = document.createElement("div");
-      slashMenu.className = "task-slash-menu";
-      const handoverContextNode = getTaskHandoverContextNode(node, options.task || null);
-
-      const syncLinkedObjectChips = () => {
-        linkedObjectChips.innerHTML = "";
-        if (!handoverContextNode) return;
-        const linkedNodes = normalizeTaskLinkedObjectIds(handoverContextNode, draftState.linkedObjectIds)
-          .map((nodeId) => getNodeById(nodeId))
-          .filter(Boolean)
-          .sort(compareNodesByDisplayLabel);
-        draftState.linkedObjectIds = linkedNodes.map((linkedNode) => linkedNode.id);
-        linkedNodes.forEach((linkedNode) => {
-          const chip = document.createElement("span");
-          chip.className = "task-linked-chip";
-          const label = document.createElement("span");
-          label.className = "task-linked-chip-label";
-          label.textContent = getNodeDisplayTitle(linkedNode, { fallback: getNodeTitleFallback(linkedNode) });
-          chip.appendChild(label);
-          const removeBtn = document.createElement("button");
-          removeBtn.type = "button";
-          removeBtn.className = "task-linked-chip-remove";
-          removeBtn.textContent = "×";
-          removeBtn.setAttribute("aria-label", `Remove ${label.textContent}`);
-          removeBtn.addEventListener("click", () => {
-            draftState.linkedObjectIds = draftState.linkedObjectIds.filter((nodeId) => nodeId !== linkedNode.id);
-            syncLinkedObjectChips();
-            syncSlashMenu();
-            input.focus();
-          });
-          chip.appendChild(removeBtn);
-          linkedObjectChips.appendChild(chip);
-        });
-      };
-
-      const syncSlashMenu = () => {
-        draftState.text = input.value;
-        draftState.slashRange = getTaskSlashRange(input.value, input.selectionStart);
-        slashMenu.innerHTML = "";
-        if (!handoverContextNode || !draftState.slashRange) {
-          slashMenu.classList.remove("is-open");
-          return;
-        }
-        const slashOptions = getTaskSlashOptions(node, draftState, options.task || null);
-        if (!slashOptions.length) {
-          slashMenu.classList.remove("is-open");
-          return;
-        }
-        slashMenu.classList.add("is-open");
-        slashOptions.forEach((objectNode) => {
-          const optionBtn = document.createElement("button");
-          optionBtn.type = "button";
-          optionBtn.className = "task-slash-option";
-          optionBtn.textContent = `${getNodeDisplayTitle(objectNode, { fallback: getNodeTitleFallback(objectNode) })} (${objectNode.type})`;
-          optionBtn.addEventListener("click", () => {
-            applyTaskSlashSelection(draftState, input, objectNode.id);
-            syncLinkedObjectChips();
-            syncSlashMenu();
-          });
-          slashMenu.appendChild(optionBtn);
-        });
-      };
-
-      ["input", "click", "keyup", "focus"].forEach((eventName) => {
-        input.addEventListener(eventName, () => {
-          draftState.text = input.value;
-          syncSlashMenu();
-        });
-      });
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          if (typeof options.onCancel === "function") {
-            options.onCancel();
-          }
-          return;
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          if (typeof options.onSubmit === "function") {
-            options.onSubmit();
-          }
-        }
-      });
-
-      const controls = document.createElement("div");
-      controls.className = "task-editor-controls";
-      controls.appendChild(assigneeSelect);
-      const actions = document.createElement("div");
-      actions.className = "task-editor-actions";
-      const submitBtn = document.createElement("button");
-      submitBtn.type = "submit";
-      submitBtn.className = "details-inline-btn";
-      submitBtn.textContent = options.submitLabel || "Save";
-      actions.appendChild(submitBtn);
-      if (typeof options.onCancel === "function") {
-        const cancelBtn = document.createElement("button");
-        cancelBtn.type = "button";
-        cancelBtn.className = "details-inline-btn is-secondary";
-        cancelBtn.textContent = "Cancel";
-        cancelBtn.addEventListener("click", () => {
-          options.onCancel();
-        });
-        actions.appendChild(cancelBtn);
-      }
-
-      form.appendChild(input);
-      form.appendChild(slashMenu);
-      if (handoverContextNode) {
-        form.appendChild(linkedObjectChips);
-      }
-      form.appendChild(controls);
-      form.appendChild(actions);
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        draftState.text = input.value;
-        if (typeof options.onSubmit === "function") {
-          options.onSubmit();
-        }
-      });
-
-      syncLinkedObjectChips();
-      syncSlashMenu();
-      return form;
-    }
-
-    function appendBuiltTaskObjectLinks(container, selectedNode, task) {
-      const linkedNodes = getTaskObjectNodes(task, selectedNode);
-      if (!linkedNodes.length) return;
-      const chipList = document.createElement("div");
-      chipList.className = "task-object-chip-list";
-      linkedNodes.forEach((linkedNode) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "task-object-chip";
-        chip.textContent = getNodeDisplayTitle(linkedNode, { fallback: getNodeTitleFallback(linkedNode) });
-        chip.addEventListener("click", () => selectNode(linkedNode.id));
-        chipList.appendChild(chip);
-      });
-      container.appendChild(chipList);
-    }
-
-    function buildTasksSection(selectedNode) {
-      const section = buildDetailsSection("details-section-tasks");
-      const title = document.createElement("h4");
-      title.className = "section-title";
-      title.textContent = "Tasks";
-      section.appendChild(title);
-
-      const canManageTasks = canManageTaskInDetails(selectedNode);
-      if (
-        detailsTaskEditState.nodeId === selectedNode.id &&
-        detailsTaskEditState.taskId &&
-        !selectedNode.tasks.some((task) => task.id === detailsTaskEditState.taskId)
-      ) {
-        resetDetailsTaskEditState();
-      }
-
-      const tasksList = document.createElement("div");
-      tasksList.className = "tasks-list";
-      if (!selectedNode.tasks.length) {
-        const emptyTasks = document.createElement("p");
-        emptyTasks.className = "muted";
-        emptyTasks.textContent = "No tasks yet.";
-        tasksList.appendChild(emptyTasks);
-      } else {
-        selectedNode.tasks.forEach((task) => {
-          const isEditingTask = detailsTaskEditState.nodeId === selectedNode.id && detailsTaskEditState.taskId === task.id;
-          if (isEditingTask) {
-            const editRow = document.createElement("div");
-            editRow.className = "task-row is-editing";
-            editRow.appendChild(buildTaskEditor(selectedNode, detailsTaskEditState, {
-              inline: true,
-              task,
-              taskId: task.id,
-              submitLabel: "Save",
-              onSubmit: () => commitDetailsTaskEdit(selectedNode, task),
-              onCancel: () => cancelDetailsTaskEdit()
-            }));
-            tasksList.appendChild(editRow);
-            return;
-          }
-
-          const row = document.createElement("div");
-          row.className = `task-row${task.done ? " done" : ""}`;
-          const check = document.createElement("input");
-          check.type = "checkbox";
-          check.checked = !!task.done;
-          check.disabled = !canManageTasks;
-          check.addEventListener("change", () => {
-            if (!setTaskDoneState(selectedNode.id, task.id, check.checked)) return;
-            persistDetailsTaskChanges();
-          });
-
-          const content = document.createElement("div");
-          content.className = "task-content";
-          const taskText = document.createElement("p");
-          taskText.className = "task-text";
-          taskText.textContent = task.text;
-          const assignee = document.createElement("div");
-          assignee.className = "task-assignee";
-          assignee.textContent = `Assigned: ${task.assignedTo}`;
-          content.appendChild(taskText);
-          content.appendChild(assignee);
-          appendBuiltTaskObjectLinks(content, selectedNode, task);
-
-          row.appendChild(check);
-          row.appendChild(content);
-
-          if (canManageTasks) {
-            const actions = document.createElement("div");
-            actions.className = "task-row-actions";
-            const editBtn = document.createElement("button");
-            editBtn.type = "button";
-            editBtn.className = "workspace-row-icon-btn rename";
-            editBtn.textContent = "✎";
-            editBtn.title = "Edit task";
-            editBtn.setAttribute("aria-label", "Edit task");
-            editBtn.addEventListener("click", () => {
-              beginDetailsTaskEdit(selectedNode, task);
-            });
-            const deleteBtn = document.createElement("button");
-            deleteBtn.type = "button";
-            deleteBtn.className = "workspace-row-icon-btn delete";
-            deleteBtn.textContent = "✕";
-            deleteBtn.title = "Delete task";
-            deleteBtn.setAttribute("aria-label", "Delete task");
-            deleteBtn.addEventListener("click", () => {
-              if (!deleteTaskById(selectedNode.id, task.id)) return;
-              if (detailsTaskEditState.taskId === task.id) {
-                resetDetailsTaskEditState();
-              }
-              persistDetailsTaskChanges();
-            });
-            actions.appendChild(editBtn);
-            actions.appendChild(deleteBtn);
-            row.appendChild(actions);
-          }
-
-          tasksList.appendChild(row);
-        });
-      }
-      section.appendChild(tasksList);
-
-      if (selectedNode.type === "handover" && !canManageTasks) {
-        const note = document.createElement("p");
-        note.className = "muted";
-        note.textContent = "Only the owner or collaborators can add tasks.";
-        section.appendChild(note);
-        return section;
-      }
-
-      ensureDetailsTaskComposerState(selectedNode);
-      section.appendChild(buildTaskEditor(selectedNode, detailsTaskComposerState, {
-        submitLabel: "Add task",
-        placeholder: "Task description",
-        onSubmit: () => {
-          const changed = saveTaskDraft(selectedNode, detailsTaskComposerState, null);
-          if (!changed) return;
-          detailsTaskComposerState = createTaskDraftState(selectedNode);
-          persistDetailsTaskChanges();
-        }
-      }));
-      return section;
-    }
-
-    function deleteCommentFromNode(nodeId, commentIndex) {
-      const node = getAnyNodeById(nodeId);
-      if (!node || !Array.isArray(node.comments) || !node.comments[commentIndex]) return false;
-      const comment = node.comments[commentIndex];
-      if (!canCurrentUserDeleteComment(node, comment)) return false;
-      node.comments.splice(commentIndex, 1);
-      if (typeof comment.id === "string" && comment.id) {
-        clearCommentSeenForAllUsers(comment.id);
-      }
-      return true;
-    }
-
-    function buildCommentsSection(selectedNode) {
-      const section = buildDetailsSection("details-section-comments");
-      const title = document.createElement("h4");
-      title.className = "section-title";
-      title.textContent = "Comments";
-      section.appendChild(title);
-
-      const commentList = document.createElement("div");
-      commentList.className = "comment-list";
-      const orderedComments = [...selectedNode.comments]
-        .map((comment, index) => ({ comment, index }))
-        .sort((left, right) => new Date(left.comment.timestamp).getTime() - new Date(right.comment.timestamp).getTime());
-
-      if (!orderedComments.length) {
-        const noComments = document.createElement("p");
-        noComments.className = "muted";
-        noComments.textContent = "No comments yet.";
-        commentList.appendChild(noComments);
-      } else {
-        orderedComments.forEach(({ comment, index }) => {
-          const item = document.createElement("div");
-          item.className = `comment-item${isCommentUnreadForCurrentUser(selectedNode, comment) ? " is-new" : ""}`;
-          const head = document.createElement("div");
-          head.className = "comment-head";
-          const meta = document.createElement("div");
-          meta.className = "comment-meta";
-          const author = document.createElement("span");
-          author.textContent = comment.author;
-          const time = document.createElement("span");
-          time.textContent = formatCommentTimestamp(comment.timestamp);
-          meta.appendChild(author);
-          meta.appendChild(time);
-          head.appendChild(meta);
-          if (canCurrentUserDeleteComment(selectedNode, comment)) {
-            const deleteBtn = document.createElement("button");
-            deleteBtn.type = "button";
-            deleteBtn.className = "workspace-row-icon-btn delete comment-delete-btn";
-            deleteBtn.textContent = "✕";
-            deleteBtn.title = "Delete comment";
-            deleteBtn.setAttribute("aria-label", "Delete comment");
-            deleteBtn.addEventListener("click", () => {
-              if (!deleteCommentFromNode(selectedNode.id, index)) return;
-              syncNodeRuntimeAndStore();
-              persistStoreToLocalStorage();
-              renderDetailsPane();
-              renderNotifications();
-            });
-            head.appendChild(deleteBtn);
-          }
-
-          const text = document.createElement("p");
-          text.className = "comment-text";
-          text.textContent = comment.text;
-          item.appendChild(head);
-          item.appendChild(text);
-          commentList.appendChild(item);
-        });
-      }
-      section.appendChild(commentList);
-
-      const commentForm = document.createElement("form");
-      commentForm.className = "comment-form";
-      const input = document.createElement("input");
-      input.type = "text";
-      input.placeholder = "Add a comment (mentions like @Hannah supported)";
-      input.maxLength = 400;
-      const submit = document.createElement("button");
-      submit.type = "submit";
-      submit.textContent = "Add comment";
-      commentForm.appendChild(input);
-      commentForm.appendChild(submit);
-      commentForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        addCommentToSelectedNode(input.value);
-        input.value = "";
-      });
-      section.appendChild(commentForm);
-      return section;
-    }
-
-    function buildDetailsFooterSection(selectedNode) {
-      const section = buildDetailsSection("details-section-footer");
-      const label = document.createElement("div");
-      label.className = "details-footer-label";
-      label.textContent = "Node ID";
-      const value = document.createElement("div");
-      value.className = "details-footer-value";
-      value.textContent = selectedNode.id || "";
-      section.appendChild(label);
-      section.appendChild(value);
-      return section;
-    }
-    function renderDetailsPane() {
-      detailsPaneEl.innerHTML = "";
-      if (isAdminMode()) {
-        const placeholder = document.createElement("p");
-        placeholder.className = "muted details-empty-state";
-        placeholder.textContent = "Admin mode. Open Edit Organisations or Edit Users from the menu.";
-        detailsPaneEl.appendChild(placeholder);
-        return;
-      }
-      const selectedNode = getSelectedNode();
-      if (!selectedNode) {
-        const placeholder = document.createElement("p");
-        placeholder.className = "muted details-empty-state";
-        placeholder.textContent = "Select a node from the list or canvas to inspect details.";
-        detailsPaneEl.appendChild(placeholder);
-        return;
-      }
-
-      const sections = [
-        buildDetailsHeaderSection(selectedNode),
-        buildDetailsDescriptionSection(selectedNode),
-        buildDetailsContextSection(selectedNode),
-        selectedNode.type === "location" ? buildLocationChildrenSection(selectedNode) : null,
-        selectedNode.type === "handover" ? buildHandoverObjectsSection(selectedNode) : null,
-        selectedNode.type === "handover" ? buildHandoverCollaboratorsSection(selectedNode) : null,
-        buildTasksSection(selectedNode),
-        buildCommentsSection(selectedNode),
-        buildDetailsFooterSection(selectedNode)
-      ].filter(Boolean);
-
-      sections.forEach((section) => {
-        detailsPaneEl.appendChild(section);
-      });
-    }
+    const {
+      createStatusControlForNode,
+      renderDetailsPane
+    } = createUiDetails({
+      state: detailsUiState,
+      detailsPaneEl,
+      requestNodeEdit,
+      canInlineEditNodeTitle,
+      resetDetailsEditState,
+      setNodeTitleById,
+      renderAll,
+      isNodeOwnedByCurrentUser,
+      setNodeSummaryById,
+      getStatusClass,
+      getNodeStatusValue,
+      getStatusOptionsForNode,
+      createStatusPill,
+      PROCESS_STATUSES,
+      HANDOVER_STATUSES,
+      setProcessStatusById,
+      setHandoverStatusById,
+      getNodeTitleFallback,
+      getNodeDisplayTitle,
+      getOwnerDisplayName,
+      getNodeDetailsHeaderContextLabel,
+      buildParentMap,
+      getNodeById,
+      selectNode,
+      getChildLocations,
+      openCollaboratorPickerModal,
+      getDirectUserCollaboratorEntryForNode,
+      openConfirmationModal,
+      removeCurrentUserFromHandover,
+      getResolvedHandoverCollaborators,
+      isCollabWorkspaceOnlyHandover,
+      toggleHandoverCollaboratorShare,
+      removeHandoverCollaborator,
+      openHandoverObjectPickerModal,
+      getHandoverObjects,
+      getAnyNodeById,
+      compareNodesByDisplayLabel,
+      HANDOVER_OBJECT_ROLES,
+      HANDOVER_OBJECT_ROLE_LABELS,
+      setHandoverObjectRole,
+      getNodeOwnerShortLabel,
+      canCurrentUserManageHandoverTasks,
+      createTaskDraftState,
+      getTaskAssigneeOptionsForContext,
+      getTaskHandoverContextNode,
+      normalizeTaskLinkedObjectIds,
+      syncNodeRuntimeAndStore,
+      persistStoreToLocalStorage,
+      renderNotifications,
+      saveTaskDraft,
+      getTaskSlashRange,
+      getTaskSlashOptions,
+      applyTaskSlashSelection,
+      getTaskObjectNodes,
+      setTaskDoneState,
+      deleteTaskById,
+      canCurrentUserDeleteComment,
+      clearCommentSeenForAllUsers,
+      isCommentUnreadForCurrentUser,
+      formatCommentTimestamp,
+      addCommentToSelectedNode,
+      isAdminMode,
+      getSelectedNode
+    });
 
     function addCommentToSelectedNode(text) {
       const message = text.trim();
